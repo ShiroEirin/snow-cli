@@ -3,6 +3,10 @@ import {sessionManager} from '../../../utils/session/sessionManager.js';
 import type {MCPTool} from '../../../utils/execution/mcpToolsManager.js';
 import type {Message} from '../../../ui/components/chat/MessageList.js';
 import {createStreamGenerator} from './streamFactory.js';
+import {
+	applyVcpTimeSyntaxBridge,
+	shouldApplyVcpTimeBridge,
+} from '../../../utils/session/timeSyntaxBridge.js';
 import type {
 	ConversationHandlerOptions,
 	ConversationUsage,
@@ -33,6 +37,7 @@ export async function processStreamRound(ctx: {
 	config: any;
 	model: string;
 	conversationMessages: ChatMessage[];
+	allowVcpTimeBridge: boolean;
 	activeTools: MCPTool[];
 	controller: AbortController;
 	encoder: TokenEncoder;
@@ -47,6 +52,7 @@ export async function processStreamRound(ctx: {
 		config,
 		model,
 		conversationMessages,
+		allowVcpTimeBridge,
 		activeTools,
 		controller,
 		encoder,
@@ -186,7 +192,10 @@ export async function processStreamRound(ctx: {
 			return;
 		}
 
-		if (listBuffer && (line.trim() === '' || LIST_CONTINUATION_PATTERN.test(line))) {
+		if (
+			listBuffer &&
+			(line.trim() === '' || LIST_CONTINUATION_PATTERN.test(line))
+		) {
 			listBuffer += line + '\n';
 			return;
 		}
@@ -221,10 +230,16 @@ export async function processStreamRound(ctx: {
 		}
 	};
 
+	const outboundMessages =
+		allowVcpTimeBridge &&
+		shouldApplyVcpTimeBridge(config, conversationMessages)
+			? applyVcpTimeSyntaxBridge(conversationMessages)
+			: conversationMessages;
+
 	const streamGenerator = createStreamGenerator({
 		config,
 		model,
-		conversationMessages,
+		conversationMessages: outboundMessages,
 		activeTools,
 		sessionId: currentSession?.id,
 		useBasicModel: options.useBasicModel,

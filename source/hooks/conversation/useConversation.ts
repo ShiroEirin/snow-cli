@@ -85,6 +85,7 @@ export async function handleConversationWithTools(
 
 	let accumulatedUsage: ConversationUsage | null = null;
 	const sessionApprovedTools = new Set<string>();
+	let allowVcpTimeBridge = true;
 
 	try {
 		while (true) {
@@ -97,6 +98,7 @@ export async function handleConversationWithTools(
 				config,
 				model,
 				conversationMessages,
+				allowVcpTimeBridge,
 				activeTools,
 				controller,
 				encoder: encoderManager,
@@ -107,6 +109,7 @@ export async function handleConversationWithTools(
 				setContextUsage,
 				options,
 			});
+			allowVcpTimeBridge = false;
 
 			setStreamTokenCount(0);
 			accumulatedUsage = mergeUsage(accumulatedUsage, streamResult.roundUsage);
