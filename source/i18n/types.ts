@@ -157,6 +157,10 @@ export type TranslationKeys = {
 		apiKey: string;
 		requestMethod: string;
 		requestUrlLabel: string;
+		vcpTimeBridge: string;
+		vcpTimeBridgeAuto: string;
+		vcpTimeBridgeEnabled: string;
+		vcpTimeBridgeDisabled: string;
 		anthropicBeta: string;
 		anthropicCacheTTL: string;
 		anthropicCacheTTL5m: string;

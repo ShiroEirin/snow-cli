@@ -47,6 +47,9 @@ export function useConfigState() {
 	const [baseUrl, setBaseUrl] = useState('');
 	const [apiKey, setApiKey] = useState('');
 	const [requestMethod, setRequestMethod] = useState<RequestMethod>('chat');
+	const [enableVcpTimeBridge, setEnableVcpTimeBridge] = useState<
+		boolean | undefined
+	>(undefined);
 	const [systemPromptId, setSystemPromptId] = useState<
 		string | string[] | undefined
 	>(undefined);
@@ -142,6 +145,7 @@ export function useConfigState() {
 			'baseUrl',
 			'apiKey',
 			'requestMethod',
+			'enableVcpTimeBridge',
 			'systemPromptId',
 			'customHeadersSchemeId',
 			'enableAutoCompress',
@@ -280,6 +284,7 @@ export function useConfigState() {
 		setBaseUrl(config.baseUrl);
 		setApiKey(config.apiKey);
 		setRequestMethod(config.requestMethod || 'chat');
+		setEnableVcpTimeBridge(config.enableVcpTimeBridge);
 		setSystemPromptId(config.systemPromptId);
 		setCustomHeadersSchemeId(config.customHeadersSchemeId);
 		setAnthropicBeta(config.anthropicBeta || false);
@@ -537,6 +542,7 @@ export function useConfigState() {
 					baseUrl,
 					apiKey,
 					requestMethod,
+					enableVcpTimeBridge,
 					systemPromptId,
 					customHeadersSchemeId,
 					anthropicBeta,
@@ -636,6 +642,7 @@ export function useConfigState() {
 				baseUrl,
 				apiKey,
 				requestMethod,
+				enableVcpTimeBridge,
 				systemPromptId,
 				customHeadersSchemeId,
 				anthropicBeta,
@@ -693,6 +700,7 @@ export function useConfigState() {
 						baseUrl,
 						apiKey,
 						requestMethod,
+						enableVcpTimeBridge,
 						systemPromptId,
 						customHeadersSchemeId,
 						anthropicBeta,
@@ -712,13 +720,13 @@ export function useConfigState() {
 						geminiThinking: geminiThinkingEnabled
 							? {enabled: true, budget: geminiThinkingBudget}
 							: undefined,
-					responsesReasoning: {
-						enabled: responsesReasoningEnabled,
-						effort: responsesReasoningEffort,
-					},
-					responsesVerbosity,
-					responsesFastMode,
-					advancedModel,
+						responsesReasoning: {
+							enabled: responsesReasoningEnabled,
+							effort: responsesReasoningEffort,
+						},
+						responsesVerbosity,
+						responsesFastMode,
+						advancedModel,
 						basicModel,
 						maxContextTokens,
 						maxTokens,
@@ -761,6 +769,8 @@ export function useConfigState() {
 		setApiKey,
 		requestMethod,
 		setRequestMethod,
+		enableVcpTimeBridge,
+		setEnableVcpTimeBridge,
 		systemPromptId,
 		setSystemPromptId,
 		customHeadersSchemeId,

@@ -26,6 +26,7 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 		apiKey,
 		setApiKey,
 		requestMethod,
+		enableVcpTimeBridge,
 		requestMethodOptions,
 		systemPromptId,
 		activeSystemPromptIds,
@@ -164,6 +165,28 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 					)}
 				</Box>
 			);
+
+		case 'enableVcpTimeBridge': {
+			const display =
+				enableVcpTimeBridge === true
+					? t.configScreen.vcpTimeBridgeEnabled
+					: enableVcpTimeBridge === false
+					? t.configScreen.vcpTimeBridgeDisabled
+					: t.configScreen.vcpTimeBridgeAuto;
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.vcpTimeBridge}
+					</Text>
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>{display}</Text>
+						</Box>
+					)}
+				</Box>
+			);
+		}
 
 		case 'systemPromptId': {
 			let display = t.configScreen.followGlobalNone;
