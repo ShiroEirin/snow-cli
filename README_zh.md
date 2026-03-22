@@ -58,6 +58,10 @@ _在终端中进行 Agentic 编程_
 - [Skills 指令详细说明](docs/usage/zh/18.Skills指令详细说明.md) - 技能创建、使用方法、Claude Code Skills 兼容性、工具限制
 - [LSP 配置与用法](docs/usage/zh/19.LSP配置.md) - LSP 配置文件、语言服务器安装、ACE 工具用法(跳转/大纲)
 - [SSE 服务模式](docs/usage/zh/20.SSE服务模式.md) - SSE 服务器启动、API 端点说明、工具确认流程、权限配置、YOLO 模式、客户端集成示例
+- [VCP 兼容说明](docs/usage/zh/21.VCP兼容说明.md) - Snow 与 VCP 生态的兼容边界、当前实现、显示层与测试策略
+- [VCP 元思考链显示改造单](docs/usage/zh/22.VCP元思考链显示改造单.md) - `VCP元思考链` 显示兼容的修正原因、分层原则、改造方案与验收标准
+- [Snow 与 VCPChat 兼容依据](docs/usage/zh/23.Snow与VCPChat兼容依据.md) - `Snow CLI` 作为 `VCP TUI` 的职责边界、静态插件/主动插件分层、当前 VCP 后端兼容审计
+- [VCPTUI 改造单](docs/usage/zh/24.VCPTUI改造单.md) - `Snow CLI` 作为 `VCP TUI` 的最终改造边界、协议显示层、压缩链与验收标准
 
 ### 推荐使用的 ROLE.md
 

@@ -4,6 +4,7 @@ import type {
 	VcpOutboundTransform,
 	VcpOutboundTransformArgs,
 } from './types.js';
+import {isVcpSystemInvitationMessage} from './protocol.js';
 
 export type VcpTimeBridgeConfig = VcpCompatibilityConfig;
 
@@ -57,11 +58,6 @@ const TIME_ANCHOR_PATTERNS = [
 ];
 
 const HISTORY_SCAN_LIMIT = 8;
-
-const VCP_SYSTEM_INVITATION_PREFIXES = [
-	'[系统邀请指令:]',
-	'[系统提示:]无内容',
-];
 
 const META_TIME_SYNTAX_HINT_PATTERN =
 	/(语法|占位符|修饰符|modifier|placeholder|prompt|role\.md|syntax|是什么意思|怎么用|用法)/i;
@@ -189,9 +185,7 @@ function hasPlaceholder(text: string): boolean {
 }
 
 function isSystemInvitationUserMessage(content: string): boolean {
-	return VCP_SYSTEM_INVITATION_PREFIXES.some(prefix =>
-		content.startsWith(prefix) || content.trim().startsWith(prefix),
-	);
+	return isVcpSystemInvitationMessage(content);
 }
 
 function isValidUserHistoryMessage(message: ChatMessage): boolean {

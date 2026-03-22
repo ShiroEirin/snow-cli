@@ -5,6 +5,7 @@ import {createStreamingChatCompletion} from '../../api/chat.js';
 import {createStreamingResponse} from '../../api/responses.js';
 import {createStreamingGeminiCompletion} from '../../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../../api/anthropic.js';
+import {formatVcpContentForTranscript} from '../session/vcpCompatibility/display.js';
 
 /**
  * Clean thinking content by removing XML-like tags
@@ -320,12 +321,15 @@ function formatMessageForTranscript(msg: ChatMessage): string | null {
 
 	const parts: string[] = [];
 	const roleLabel = msg.role === 'user' ? '[User]' : '[Assistant]';
+	const normalizedContent = msg.content
+		? formatVcpContentForTranscript(msg.content)
+		: '';
 
 	// For assistant messages with tool_calls, record the tool call events
 	if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
 		// Include assistant's text content if any
-		if (msg.content) {
-			parts.push(`${roleLabel}\n${msg.content}`);
+		if (normalizedContent) {
+			parts.push(`${roleLabel}\n${normalizedContent}`);
 		} else {
 			parts.push(roleLabel);
 		}
@@ -340,8 +344,8 @@ function formatMessageForTranscript(msg: ChatMessage): string | null {
 	}
 
 	// For regular user/assistant messages, include content
-	if (msg.content) {
-		parts.push(`${roleLabel}\n${msg.content}`);
+	if (normalizedContent) {
+		parts.push(`${roleLabel}\n${normalizedContent}`);
 	}
 
 	// Include thinking/reasoning if present (important context)

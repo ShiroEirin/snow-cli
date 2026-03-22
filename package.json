@@ -29,7 +29,7 @@
 	},
 	"scripts": {
 		"build": "node scripts/clean-build.cjs && tsc && node build.mjs",
-		"build:ts": "tsc",
+		"build:ts": "node scripts/clean-build.cjs dist && tsc",
 		"build:bundle": "node build.mjs",
 		"dev": "tsc --watch",
 		"start": "node bundle/cli.mjs",
@@ -38,7 +38,8 @@
 		"unlink": "npm unlink -g snow-ai",
 		"prepublishOnly": "npm run build",
 		"postinstall": "node scripts/postinstall.cjs",
-		"test": "prettier --check . && xo && ava",
+		"test": "prettier --check . && xo && npm run test:unit",
+		"test:unit": "npm run build:ts && ava",
 		"lint": "xo",
 		"format": "prettier --write ."
 	},
@@ -123,12 +124,8 @@
 		"tough-cookie": "^6.0.0"
 	},
 	"ava": {
-		"extensions": {
-			"ts": "module",
-			"tsx": "module"
-		},
-		"nodeArguments": [
-			"--loader=ts-node/esm"
+		"files": [
+			"dist/**/*.test.js"
 		]
 	},
 	"xo": {

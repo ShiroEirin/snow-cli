@@ -18,6 +18,14 @@ import {
 import {isSensitiveCommand} from '../../utils/execution/sensitiveCommandManager.js';
 import {getCurrentTheme} from '../../utils/config/themeConfig.js';
 import {themes} from '../themes/index.js';
+import {
+	containsVcpDisplayBlocks,
+	formatVcpDailyNoteLabel,
+	formatVcpThoughtChainSummaryLabel,
+	formatVcpToolRequestLabel,
+	formatVcpToolResultLabel,
+	parseVcpDisplayBlocks,
+} from '../../utils/session/vcpCompatibility/display.js';
 
 type Props = {
 	prompt: string;
@@ -26,9 +34,77 @@ type Props = {
 };
 
 // Console-based markdown renderer functions
-function renderConsoleMarkdown(content: string): string {
+function renderConsoleMarkdownContent(content: string): string {
 	const blocks = parseConsoleMarkdown(content);
 	return blocks.map(block => renderConsoleBlock(block)).join('\n');
+}
+
+function renderConsoleMarkdown(content: string): string {
+	if (!containsVcpDisplayBlocks(content)) {
+		return renderConsoleMarkdownContent(content);
+	}
+
+	const parsed = parseVcpDisplayBlocks(content);
+	return parsed.parts
+		.map(part => {
+			if (part.type === 'text') {
+				return part.content.trim() ? renderConsoleMarkdownContent(part.content) : '';
+			}
+
+			if (part.block.type === 'roleDivider') {
+				return '';
+			}
+
+			if (part.block.type === 'thoughtChain') {
+				return `\n${formatVcpThoughtChainSummaryLabel(part.block)}`;
+			}
+
+			if (part.block.type === 'toolRequest') {
+				const lines = [`\n\x1b[96m${formatVcpToolRequestLabel(part.block)}\x1b[0m`];
+				if (part.block.fields.length > 0) {
+					for (const field of part.block.fields) {
+						lines.push(`\x1b[90m- ${field.key}:\x1b[0m ${field.value}`);
+					}
+				} else if (part.block.content) {
+					lines.push(part.block.content);
+				}
+
+				return lines.join('\n');
+			}
+
+			if (part.block.type === 'toolResult') {
+				const statusColor =
+					part.block.status === 'error'
+						? '\x1b[31m'
+						: part.block.status === 'success'
+						? '\x1b[32m'
+						: '\x1b[90m';
+				const lines = [
+					`\n${statusColor}${formatVcpToolResultLabel(part.block)}\x1b[0m`,
+				];
+				if (part.block.statusText) {
+					lines.push(`\x1b[90m- 状态:\x1b[0m ${part.block.statusText}`);
+				}
+				if (part.block.content) {
+					lines.push(part.block.content);
+				}
+
+				return lines.join('\n');
+			}
+
+			if (part.block.type === 'dailyNote') {
+				const lines = [`\n\x1b[93m${formatVcpDailyNoteLabel(part.block)}\x1b[0m`];
+				if (part.block.content) {
+					lines.push(part.block.content);
+				}
+
+				return lines.join('\n');
+			}
+
+			return '';
+		})
+		.filter(Boolean)
+		.join('\n');
 }
 
 function parseConsoleMarkdown(content: string): any[] {
