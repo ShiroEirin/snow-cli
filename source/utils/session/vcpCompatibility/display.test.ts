@@ -4,6 +4,7 @@ import {
 	containsVcpDisplayBlocks,
 	formatVcpContentForTranscript,
 	formatVcpThoughtChainSummaryLabel,
+	getVcpStreamingSuppressionDecision,
 	parseVcpDisplayBlocks,
 	stripVcpDisplayBlocks,
 } from './display.js';
@@ -200,6 +201,22 @@ query:「始」昨天的记录[@tag]「末」
 	}
 });
 
+test('ignore VCP-looking protocol samples inside fenced code blocks', t => {
+	const input = `下面是协议示例：
+\`\`\`text
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LightMemo「末」
+<<<[END_TOOL_REQUEST]>>>
+\`\`\`
+这里不是实际调用。`;
+
+	const result = parseVcpDisplayBlocks(input);
+
+	t.is(result.blocks.length, 0);
+	t.true(result.mainText.includes('<<<[TOOL_REQUEST]>>>'));
+	t.true(result.mainText.includes('这里不是实际调用。'));
+});
+
 test('parse english TOOL_RESULT fields into transcript summaries', t => {
 	const input = `[[VCP调用结果信息汇总:
 - Tool Name: LightMemo
@@ -222,6 +239,47 @@ VCP调用结果结束]]`;
 	t.true(transcript.includes('VCP-ToolResult：LightMemo'));
 	t.true(transcript.includes('- 状态: SUCCESS'));
 	t.true(transcript.includes('- 内容: found 3 records'));
+});
+
+test('suppress VCP protocol shells during streaming until final render takes over', t => {
+	let state = null;
+
+	let decision = getVcpStreamingSuppressionDecision(
+		'<<<[TOOL_REQUEST]>>>',
+		state,
+	);
+	t.true(decision.suppress);
+	state = decision.nextState;
+	t.is(state, 'toolRequest');
+
+	decision = getVcpStreamingSuppressionDecision(
+		'tool_name:「始」LightMemo「末」',
+		state,
+	);
+	t.true(decision.suppress);
+	state = decision.nextState;
+	t.is(state, 'toolRequest');
+
+	decision = getVcpStreamingSuppressionDecision(
+		'<<<[END_TOOL_REQUEST]>>>',
+		state,
+	);
+	t.true(decision.suppress);
+	t.is(decision.nextState, null);
+
+	decision = getVcpStreamingSuppressionDecision(
+		'[[VCP调用结果信息汇总: - 工具名称: LightMemo VCP调用结果结束]]',
+		null,
+	);
+	t.true(decision.suppress);
+	t.is(decision.nextState, null);
+
+	decision = getVcpStreamingSuppressionDecision(
+		'<<<[ROLE_DIVIDE_USER]>>>',
+		null,
+	);
+	t.true(decision.suppress);
+	t.is(decision.nextState, null);
 });
 
 test('parse conventional thinking blocks alongside VCP blocks', t => {

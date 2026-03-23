@@ -4,6 +4,10 @@ import type {MCPTool} from '../../../utils/execution/mcpToolsManager.js';
 import type {Message} from '../../../ui/components/chat/MessageList.js';
 import {createStreamGenerator} from './streamFactory.js';
 import {applyVcpOutboundMessageTransforms} from '../../../utils/session/vcpCompatibility/applyOutboundMessageTransforms.js';
+import {
+	getVcpStreamingSuppressionDecision,
+	type VcpStreamingSuppressionState,
+} from '../../../utils/session/vcpCompatibility/display.js';
 import type {
 	ConversationHandlerOptions,
 	ConversationUsage,
@@ -85,6 +89,7 @@ export async function processStreamRound(ctx: {
 	let codeBlockBuffer = '';
 	let tableBuffer = '';
 	let listBuffer = '';
+	let vcpStreamingSuppressionState: VcpStreamingSuppressionState = null;
 	const pendingStreamLines: Message[] = [];
 	let lastFlushTime = 0;
 
@@ -165,6 +170,17 @@ export async function processStreamRound(ctx: {
 				emitStreamLine(codeBlockBuffer.trimEnd(), false);
 				codeBlockBuffer = '';
 			}
+			return;
+		}
+
+		const suppressionDecision = getVcpStreamingSuppressionDecision(
+			line,
+			vcpStreamingSuppressionState,
+		);
+		if (suppressionDecision.suppress) {
+			flushTableBuffer();
+			flushListBuffer();
+			vcpStreamingSuppressionState = suppressionDecision.nextState;
 			return;
 		}
 

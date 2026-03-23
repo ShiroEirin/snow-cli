@@ -9,6 +9,9 @@ import {
 
 const CONVENTIONAL_THOUGHT_REGEX =
 	/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/gi;
+const FENCED_CODE_BLOCK_REGEX = /```[\s\S]*?```/g;
+const ROLE_DIVIDER_LINE_REGEX =
+	/^<<<\[(?:END_)?ROLE_DIVIDE_(?:SYSTEM|ASSISTANT|USER)\]>>>$/;
 
 type MatchBuilder<T> = (match: RegExpExecArray) => T;
 
@@ -78,10 +81,22 @@ export type VcpDisplayParseResult = {
 	parts: VcpDisplayPart[];
 };
 
+export type VcpStreamingSuppressionState =
+	| 'toolRequest'
+	| 'toolResult'
+	| 'dailyNote'
+	| 'thoughtChain'
+	| null;
+
 type BlockMatch = {
 	start: number;
 	end: number;
 	block: VcpDisplayBlock;
+};
+
+type ProtectedRange = {
+	start: number;
+	end: number;
 };
 
 type ParsedToolResultFields = {
@@ -101,6 +116,37 @@ function countDisplayLines(content: string): number {
 
 function normalizeTextPart(text: string): string {
 	return text.replace(/\n{3,}/g, '\n\n');
+}
+
+function collectProtectedRanges(text: string): ProtectedRange[] {
+	const ranges: ProtectedRange[] = [];
+	const regex = new RegExp(
+		FENCED_CODE_BLOCK_REGEX.source,
+		FENCED_CODE_BLOCK_REGEX.flags.includes('g')
+			? FENCED_CODE_BLOCK_REGEX.flags
+			: `${FENCED_CODE_BLOCK_REGEX.flags}g`,
+	);
+	let match: RegExpExecArray | null;
+
+	while ((match = regex.exec(text)) !== null) {
+		const wholeMatch = match[0] || '';
+		ranges.push({
+			start: match.index,
+			end: match.index + wholeMatch.length,
+		});
+	}
+
+	return ranges;
+}
+
+function overlapsProtectedRange(
+	start: number,
+	end: number,
+	protectedRanges: readonly ProtectedRange[],
+): boolean {
+	return protectedRanges.some(
+		range => start < range.end && end > range.start,
+	);
 }
 
 function trimTranscriptValue(value: string, maxLength = 400): string {
@@ -135,6 +181,7 @@ function collectRegexMatches<T extends VcpDisplayBlock>(
 	text: string,
 	regex: RegExp,
 	buildBlock: MatchBuilder<T>,
+	protectedRanges: readonly ProtectedRange[] = [],
 ): BlockMatch[] {
 	const matches: BlockMatch[] = [];
 	const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`;
@@ -143,9 +190,15 @@ function collectRegexMatches<T extends VcpDisplayBlock>(
 
 	while ((match = globalRegex.exec(text)) !== null) {
 		const wholeMatch = match[0] || '';
+		const start = match.index;
+		const end = match.index + wholeMatch.length;
+		if (overlapsProtectedRange(start, end, protectedRanges)) {
+			continue;
+		}
+
 		matches.push({
-			start: match.index,
-			end: match.index + wholeMatch.length,
+			start,
+			end,
 			block: buildBlock(match),
 		});
 	}
@@ -351,24 +404,44 @@ export function parseVcpDisplayBlocks(text: string): VcpDisplayParseResult {
 		};
 	}
 
+	const protectedRanges = collectProtectedRanges(text);
 	const matches = [
-		...collectRegexMatches(text, VCP_TOOL_REQUEST_REGEX, match =>
-			buildToolRequestBlock(match[1] || ''),
+		...collectRegexMatches(
+			text,
+			VCP_TOOL_REQUEST_REGEX,
+			match => buildToolRequestBlock(match[1] || ''),
+			protectedRanges,
 		),
-		...collectRegexMatches(text, VCP_TOOL_RESULT_REGEX, match =>
-			buildToolResultBlock(match[1] || ''),
+		...collectRegexMatches(
+			text,
+			VCP_TOOL_RESULT_REGEX,
+			match => buildToolResultBlock(match[1] || ''),
+			protectedRanges,
 		),
-		...collectRegexMatches(text, VCP_DAILY_NOTE_REGEX, match =>
-			buildDailyNoteBlock(match[1] || ''),
+		...collectRegexMatches(
+			text,
+			VCP_DAILY_NOTE_REGEX,
+			match => buildDailyNoteBlock(match[1] || ''),
+			protectedRanges,
 		),
-		...collectRegexMatches(text, VCP_THOUGHT_CHAIN_REGEX, match =>
-			buildThoughtChainBlock('vcp', match[2] || '', match[1] || undefined),
+		...collectRegexMatches(
+			text,
+			VCP_THOUGHT_CHAIN_REGEX,
+			match =>
+				buildThoughtChainBlock('vcp', match[2] || '', match[1] || undefined),
+			protectedRanges,
 		),
-		...collectRegexMatches(text, CONVENTIONAL_THOUGHT_REGEX, match =>
-			buildThoughtChainBlock('conventional', match[1] || ''),
+		...collectRegexMatches(
+			text,
+			CONVENTIONAL_THOUGHT_REGEX,
+			match => buildThoughtChainBlock('conventional', match[1] || ''),
+			protectedRanges,
 		),
-		...collectRegexMatches(text, VCP_ROLE_DIVIDER_REGEX, match =>
-			buildRoleDividerBlock(match),
+		...collectRegexMatches(
+			text,
+			VCP_ROLE_DIVIDER_REGEX,
+			match => buildRoleDividerBlock(match),
+			protectedRanges,
 		),
 	].sort((left, right) => left.start - right.start || left.end - right.end);
 
@@ -539,4 +612,101 @@ export function formatVcpContentForTranscript(text: string): string {
 	}
 
 	return normalizeTextPart(contentParts.join('\n\n')).trim();
+}
+
+export function getVcpStreamingSuppressionDecision(
+	line: string,
+	currentState: VcpStreamingSuppressionState,
+): {
+	suppress: boolean;
+	nextState: VcpStreamingSuppressionState;
+} {
+	const trimmedLine = line.trim();
+
+	switch (currentState) {
+		case 'toolRequest': {
+			const shouldClose =
+				trimmedLine.startsWith('<<<[END_TOOL_REQUEST]>>>') ||
+				trimmedLine.startsWith('<<<END_TOOL_REQUEST>>>');
+			return {
+				suppress: true,
+				nextState: shouldClose ? null : currentState,
+			};
+		}
+
+		case 'toolResult': {
+			return {
+				suppress: true,
+				nextState: trimmedLine.includes('VCP调用结果结束]]') ? null : currentState,
+			};
+		}
+
+		case 'dailyNote': {
+			return {
+				suppress: true,
+				nextState: trimmedLine.startsWith('<<<DailyNoteEnd>>>') ? null : currentState,
+			};
+		}
+
+		case 'thoughtChain': {
+			return {
+				suppress: true,
+				nextState: trimmedLine.includes('[--- 元思考链结束 ---]')
+					? null
+					: currentState,
+			};
+		}
+
+		default: {
+			break;
+		}
+	}
+
+	if (ROLE_DIVIDER_LINE_REGEX.test(trimmedLine)) {
+		return {
+			suppress: true,
+			nextState: null,
+		};
+	}
+
+	if (
+		trimmedLine.startsWith('<<<[TOOL_REQUEST]>>>') ||
+		trimmedLine.startsWith('<<<TOOL_REQUEST>>>')
+	) {
+		const closesImmediately =
+			trimmedLine.includes('<<<[END_TOOL_REQUEST]>>>') ||
+			trimmedLine.includes('<<<END_TOOL_REQUEST>>>');
+		return {
+			suppress: true,
+			nextState: closesImmediately ? null : 'toolRequest',
+		};
+	}
+
+	if (trimmedLine.startsWith('<<<DailyNoteStart>>>')) {
+		return {
+			suppress: true,
+			nextState: trimmedLine.includes('<<<DailyNoteEnd>>>') ? null : 'dailyNote',
+		};
+	}
+
+	if (trimmedLine.includes('[[VCP调用结果信息汇总:')) {
+		return {
+			suppress: true,
+			nextState: trimmedLine.includes('VCP调用结果结束]]') ? null : 'toolResult',
+		};
+	}
+
+	if (trimmedLine.startsWith('[--- VCP元思考链')) {
+		return {
+			suppress: true,
+			nextState: trimmedLine.includes('[--- 元思考链结束 ---]')
+				? null
+				: 'thoughtChain',
+		};
+	}
+
+	return {
+		suppress: false,
+		nextState: null,
+	};
 }

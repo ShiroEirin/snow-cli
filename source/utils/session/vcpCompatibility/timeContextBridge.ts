@@ -16,6 +16,14 @@ const TIME_PLACEHOLDER_PATTERNS = [
 ];
 
 const HARD_CODED_TIME_ANCHORS = [
+	'最近几个月',
+	'最近几周',
+	'最近几天',
+	'这几个月',
+	'这几周',
+	'这几天',
+	'前几个月',
+	'前几周',
 	'上个月初',
 	'上个月中',
 	'上个月末',
@@ -35,6 +43,15 @@ const HARD_CODED_TIME_ANCHORS = [
 	'这周',
 	'本月',
 	'月初',
+	'past few months',
+	'past few weeks',
+	'past few days',
+	'last few months',
+	'last few weeks',
+	'last few days',
+	'recent months',
+	'recent weeks',
+	'recent days',
 	'a while ago',
 	'last month',
 	'this month',
@@ -96,81 +113,11 @@ const TIME_CONTINUATION_CUE_PATTERNS = [
 	/\bas before\b/i,
 ];
 
-type ExpandedTimeWindowConfig = {
-	anchor: string;
-	windowLabel: string;
-	explicitAnchors: readonly string[];
-};
-
 type FoundAnchor = {
 	anchor: string;
 	index: number;
 	length: number;
 };
-
-type FoundExpandedTimeWindow = FoundAnchor & {
-	config: ExpandedTimeWindowConfig;
-};
-
-const EXPANDED_TIME_WINDOW_CONFIGS: readonly ExpandedTimeWindowConfig[] = [
-	{
-		anchor: '最近',
-		windowLabel: '近7天时间窗',
-		explicitAnchors: [
-			'今天',
-			'昨天',
-			'前天',
-			'大前天',
-			'4天前',
-			'5天前',
-			'6天前',
-		],
-	},
-	{
-		anchor: '近期',
-		windowLabel: '近7天时间窗',
-		explicitAnchors: [
-			'今天',
-			'昨天',
-			'前天',
-			'大前天',
-			'4天前',
-			'5天前',
-			'6天前',
-		],
-	},
-	{
-		anchor: '前几天',
-		windowLabel: '前2到6天时间窗',
-		explicitAnchors: ['前天', '大前天', '4天前', '5天前', '6天前'],
-	},
-	{
-		anchor: 'recently',
-		windowLabel: 'recent 7-day window',
-		explicitAnchors: [
-			'today',
-			'yesterday',
-			'2 days ago',
-			'3 days ago',
-			'4 days ago',
-			'5 days ago',
-			'6 days ago',
-		],
-	},
-	{
-		anchor: 'lately',
-		windowLabel: 'recent 7-day window',
-		explicitAnchors: [
-			'today',
-			'yesterday',
-			'2 days ago',
-			'3 days ago',
-			'4 days ago',
-			'5 days ago',
-			'6 days ago',
-		],
-	},
-];
 
 function getTextContent(message: ChatMessage): string {
 	return typeof message.content === 'string' ? message.content : '';
@@ -197,12 +144,6 @@ function isValidUserHistoryMessage(message: ChatMessage): boolean {
 	return content.length > 0 && !isSystemInvitationUserMessage(content);
 }
 
-function isValidAssistantHistoryMessage(message: ChatMessage): boolean {
-	return (
-		message.role === 'assistant' && getTextContent(message).trim().length > 0
-	);
-}
-
 function findBridgeTargetUserIndex(messages: ChatMessage[]): number {
 	if (messages.length === 0) {
 		return -1;
@@ -219,20 +160,6 @@ function findBridgeTargetUserIndex(messages: ChatMessage[]): number {
 	}
 
 	return messages.length - 1;
-}
-
-function findLastAssistantIndexBefore(
-	messages: ChatMessage[],
-	startIndex: number,
-): number {
-	for (let index = startIndex - 1; index >= 0; index--) {
-		const message = messages[index];
-		if (message && isValidAssistantHistoryMessage(message)) {
-			return index;
-		}
-	}
-
-	return -1;
 }
 
 function looksLikeTimeSyntaxDiscussion(text: string): boolean {
@@ -266,92 +193,6 @@ function findPlainTextAnchors(text: string, anchor: string): FoundAnchor[] {
 	}
 
 	return matches;
-}
-
-function getExpandedTimeWindowConfig(
-	anchor: string,
-): ExpandedTimeWindowConfig | null {
-	if (!anchor) {
-		return null;
-	}
-
-	const normalizedAnchor = /[A-Za-z]/.test(anchor)
-		? anchor.toLowerCase()
-		: anchor;
-
-	for (const config of EXPANDED_TIME_WINDOW_CONFIGS) {
-		const normalizedConfigAnchor = /[A-Za-z]/.test(config.anchor)
-			? config.anchor.toLowerCase()
-			: config.anchor;
-		if (normalizedConfigAnchor === normalizedAnchor) {
-			return config;
-		}
-	}
-
-	return null;
-}
-
-function findLatestExpandedTimeWindow(
-	text: string,
-): FoundExpandedTimeWindow | null {
-	if (!text) {
-		return null;
-	}
-
-	const foundWindows: FoundExpandedTimeWindow[] = [];
-
-	for (const config of EXPANDED_TIME_WINDOW_CONFIGS) {
-		const matches = findPlainTextAnchors(text, config.anchor);
-		for (const match of matches) {
-			foundWindows.push({
-				...match,
-				config,
-			});
-		}
-	}
-
-	if (foundWindows.length === 0) {
-		return null;
-	}
-
-	foundWindows.sort((a, b) => {
-		const endOffsetDelta = b.index + b.length - (a.index + a.length);
-		return (
-			endOffsetDelta ||
-			b.length - a.length ||
-			b.index - a.index ||
-			b.anchor.localeCompare(a.anchor)
-		);
-	});
-
-	return foundWindows[0] ?? null;
-}
-
-function joinExplicitAnchors(config: ExpandedTimeWindowConfig): string {
-	const separator = /[A-Za-z]/.test(config.anchor) ? ', ' : '、';
-	return config.explicitAnchors.join(separator);
-}
-
-function buildExpandedTimeWindowBridge(
-	config: ExpandedTimeWindowConfig,
-	mode: 'current' | 'carry',
-): string {
-	const anchors = joinExplicitAnchors(config);
-	if (mode === 'carry') {
-		return `补充时间上下文：本轮 ::Time 检索沿用上一轮的${config.windowLabel}：${anchors}。`;
-	}
-
-	return `补充时间上下文：本轮 ::Time 检索按${config.windowLabel}理解：${anchors}。`;
-}
-
-function buildExpandedTimeWindowTargetContent(text: string): string | null {
-	const foundWindow = findLatestExpandedTimeWindow(text);
-	if (!foundWindow) {
-		return null;
-	}
-
-	const bridge = buildExpandedTimeWindowBridge(foundWindow.config, 'current');
-	return `${text}\n\n${bridge}`.trim();
 }
 
 function findLatestUserTimeAnchorBeforeTarget(
@@ -480,19 +321,6 @@ export function buildVcpTimeBridge(messages: ChatMessage[]): string | null {
 		return null;
 	}
 
-	const lastAssistantIndex = findLastAssistantIndexBefore(
-		messages,
-		targetUserIndex,
-	);
-	if (lastAssistantIndex !== -1) {
-		const lastAssistantAnchor = extractLatestTimeAnchor(
-			getTextContent(messages[lastAssistantIndex]!),
-		);
-		if (lastAssistantAnchor) {
-			return null;
-		}
-	}
-
 	if (
 		!hasPlaceholder(targetUserContent) &&
 		!looksLikeTimeContinuation(targetUserContent)
@@ -506,11 +334,6 @@ export function buildVcpTimeBridge(messages: ChatMessage[]): string | null {
 	);
 	if (!previousUserAnchor) {
 		return null;
-	}
-
-	const expandedWindowConfig = getExpandedTimeWindowConfig(previousUserAnchor);
-	if (expandedWindowConfig) {
-		return buildExpandedTimeWindowBridge(expandedWindowConfig, 'carry');
 	}
 
 	return `补充时间上下文：本轮 ::Time 检索沿用上一轮用户提到的"${previousUserAnchor}"。`;
@@ -530,17 +353,6 @@ export function applyVcpTimeSyntaxBridge(messages: ChatMessage[]): ChatMessage[]
 	const targetUserContent = targetUser.content.trim();
 	if (!targetUserContent || looksLikeTimeSyntaxDiscussion(targetUserContent)) {
 		return messages;
-	}
-
-	const expandedWindowContent =
-		buildExpandedTimeWindowTargetContent(targetUserContent);
-	if (expandedWindowContent) {
-		const clonedMessages = messages.map(message => ({...message}));
-		clonedMessages[targetUserIndex] = {
-			...targetUser,
-			content: expandedWindowContent,
-		};
-		return clonedMessages;
 	}
 
 	const bridge = buildVcpTimeBridge(messages);

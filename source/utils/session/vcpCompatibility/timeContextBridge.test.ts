@@ -198,7 +198,7 @@ test('do not bridge ::Time syntax discussion prompts', t => {
 	t.is(bridgedMessages, messages);
 });
 
-test('do not bridge when the latest assistant reply already contains a time anchor', t => {
+test('prefer previous user anchor even if the latest assistant reply also mentions time words', t => {
 	const messages = [
 		{
 			role: 'system' as const,
@@ -210,7 +210,8 @@ test('do not bridge when the latest assistant reply already contains a time anch
 		},
 		{
 			role: 'assistant' as const,
-			content: '昨天的记录我已经定位到了。',
+			content:
+				'当前看来 `::Time` 对明确时间词（今天/昨天）较稳定，但对“最近几天”仍要谨慎。',
 		},
 		{
 			role: 'user' as const,
@@ -219,10 +220,16 @@ test('do not bridge when the latest assistant reply already contains a time anch
 	];
 
 	const bridgedMessages = applyVcpTimeSyntaxBridge(messages);
-	t.is(bridgedMessages, messages);
+	const lastUserMessage = bridgedMessages[bridgedMessages.length - 1];
+
+	t.true(
+		(lastUserMessage?.content || '').includes(
+			'补充时间上下文：本轮 ::Time 检索沿用上一轮用户提到的"昨天"。',
+		),
+	);
 });
 
-test('expand recent time windows directly in the current user message', t => {
+test('do not expand wide time words directly in the current user message', t => {
 	const messages = [
 		{
 			role: 'system' as const,
@@ -235,17 +242,10 @@ test('expand recent time windows directly in the current user message', t => {
 	];
 
 	const bridgedMessages = applyVcpTimeSyntaxBridge(messages);
-	const lastUserMessage = bridgedMessages[bridgedMessages.length - 1];
-
-	t.not(lastUserMessage, messages[messages.length - 1]);
-	t.true(
-		(lastUserMessage?.content || '').includes(
-			'补充时间上下文：本轮 ::Time 检索按近7天时间窗理解：今天、昨天、前天、大前天、4天前、5天前、6天前。',
-		),
-	);
+	t.is(bridgedMessages, messages);
 });
 
-test('carry expanded recent time windows for english follow-up queries', t => {
+test('carry english wide time anchors as raw phrases on follow-up queries', t => {
 	const messages = [
 		{
 			role: 'system' as const,
@@ -270,7 +270,69 @@ test('carry expanded recent time windows for english follow-up queries', t => {
 
 	t.true(
 		(lastUserMessage?.content || '').includes(
-			'补充时间上下文：本轮 ::Time 检索沿用上一轮的recent 7-day window：today, yesterday, 2 days ago, 3 days ago, 4 days ago, 5 days ago, 6 days ago。',
+			'补充时间上下文：本轮 ::Time 检索沿用上一轮用户提到的"recently"。',
+		),
+	);
+});
+
+test('carry wide time anchors as raw phrases instead of expanding time windows', t => {
+	const messages = [
+		{
+			role: 'system' as const,
+			content: '[[Nova日记本::Time]]',
+		},
+		{
+			role: 'user' as const,
+			content: '查一下最近的日记',
+		},
+		{
+			role: 'assistant' as const,
+			content: '好的。',
+		},
+		{
+			role: 'user' as const,
+			content: '继续查一下',
+		},
+	];
+
+	const bridgedMessages = applyVcpTimeSyntaxBridge(messages);
+	const lastUserMessage = bridgedMessages[bridgedMessages.length - 1];
+
+	t.true(
+		(lastUserMessage?.content || '').includes(
+			'补充时间上下文：本轮 ::Time 检索沿用上一轮用户提到的"最近"。',
+		),
+	);
+	t.false((lastUserMessage?.content || '').includes('近7天时间窗'));
+});
+
+test('preserve compound wide time phrases on follow-up queries', t => {
+	const messages = [
+		{
+			role: 'system' as const,
+			content: '[[Nova日记本::Time]]',
+		},
+		{
+			role: 'user' as const,
+			content: '查一下最近几天关于 snow 魔改的日记',
+		},
+		{
+			role: 'assistant' as const,
+			content:
+				'当前看来 `::Time` 对今天/昨天较稳定，但最近几天这种宽时间词还要继续验证。',
+		},
+		{
+			role: 'user' as const,
+			content: '继续，只看时间线',
+		},
+	];
+
+	const bridgedMessages = applyVcpTimeSyntaxBridge(messages);
+	const lastUserMessage = bridgedMessages[bridgedMessages.length - 1];
+
+	t.true(
+		(lastUserMessage?.content || '').includes(
+			'补充时间上下文：本轮 ::Time 检索沿用上一轮用户提到的"最近几天"。',
 		),
 	);
 });
