@@ -31,6 +31,7 @@ import {
 	MAX_VISIBLE_FIELDS,
 	stripFocusArtifacts,
 } from './types.js';
+import {shouldUseVcpGateway} from '../../../utils/session/vcpCompatibility/gateway.js';
 
 export function useConfigState() {
 	const {t} = useI18n();
@@ -48,6 +49,9 @@ export function useConfigState() {
 	const [apiKey, setApiKey] = useState('');
 	const [requestMethod, setRequestMethod] = useState<RequestMethod>('chat');
 	const [enableVcpTimeBridge, setEnableVcpTimeBridge] = useState<
+		boolean | undefined
+	>(undefined);
+	const [enableVcpGateway, setEnableVcpGateway] = useState<
 		boolean | undefined
 	>(undefined);
 	const [systemPromptId, setSystemPromptId] = useState<
@@ -146,6 +150,7 @@ export function useConfigState() {
 			'apiKey',
 			'requestMethod',
 			'enableVcpTimeBridge',
+			'enableVcpGateway',
 			'systemPromptId',
 			'customHeadersSchemeId',
 			'enableAutoCompress',
@@ -285,6 +290,7 @@ export function useConfigState() {
 		setApiKey(config.apiKey);
 		setRequestMethod(config.requestMethod || 'chat');
 		setEnableVcpTimeBridge(config.enableVcpTimeBridge);
+		setEnableVcpGateway(config.enableVcpGateway);
 		setSystemPromptId(config.systemPromptId);
 		setCustomHeadersSchemeId(config.customHeadersSchemeId);
 		setAnthropicBeta(config.anthropicBeta || false);
@@ -340,6 +346,7 @@ export function useConfigState() {
 			baseUrl,
 			apiKey,
 			requestMethod,
+			enableVcpGateway,
 		};
 		await updateOpenAiConfig(tempConfig);
 
@@ -431,6 +438,15 @@ export function useConfigState() {
 
 	const getRequestUrl = () => {
 		const resolvedBaseUrl = getResolvedBaseUrl(requestMethod);
+		const gatewayEnabled = shouldUseVcpGateway({
+			baseUrl,
+			requestMethod,
+			enableVcpGateway,
+		});
+
+		if (gatewayEnabled) {
+			return `${resolvedBaseUrl}/chat/completions`;
+		}
 
 		if (requestMethod === 'responses') {
 			return `${resolvedBaseUrl}/responses`;
@@ -543,6 +559,7 @@ export function useConfigState() {
 					apiKey,
 					requestMethod,
 					enableVcpTimeBridge,
+					enableVcpGateway,
 					systemPromptId,
 					customHeadersSchemeId,
 					anthropicBeta,
@@ -643,6 +660,7 @@ export function useConfigState() {
 				apiKey,
 				requestMethod,
 				enableVcpTimeBridge,
+				enableVcpGateway,
 				systemPromptId,
 				customHeadersSchemeId,
 				anthropicBeta,
@@ -701,6 +719,7 @@ export function useConfigState() {
 						apiKey,
 						requestMethod,
 						enableVcpTimeBridge,
+						enableVcpGateway,
 						systemPromptId,
 						customHeadersSchemeId,
 						anthropicBeta,
@@ -771,6 +790,8 @@ export function useConfigState() {
 		setRequestMethod,
 		enableVcpTimeBridge,
 		setEnableVcpTimeBridge,
+		enableVcpGateway,
+		setEnableVcpGateway,
 		systemPromptId,
 		setSystemPromptId,
 		customHeadersSchemeId,

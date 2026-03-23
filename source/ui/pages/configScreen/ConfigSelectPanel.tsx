@@ -19,6 +19,8 @@ export default function ConfigSelectPanel({state}: Props) {
 		setRequestMethod,
 		enableVcpTimeBridge,
 		setEnableVcpTimeBridge,
+		enableVcpGateway,
+		setEnableVcpGateway,
 		requestMethodOptions,
 		searchTerm,
 		thinkingMode,
@@ -43,6 +45,8 @@ export default function ConfigSelectPanel({state}: Props) {
 				return t.configScreen.requestMethod.replace(':', '');
 			case 'enableVcpTimeBridge':
 				return t.configScreen.vcpTimeBridge.replace(':', '');
+			case 'enableVcpGateway':
+				return t.configScreen.vcpGateway.replace(':', '');
 			case 'advancedModel':
 				return t.configScreen.advancedModel.replace(':', '');
 			case 'basicModel':
@@ -113,6 +117,42 @@ export default function ConfigSelectPanel({state}: Props) {
 								setEnableVcpTimeBridge(false);
 							} else {
 								setEnableVcpTimeBridge(undefined);
+							}
+							setIsEditing(false);
+						}}
+					/>
+				)}
+				{currentField === 'enableVcpGateway' && (
+					<ScrollableSelectInput
+						items={[
+							{
+								label: t.configScreen.vcpGatewayAuto,
+								value: 'auto',
+							},
+							{
+								label: t.configScreen.vcpGatewayEnabled,
+								value: 'enabled',
+							},
+							{
+								label: t.configScreen.vcpGatewayDisabled,
+								value: 'disabled',
+							},
+						]}
+						initialIndex={
+							enableVcpGateway === true
+								? 1
+								: enableVcpGateway === false
+								? 2
+								: 0
+						}
+						isFocused={true}
+						onSelect={item => {
+							if (item.value === 'enabled') {
+								setEnableVcpGateway(true);
+							} else if (item.value === 'disabled') {
+								setEnableVcpGateway(false);
+							} else {
+								setEnableVcpGateway(undefined);
 							}
 							setIsEditing(false);
 						}}

@@ -14,6 +14,8 @@ import {
 import {createStreamingResponse} from '../../api/responses.js';
 import {createStreamingGeminiCompletion} from '../../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../../api/anthropic.js';
+import {extractStreamTextContent} from '../../api/streamingUtils.js';
+import {resolveVcpGatewayRequest} from '../session/vcpCompatibility/gateway.js';
 import {parseJsonWithFix} from '../core/retryUtils.js';
 
 // Skill template metadata
@@ -221,8 +223,12 @@ async function callModelForText(
 	let stream:
 		| AsyncGenerator<any, void, unknown>
 		| AsyncGenerator<{type?: string; content?: string}, void, unknown>;
+	const gatewayRequest = resolveVcpGatewayRequest(config, {
+		model,
+		toolChoice: 'none',
+	});
 
-	switch (config.requestMethod) {
+	switch (gatewayRequest.requestMethod) {
 		case 'anthropic':
 			stream = createStreamingAnthropicCompletion(
 				{
@@ -251,7 +257,7 @@ async function callModelForText(
 					model,
 					messages,
 					includeBuiltinSystemPrompt: false,
-					tool_choice: 'none',
+					tool_choice: gatewayRequest.toolChoice,
 				},
 				abortSignal,
 			);
@@ -277,18 +283,9 @@ async function callModelForText(
 			throw new Error('Request aborted');
 		}
 
-		if (chunk && typeof chunk === 'object') {
-			if (chunk.type === 'content' && typeof chunk.content === 'string') {
-				text += chunk.content;
-				continue;
-			}
-
-			// Backward compatibility: some callers expect raw OpenAI delta chunks
-			const maybeChoices = (chunk as any).choices;
-			const deltaContent = maybeChoices?.[0]?.delta?.content;
-			if (typeof deltaContent === 'string') {
-				text += deltaContent;
-			}
+		const content = extractStreamTextContent(chunk);
+		if (content) {
+			text += content;
 		}
 	}
 

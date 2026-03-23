@@ -62,6 +62,7 @@ _在终端中进行 Agentic 编程_
 - [VCP 元思考链显示改造单](docs/usage/zh/22.VCP元思考链显示改造单.md) - `VCP元思考链` 显示兼容的修正原因、分层原则、改造方案与验收标准
 - [Snow 与 VCPChat 兼容依据](docs/usage/zh/23.Snow与VCPChat兼容依据.md) - `Snow CLI` 作为 `VCP TUI` 的职责边界、静态插件/主动插件分层、当前 VCP 后端兼容审计
 - [VCPTUI 改造单](docs/usage/zh/24.VCPTUI改造单.md) - `Snow CLI` 作为 `VCP TUI` 的最终改造边界、协议显示层、压缩链与验收标准
+- [VCP Gateway 改造单](docs/usage/zh/26.VCP%20Gateway改造单.md) - `VCP` 请求网关的非侵入式扩展边界、工具裁决矩阵与验证基线
 
 ### 推荐使用的 ROLE.md
 

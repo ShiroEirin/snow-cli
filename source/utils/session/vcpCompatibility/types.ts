@@ -5,6 +5,7 @@ export type VcpCompatibilityConfig = {
 	requestMethod?: RequestMethod;
 	baseUrl?: string;
 	enableVcpTimeBridge?: boolean;
+	enableVcpGateway?: boolean;
 };
 
 export type VcpOutboundTransformArgs = {

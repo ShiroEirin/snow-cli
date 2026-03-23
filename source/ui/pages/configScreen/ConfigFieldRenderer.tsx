@@ -27,6 +27,7 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 		setApiKey,
 		requestMethod,
 		enableVcpTimeBridge,
+		enableVcpGateway,
 		requestMethodOptions,
 		systemPromptId,
 		activeSystemPromptIds,
@@ -178,6 +179,28 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 					<Text color={activeColor}>
 						{activeIndicator}
 						{t.configScreen.vcpTimeBridge}
+					</Text>
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>{display}</Text>
+						</Box>
+					)}
+				</Box>
+			);
+		}
+
+		case 'enableVcpGateway': {
+			const display =
+				enableVcpGateway === true
+					? t.configScreen.vcpGatewayEnabled
+					: enableVcpGateway === false
+					? t.configScreen.vcpGatewayDisabled
+					: t.configScreen.vcpGatewayAuto;
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.vcpGateway}
 					</Text>
 					{!isCurrentlyEditing && (
 						<Box marginLeft={3}>

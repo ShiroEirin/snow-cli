@@ -10,6 +10,7 @@ import {unifiedHooksExecutor} from './unifiedHooksExecutor.js';
 import {checkYoloPermission} from './yoloPermissionChecker.js';
 import {connectionManager} from '../connection/ConnectionManager.js';
 import {getSubAgentMaxSpawnDepth} from '../config/projectSettings.js';
+import {resolveVcpGatewayRequest} from '../session/vcpCompatibility/gateway.js';
 import {
 	shouldCompressSubAgentContext,
 	getContextPercentage,
@@ -1348,39 +1349,43 @@ You have access to these collaboration tools:
 
 			// Call API with sub-agent's tools - choose API based on config
 			// Apply sub-agent configuration overrides (model already loaded from configProfile above)
+			const gatewayRequest = resolveVcpGatewayRequest(config, {
+				model,
+				tools: allowedTools,
+			});
 			const stream =
-				config.requestMethod === 'anthropic'
+				gatewayRequest.requestMethod === 'anthropic'
 					? createStreamingAnthropicCompletion(
 							{
 								model,
 								messages,
 								temperature: 0,
 								max_tokens: config.maxTokens || 4096,
-								tools: allowedTools,
+								tools: gatewayRequest.tools,
 								sessionId: currentSession?.id,
 								//disableThinking: true, // Sub-agents 不使用 Extended Thinking
 								configProfile: agent.configProfile,
 							},
 							abortSignal,
 					  )
-					: config.requestMethod === 'gemini'
+					: gatewayRequest.requestMethod === 'gemini'
 					? createStreamingGeminiCompletion(
 							{
 								model,
 								messages,
 								temperature: 0,
-								tools: allowedTools,
+								tools: gatewayRequest.tools,
 								configProfile: agent.configProfile,
 							},
 							abortSignal,
 					  )
-					: config.requestMethod === 'responses'
+					: gatewayRequest.requestMethod === 'responses'
 					? createStreamingResponse(
 							{
 								model,
 								messages,
 								temperature: 0,
-								tools: allowedTools,
+								tools: gatewayRequest.tools,
 								prompt_cache_key: currentSession?.id,
 								configProfile: agent.configProfile,
 							},
@@ -1391,7 +1396,7 @@ You have access to these collaboration tools:
 								model,
 								messages,
 								temperature: 0,
-								tools: allowedTools,
+								tools: gatewayRequest.tools,
 								configProfile: agent.configProfile,
 							},
 							abortSignal,
@@ -1611,6 +1616,8 @@ You have access to these collaboration tools:
 								requestMethod: config.requestMethod,
 								maxTokens: config.maxTokens,
 								configProfile: agent.configProfile,
+								baseUrl: config.baseUrl,
+								enableVcpGateway: config.enableVcpGateway,
 							},
 						);
 

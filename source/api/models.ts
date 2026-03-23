@@ -1,5 +1,6 @@
 import {getOpenAiConfig, getCustomHeaders} from '../utils/config/apiConfig.js';
 import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
+import {resolveVcpGatewayModelFetchMethod} from '../utils/session/vcpCompatibility/gateway.js';
 
 export interface Model {
 	id: string;
@@ -177,11 +178,12 @@ export async function fetchAvailableModels(): Promise<Model[]> {
 	}
 
 	const customHeaders = getCustomHeaders();
+	const requestMethod = resolveVcpGatewayModelFetchMethod(config);
 
 	try {
 		let models: Model[];
 
-		switch (config.requestMethod) {
+		switch (requestMethod) {
 			case 'gemini':
 				if (!config.apiKey) {
 					throw new Error('API key is required for Gemini API');

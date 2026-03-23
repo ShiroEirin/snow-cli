@@ -6,6 +6,7 @@ export type ConfigField =
 	| 'apiKey'
 	| 'requestMethod'
 	| 'enableVcpTimeBridge'
+	| 'enableVcpGateway'
 	| 'systemPromptId'
 	| 'customHeadersSchemeId'
 	| 'anthropicBeta'
@@ -88,6 +89,7 @@ export const SELECT_FIELDS: ConfigField[] = [
 	'profile',
 	'requestMethod',
 	'enableVcpTimeBridge',
+	'enableVcpGateway',
 	'systemPromptId',
 	'customHeadersSchemeId',
 	'advancedModel',

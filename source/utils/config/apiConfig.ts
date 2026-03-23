@@ -48,6 +48,8 @@ export interface ApiConfig {
 	streamIdleTimeoutSec?: number;
 	// 显式启用 Snow 侧的 VCP ::Time 兼容桥接。未设置时仅对 localhost 链路做保守兜底判断。
 	enableVcpTimeBridge?: boolean;
+	// 显式启用 Snow 侧的 VCP 请求网关。未设置时仅对 localhost 链路做保守兜底判断。
+	enableVcpGateway?: boolean;
 	// 选填：覆盖 system-prompt.json 的 active（undefined=跟随全局；''=不使用；string=按ID选择；string[]=多选）
 	systemPromptId?: string | string[];
 	// 选填：覆盖 custom-headers.json 的 active（undefined=跟随全局；''=不使用；其它=按ID选择）

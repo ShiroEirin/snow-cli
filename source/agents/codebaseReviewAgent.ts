@@ -4,7 +4,11 @@ import {createStreamingChatCompletion, type ChatMessage} from '../api/chat.js';
 import {createStreamingResponse} from '../api/responses.js';
 import {createStreamingGeminiCompletion} from '../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../api/anthropic.js';
-import type {RequestMethod} from '../utils/config/apiConfig.js';
+import {
+	extractStreamTextContent,
+	extractStreamToolCalls,
+} from '../api/streamingUtils.js';
+import {resolveVcpGatewayRequest} from '../utils/session/vcpCompatibility/gateway.js';
 
 /**
  * Codebase Review Agent Service
@@ -15,7 +19,6 @@ import type {RequestMethod} from '../utils/config/apiConfig.js';
  */
 export class CodebaseReviewAgent {
 	private modelName: string = '';
-	private requestMethod: RequestMethod = 'chat';
 	private initialized: boolean = false;
 	private readonly MAX_RETRIES = 3;
 
@@ -80,7 +83,6 @@ export class CodebaseReviewAgent {
 				this.modelName = config.basicModel;
 			}
 
-			this.requestMethod = config.requestMethod;
 			this.initialized = true;
 
 			return true;
@@ -96,7 +98,6 @@ export class CodebaseReviewAgent {
 	clearCache(): void {
 		this.initialized = false;
 		this.modelName = '';
-		this.requestMethod = 'chat';
 	}
 
 	/**
@@ -117,15 +118,21 @@ export class CodebaseReviewAgent {
 		messages: ChatMessage[],
 		abortSignal?: AbortSignal,
 	): Promise<{content: string; tool_calls?: any[]}> {
+		const config = getOpenAiConfig();
+		const gatewayRequest = resolveVcpGatewayRequest(config, {
+			model: this.modelName,
+			tools: [this.REVIEW_TOOL],
+		});
 		let streamGenerator: AsyncGenerator<any, void, unknown>;
+		const effectiveRequestMethod = gatewayRequest.requestMethod;
 
-		switch (this.requestMethod) {
+		switch (effectiveRequestMethod) {
 			case 'anthropic':
 				streamGenerator = createStreamingAnthropicCompletion(
 					{
 						model: this.modelName,
 						messages,
-						tools: [this.REVIEW_TOOL],
+						tools: gatewayRequest.tools,
 						includeBuiltinSystemPrompt: false,
 						disableThinking: true,
 					},
@@ -138,7 +145,7 @@ export class CodebaseReviewAgent {
 					{
 						model: this.modelName,
 						messages,
-						tools: [this.REVIEW_TOOL],
+						tools: gatewayRequest.tools,
 						includeBuiltinSystemPrompt: false,
 						disableThinking: true, // Agents 不使用思考功能
 					},
@@ -151,7 +158,7 @@ export class CodebaseReviewAgent {
 					{
 						model: this.modelName,
 						messages,
-						tools: [this.REVIEW_TOOL],
+						tools: gatewayRequest.tools,
 						stream: true,
 						includeBuiltinSystemPrompt: false,
 						disableThinking: true, // Agents 不使用思考功能
@@ -166,7 +173,7 @@ export class CodebaseReviewAgent {
 					{
 						model: this.modelName,
 						messages,
-						tools: [this.REVIEW_TOOL],
+						tools: gatewayRequest.tools,
 						stream: true,
 						includeBuiltinSystemPrompt: false,
 						disableThinking: true, // Agents 不使用思考功能
@@ -185,41 +192,14 @@ export class CodebaseReviewAgent {
 					throw new Error('Request aborted');
 				}
 
-				if (this.requestMethod === 'chat') {
-					// OpenAI chat format
-					if (chunk.choices && chunk.choices[0]?.delta?.content) {
-						completeContent += chunk.choices[0].delta.content;
-					}
-					if (chunk.choices && chunk.choices[0]?.delta?.tool_calls) {
-						// Accumulate tool calls
-						const deltaToolCalls = chunk.choices[0].delta.tool_calls;
-						for (const tc of deltaToolCalls) {
-							if (tc.index !== undefined) {
-								if (!tool_calls[tc.index]) {
-									tool_calls[tc.index] = {
-										id: tc.id || '',
-										type: 'function',
-										function: {name: '', arguments: ''},
-									};
-								}
-								if (tc.function?.name) {
-									tool_calls[tc.index].function.name += tc.function.name;
-								}
-								if (tc.function?.arguments) {
-									tool_calls[tc.index].function.arguments +=
-										tc.function.arguments;
-								}
-							}
-						}
-					}
-				} else {
-					// Anthropic/Gemini/Responses format
-					if (chunk.type === 'content' && chunk.content) {
-						completeContent += chunk.content;
-					}
-					if (chunk.type === 'tool_calls' && chunk.tool_calls) {
-						tool_calls = chunk.tool_calls;
-					}
+				const content = extractStreamTextContent(chunk);
+				if (content) {
+					completeContent += content;
+				}
+
+				const chunkToolCalls = extractStreamToolCalls<any>(chunk);
+				if (chunkToolCalls) {
+					tool_calls = chunkToolCalls;
 				}
 			}
 		} catch (streamError) {
