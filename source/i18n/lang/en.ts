@@ -183,6 +183,10 @@ export const en: TranslationKeys = {
 		anthropicCacheTTL: 'Anthropic Cache TTL:',
 		anthropicCacheTTL5m: '5 minutes (default)',
 		anthropicCacheTTL1h: '1 hour',
+		anthropicSpeed: 'Anthropic Speed:',
+		anthropicSpeedNotUsed: 'Not Used (default)',
+		anthropicSpeedFast: 'fast',
+		anthropicSpeedStandard: 'standard',
 		enablePromptOptimization: 'Enable Prompt Optimization:',
 		enableAutoCompress: 'Enable Auto Compression:',
 		autoCompressThreshold: 'Auto Compress Threshold (%):',
@@ -214,9 +218,14 @@ export const en: TranslationKeys = {
 		toggleHint: '(Press Enter to toggle)',
 		enterValue: 'Enter value:',
 		createNewProfile: 'Create New Profile',
+		renameProfile: 'Rename Profile',
 		enterProfileName: 'Enter a name for the new configuration profile',
+		enterRenameProfileName: 'Enter a new name for this profile',
+		profileNameLabel: 'Profile Name:',
 		profileNamePlaceholder: 'e.g., work, personal, test',
+		renameProfilePlaceholder: 'Enter the new profile name',
 		createHint: 'Press Enter to create, Esc to cancel',
+		renameHint: 'Press Enter to rename, Esc to cancel',
 		deleteProfile: 'Delete Profile',
 		confirmDelete: 'Confirm profile deletion',
 		deleteWarning:
@@ -239,19 +248,21 @@ export const en: TranslationKeys = {
 		cannotDeleteDefault: 'Cannot delete the default profile',
 		profileNameEmpty: 'Profile name cannot be empty',
 		navigationHint:
-			'Use ↑↓ to navigate, Enter to edit, M for manual input, Ctrl+S or Esc to save',
+			'Use ↑↓ to navigate, Enter to edit, R to rename, M for manual input, Ctrl+S or Esc to save',
 		editingHintNumeric: 'Type to edit, Enter to save',
 		editingHintGeneral: 'Press Enter to save and exit editing',
 		modelFilterHint:
 			'Type to filter, ↑↓ to select, Enter to confirm, Esc to cancel',
 		effortSelectHint: '↑↓ to select, Enter to confirm, Esc to cancel',
 		profileSelectHint:
-			'↑↓ to select profile, N to create new, D to delete, Enter to confirm, Esc to cancel',
+			'↑↓ to select profile, N to create new, R to rename, D to delete, Enter to confirm, Esc to cancel',
 		requestMethodSelectHint: '↑↓ to select, Enter to confirm, Esc to cancel',
 		newProfile: '+ New',
+		renameProfileShort: '[R] Rename',
 		deleteProfileShort: '🆇 Delete',
 		mark: '✓ Mark',
-		noProfilesMarked: 'Please use Space to select profiles to delete',
+		cannotRenameDefault: 'Cannot rename the default profile',
+		noProfilesMarked: 'Please mark profiles to delete with Space first',
 		confirmDeleteProfiles:
 			'Are you sure you want to delete the following {count} profiles?',
 		fetchingModels: 'Fetching models from API...',
@@ -417,6 +428,9 @@ export const en: TranslationKeys = {
 		backInfo: 'Return to main menu',
 		simpleMode: 'Simple Mode:',
 		simpleModeInfo: 'Enable simple mode to simplify the interface',
+		diffOpacity: 'Diff Highlight Strength:',
+		diffOpacityInfo:
+			'Adjust diff highlight strength, default 100%, minimum 30%, press Enter to cycle by 10%',
 		enabled: '[✓] Enabled',
 		disabled: '[ ] Disabled',
 		darkTheme: 'Dark Theme',
@@ -605,6 +619,22 @@ export const en: TranslationKeys = {
 			copyFailedPrefix: '✗ Failed to copy to clipboard',
 			unknownError: 'Unknown error',
 		},
+		// Command output messages (for command execution results)
+		commandOutput: {
+			// Auto-format command messages
+			autoFormat: {
+				enabled: 'Auto-format: Enabled for this project',
+				disabled: 'Auto-format: Disabled for this project',
+				statusEnabled: 'Auto-format: Enabled for this project',
+				statusDisabled: 'Auto-format: Disabled for this project',
+			},
+			// Export command messages
+			export: {
+				exporting: 'Exporting conversation...',
+				openingDialog: 'Opening file save dialog...',
+				cancelledByUser: 'Export cancelled by user.',
+			},
+		},
 	},
 	permissionsPanel: {
 		title: 'Permissions',
@@ -658,6 +688,7 @@ export const en: TranslationKeys = {
 			'Current request method ({requestMethod}) does not support thinking',
 		requestMethodNotSupportedForThinkingStrength:
 			'Current request method ({requestMethod}) does not support thinking strength settings',
+		anthropicSpeed: 'Speed:',
 		saveFailed: 'Save failed',
 		modelSaveFailed: 'Model save failed',
 		tipLabel: 'Tip:',
@@ -892,6 +923,7 @@ export const en: TranslationKeys = {
 		// Profile switch
 		profileCurrent: 'Profile',
 		profileSwitchHint: 'switch',
+		gitBranch: 'Git Branch',
 		memoryUsageLabel: 'Memory Usage:',
 		// Tool execution
 		toolCall: 'Tool call',

@@ -169,6 +169,10 @@ export const zhTW: TranslationKeys = {
 		anthropicCacheTTL: 'Anthropic 快取時效:',
 		anthropicCacheTTL5m: '5分鐘（預設）',
 		anthropicCacheTTL1h: '1小時',
+		anthropicSpeed: 'Anthropic Speed:',
+		anthropicSpeedNotUsed: '不使用（預設）',
+		anthropicSpeedFast: 'fast',
+		anthropicSpeedStandard: 'standard',
 		enablePromptOptimization: '啟用提示詞優化:',
 		enableAutoCompress: '啟用自動壓縮:',
 		autoCompressThreshold: '自動壓縮閾值 (%):',
@@ -199,9 +203,14 @@ export const zhTW: TranslationKeys = {
 		toggleHint: '(按 Enter 切換)',
 		enterValue: '輸入值:',
 		createNewProfile: '建立新配置',
+		renameProfile: '重新命名配置',
 		enterProfileName: '輸入新配置的名稱',
+		enterRenameProfileName: '輸入配置的新名稱',
+		profileNameLabel: '配置名稱:',
 		profileNamePlaceholder: '例如: work, personal, test',
+		renameProfilePlaceholder: '輸入新的配置名稱',
 		createHint: '按 Enter 建立,Esc 取消',
+		renameHint: '按 Enter 重新命名,Esc 取消',
 		deleteProfile: '刪除配置',
 		confirmDelete: '確認刪除配置',
 		deleteWarning: '此操作無法撤銷。你將被切換到預設配置。',
@@ -221,16 +230,20 @@ export const zhTW: TranslationKeys = {
 		errors: '錯誤:',
 		cannotDeleteDefault: '無法刪除預設配置',
 		profileNameEmpty: '配置名稱不能為空',
-		navigationHint: '使用 ↑↓ 導航,Enter 編輯,M 手動輸入,Ctrl+S 或 Esc 儲存',
+		navigationHint:
+			'使用 ↑↓ 導航,Enter 編輯,R 重新命名,M 手動輸入,Ctrl+S 或 Esc 儲存',
 		editingHintNumeric: '輸入數字編輯,Enter 儲存',
 		editingHintGeneral: '按 Enter 儲存並退出編輯',
 		modelFilterHint: '輸入過濾,↑↓ 選擇,Enter 確認,Esc 取消',
 		effortSelectHint: '↑↓ 選擇,Enter 確認,Esc 取消',
-		profileSelectHint: '↑↓ 選擇配置,N 建立新配置,D 刪除,Enter 確認,Esc 取消',
+		profileSelectHint:
+			'↑↓ 選擇配置,N 建立新配置,R 重新命名,D 刪除,Enter 確認,Esc 取消',
 		requestMethodSelectHint: '↑↓ 選擇,Enter 確認,Esc 取消',
 		newProfile: '+ 新建',
+		renameProfileShort: '[R] 重新命名',
 		deleteProfileShort: '🆇 刪除',
 		mark: '✓ 標記',
+		cannotRenameDefault: '無法重新命名預設配置',
 		noProfilesMarked: '請先使用空格鍵選中要刪除的配置',
 		confirmDeleteProfiles: '確定要刪除以下 {count} 個配置嗎？',
 		fetchingModels: '從 API 獲取模型...',
@@ -388,6 +401,9 @@ export const zhTW: TranslationKeys = {
 		backInfo: '返回主選單',
 		simpleMode: '簡易模式:',
 		simpleModeInfo: '啟用簡易模式以簡化介面',
+		diffOpacity: 'Diff 高亮強度:',
+		diffOpacityInfo:
+			'調整差異高亮顯示強度，預設 100%，最低 30%，按 Enter 以 10% 循環切換',
 		enabled: '[✓] 已啟用',
 		disabled: '[ ] 已停用',
 		darkTheme: '深色主題',
@@ -558,11 +574,27 @@ export const zhTW: TranslationKeys = {
 			quit: '退出應用程式',
 		},
 		copyLastFeedback: {
-			noAssistantMessage: '未找到可複製的 AI 助手訊息。',
-			emptyAssistantMessage: '最後一條 AI 助手訊息沒有可複製的內容。',
-			copySuccess: '✓ 已複製最後一條 AI 訊息到剪貼簿',
+			noAssistantMessage: '未找到可複製的 AI 助手消息。',
+			emptyAssistantMessage: '最後一條 AI 助手消息沒有可複製的內容。',
+			copySuccess: '✓ 已複製最後一條 AI 消息到剪貼簿',
 			copyFailedPrefix: '✗ 複製到剪貼簿失敗',
 			unknownError: '未知錯誤',
+		},
+		// 命令輸出消息（用於命令執行結果）
+		commandOutput: {
+			// 自動格式化命令消息
+			autoFormat: {
+				enabled: '自動格式化: 已啟用',
+				disabled: '自動格式化: 已停用',
+				statusEnabled: '自動格式化: 已啟用',
+				statusDisabled: '自動格式化: 已停用',
+			},
+			// 導出命令消息
+			export: {
+				exporting: '正在導出對話...',
+				openingDialog: '正在開啟檔案儲存對話方塊...',
+				cancelledByUser: '導出已被使用者取消。',
+			},
 		},
 	},
 	permissionsPanel: {
@@ -615,6 +647,7 @@ export const zhTW: TranslationKeys = {
 			'目前請求方式({requestMethod})不支援思考',
 		requestMethodNotSupportedForThinkingStrength:
 			'目前請求方式({requestMethod})不支援思考強度設定',
+		anthropicSpeed: 'Speed:',
 		saveFailed: '儲存失敗',
 		modelSaveFailed: '模型儲存失敗',
 		tipLabel: '提示:',
@@ -842,6 +875,7 @@ export const zhTW: TranslationKeys = {
 		// Profile switch
 		profileCurrent: '目前設定檔',
 		profileSwitchHint: '切換',
+		gitBranch: 'Git分支',
 		memoryUsageLabel: '記憶體佔用:',
 		// Tool execution
 		toolCall: '工具呼叫',

@@ -11,6 +11,7 @@ export type ConfigField =
 	| 'customHeadersSchemeId'
 	| 'anthropicBeta'
 	| 'anthropicCacheTTL'
+	| 'anthropicSpeed'
 	| 'enableAutoCompress'
 	| 'autoCompressThreshold'
 	| 'showThinking'
@@ -33,7 +34,7 @@ export type ConfigField =
 	| 'editSimilarityThreshold'
 	| 'streamingDisplay';
 
-export type ProfileMode = 'normal' | 'creating' | 'deleting';
+export type ProfileMode = 'normal' | 'creating' | 'renaming' | 'deleting';
 
 export type ConfigScreenProps = {
 	onBack: () => void;
@@ -98,6 +99,7 @@ export const SELECT_FIELDS: ConfigField[] = [
 	'thinkingEffort',
 	'responsesReasoningEffort',
 	'responsesVerbosity',
+	'anthropicSpeed',
 ];
 
 export const isSelectField = (field: ConfigField) =>

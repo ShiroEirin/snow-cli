@@ -19,6 +19,7 @@ import {
 	switchProfile,
 	createProfile,
 	deleteProfile,
+	renameProfile,
 	saveProfile,
 	type ConfigProfile,
 } from '../../../utils/config/configManager.js';
@@ -42,6 +43,7 @@ export function useConfigState() {
 	const [activeProfile, setActiveProfile] = useState('');
 	const [profileMode, setProfileMode] = useState<ProfileMode>('normal');
 	const [newProfileName, setNewProfileName] = useState('');
+	const [renameProfileName, setRenameProfileName] = useState('');
 	const [markedProfiles, setMarkedProfiles] = useState<Set<string>>(new Set());
 
 	// API settings
@@ -99,6 +101,9 @@ export function useConfigState() {
 		'low' | 'medium' | 'high'
 	>('medium');
 	const [responsesFastMode, setResponsesFastMode] = useState(false);
+	const [anthropicSpeed, setAnthropicSpeed] = useState<
+		'fast' | 'standard' | undefined
+	>(undefined);
 
 	// Model settings
 	const [advancedModel, setAdvancedModel] = useState('');
@@ -161,6 +166,7 @@ export function useConfigState() {
 				? [
 						'anthropicBeta' as ConfigField,
 						'anthropicCacheTTL' as ConfigField,
+						'anthropicSpeed' as ConfigField,
 						'thinkingEnabled' as ConfigField,
 						'thinkingMode' as ConfigField,
 						...(thinkingEnabled && thinkingMode === 'tokens'
@@ -238,6 +244,7 @@ export function useConfigState() {
 			requestMethod !== 'anthropic' &&
 			(currentField === 'anthropicBeta' ||
 				currentField === 'anthropicCacheTTL' ||
+				currentField === 'anthropicSpeed' ||
 				currentField === 'thinkingEnabled' ||
 				currentField === 'thinkingBudgetTokens')
 		) {
@@ -315,6 +322,7 @@ export function useConfigState() {
 		setResponsesReasoningEffort(config.responsesReasoning?.effort || 'high');
 		setResponsesVerbosity(config.responsesVerbosity || 'medium');
 		setResponsesFastMode(config.responsesFastMode || false);
+		setAnthropicSpeed(config.anthropicSpeed);
 		setAdvancedModel(config.advancedModel || '');
 		setBasicModel(config.basicModel || '');
 		setMaxContextTokens(config.maxContextTokens || 4000);
@@ -400,6 +408,8 @@ export function useConfigState() {
 			return geminiThinkingBudget.toString();
 		if (currentField === 'responsesReasoningEffort')
 			return responsesReasoningEffort;
+		if (currentField === 'anthropicSpeed')
+			return anthropicSpeed || '';
 		return '';
 	};
 
@@ -573,6 +583,7 @@ export function useConfigState() {
 							? {type: 'adaptive' as const, effort: thinkingEffort}
 							: {type: 'enabled' as const, budget_tokens: thinkingBudgetTokens}
 						: undefined,
+					anthropicSpeed,
 					advancedModel,
 					basicModel,
 					maxContextTokens,
@@ -628,6 +639,34 @@ export function useConfigState() {
 				err instanceof Error ? err.message : 'Failed to delete profiles',
 			]);
 			setProfileMode('normal');
+		}
+	};
+
+	const handleRenameProfile = () => {
+		const cleaned = stripFocusArtifacts(renameProfileName).trim();
+
+		if (!cleaned) {
+			setErrors([t.configScreen.profileNameEmpty]);
+			return;
+		}
+
+		if (activeProfile === 'default') {
+			setErrors([t.configScreen.cannotRenameDefault]);
+			return;
+		}
+
+		try {
+			renameProfile(activeProfile, cleaned);
+			loadProfilesAndConfig();
+			setProfileMode('normal');
+			setRenameProfileName('');
+			setMarkedProfiles(new Set());
+			setIsEditing(false);
+			setErrors([]);
+		} catch (err) {
+			setErrors([
+				err instanceof Error ? err.message : 'Failed to rename profile',
+			]);
 		}
 	};
 
@@ -709,6 +748,7 @@ export function useConfigState() {
 
 			config.responsesFastMode = responsesFastMode;
 			config.responsesVerbosity = responsesVerbosity;
+			config.anthropicSpeed = anthropicSpeed;
 
 			await updateOpenAiConfig(config);
 
@@ -745,6 +785,7 @@ export function useConfigState() {
 						},
 						responsesVerbosity,
 						responsesFastMode,
+						anthropicSpeed,
 						advancedModel,
 						basicModel,
 						maxContextTokens,
@@ -779,6 +820,8 @@ export function useConfigState() {
 		setProfileMode,
 		newProfileName,
 		setNewProfileName,
+		renameProfileName,
+		setRenameProfileName,
 		markedProfiles,
 		setMarkedProfiles,
 		// API settings
@@ -834,6 +877,8 @@ export function useConfigState() {
 		setResponsesVerbosity,
 		responsesFastMode,
 		setResponsesFastMode,
+		anthropicSpeed,
+		setAnthropicSpeed,
 		// Model settings
 		advancedModel,
 		setAdvancedModel,
@@ -893,6 +938,7 @@ export function useConfigState() {
 		applyCustomHeadersSchemeSelectValue,
 		handleCreateProfile,
 		handleBatchDeleteProfiles,
+		handleRenameProfile,
 		handleModelChange,
 		saveConfiguration,
 		getAllFields,

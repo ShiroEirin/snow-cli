@@ -168,6 +168,10 @@ export const zh: TranslationKeys = {
 		anthropicCacheTTL: 'Anthropic 缓存时效:',
 		anthropicCacheTTL5m: '5分钟（默认）',
 		anthropicCacheTTL1h: '1小时',
+		anthropicSpeed: 'Anthropic Speed:',
+		anthropicSpeedNotUsed: '不使用（默认）',
+		anthropicSpeedFast: 'fast',
+		anthropicSpeedStandard: 'standard',
 		enablePromptOptimization: '启用提示词优化:',
 		enableAutoCompress: '启用自动压缩:',
 		autoCompressThreshold: '自动压缩阈值 (%):',
@@ -198,9 +202,14 @@ export const zh: TranslationKeys = {
 		toggleHint: '(按 Enter 切换)',
 		enterValue: '输入值:',
 		createNewProfile: '创建新配置',
+		renameProfile: '重命名配置',
 		enterProfileName: '输入新配置的名称',
+		enterRenameProfileName: '输入配置的新名称',
+		profileNameLabel: '配置名称:',
 		profileNamePlaceholder: '例如: work, personal, test',
+		renameProfilePlaceholder: '输入新的配置名称',
 		createHint: '按 Enter 创建,Esc 取消',
+		renameHint: '按 Enter 重命名,Esc 取消',
 		deleteProfile: '删除配置',
 		confirmDelete: '确认删除配置',
 		deleteWarning: '此操作无法撤销。你将被切换到默认配置。',
@@ -220,16 +229,20 @@ export const zh: TranslationKeys = {
 		errors: '错误:',
 		cannotDeleteDefault: '无法删除默认配置',
 		profileNameEmpty: '配置名称不能为空',
-		navigationHint: '使用 ↑↓ 导航,Enter 编辑,M 手动输入,Ctrl+S 或 Esc 保存',
+		navigationHint:
+			'使用 ↑↓ 导航,Enter 编辑,R 重命名,M 手动输入,Ctrl+S 或 Esc 保存',
 		editingHintNumeric: '输入数字编辑,Enter 保存',
 		editingHintGeneral: '按 Enter 保存并退出编辑',
 		modelFilterHint: '输入过滤,↑↓ 选择,Enter 确认,Esc 取消',
 		effortSelectHint: '↑↓ 选择,Enter 确认,Esc 取消',
-		profileSelectHint: '↑↓ 选择配置,N 创建新配置,D 删除,Enter 确认,Esc 取消',
+		profileSelectHint:
+			'↑↓ 选择配置,N 创建新配置,R 重命名,D 删除,Enter 确认,Esc 取消',
 		requestMethodSelectHint: '↑↓ 选择,Enter 确认,Esc 取消',
 		newProfile: '+ 新建',
+		renameProfileShort: '[R] 重命名',
 		deleteProfileShort: '🆇 删除',
 		mark: '✓ 标记',
+		cannotRenameDefault: '无法重命名默认配置',
 		noProfilesMarked: '请先使用空格键选中要删除的配置',
 		confirmDeleteProfiles: '确定要删除以下 {count} 个配置吗？',
 		fetchingModels: '从 API 获取模型...',
@@ -387,6 +400,9 @@ export const zh: TranslationKeys = {
 		backInfo: '返回主菜单',
 		simpleMode: '简易模式:',
 		simpleModeInfo: '启用简易模式以简化界面',
+		diffOpacity: 'Diff 高亮强度:',
+		diffOpacityInfo:
+			'调整差异高亮显示强度，默认 100%，最低 30%，回车按 10% 循环切换',
 		enabled: '[✓] 已启用',
 		disabled: '[ ] 已禁用',
 		darkTheme: '深色主题',
@@ -563,6 +579,22 @@ export const zh: TranslationKeys = {
 			copyFailedPrefix: '✗ 复制到剪贴板失败',
 			unknownError: '未知错误',
 		},
+		// 命令输出消息（用于命令执行结果）
+		commandOutput: {
+			// 自动格式化命令消息
+			autoFormat: {
+				enabled: '自动格式化: 已启用',
+				disabled: '自动格式化: 已禁用',
+				statusEnabled: '自动格式化: 已启用',
+				statusDisabled: '自动格式化: 已禁用',
+			},
+			// 导出命令消息
+			export: {
+				exporting: '正在导出对话...',
+				openingDialog: '正在打开文件保存对话框...',
+				cancelledByUser: '导出已被用户取消。',
+			},
+		},
 	},
 	permissionsPanel: {
 		title: '权限',
@@ -614,6 +646,7 @@ export const zh: TranslationKeys = {
 			'当前请求方式({requestMethod})不支持思考',
 		requestMethodNotSupportedForThinkingStrength:
 			'当前请求方式({requestMethod})不支持思考强度设置',
+		anthropicSpeed: 'Speed:',
 		saveFailed: '保存失败',
 		modelSaveFailed: '模型保存失败',
 		tipLabel: '提示:',
@@ -841,6 +874,7 @@ export const zh: TranslationKeys = {
 		// Profile switch
 		profileCurrent: '当前配置',
 		profileSwitchHint: '切换',
+		gitBranch: 'Git分支',
 		memoryUsageLabel: '内存占用:',
 		// Tool execution
 		toolCall: '工具调用',

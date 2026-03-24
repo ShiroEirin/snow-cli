@@ -9,8 +9,6 @@ import {getSystemPromptForMode} from '../prompt/systemPrompt.js';
 import {
 	withRetryGenerator,
 	parseJsonWithFix,
-	isOverloadedResponse,
-	createOverloadedApiError,
 } from '../utils/core/retryUtils.js';
 import {
 	createIdleTimeoutGuard,
@@ -714,6 +712,10 @@ export async function* createStreamingAnthropicCompletion(
 				stream: true,
 			};
 
+			if (config.anthropicSpeed) {
+				requestBody.speed = config.anthropicSpeed;
+			}
+
 			// Add thinking configuration if enabled and not explicitly disabled
 			// When thinking is enabled, temperature must be 1
 			// Note: agents and other internal tools should set disableThinking=true
@@ -798,16 +800,6 @@ export async function* createStreamingAnthropicCompletion(
 
 			if (!response.ok) {
 				const errorText = await response.text();
-				if (
-					isOverloadedResponse(response.status, response.statusText, errorText)
-				) {
-					throw createOverloadedApiError(
-						'Anthropic API',
-						response.status,
-						response.statusText,
-						errorText,
-					);
-				}
 				throw new Error(
 					`Anthropic API error: ${response.status} ${response.statusText} - ${errorText}`,
 				);

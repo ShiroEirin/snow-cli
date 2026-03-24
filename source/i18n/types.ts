@@ -169,6 +169,10 @@ export type TranslationKeys = {
 		anthropicCacheTTL: string;
 		anthropicCacheTTL5m: string;
 		anthropicCacheTTL1h: string;
+		anthropicSpeed: string;
+		anthropicSpeedNotUsed: string;
+		anthropicSpeedFast: string;
+		anthropicSpeedStandard: string;
 		enablePromptOptimization: string;
 		enableAutoCompress: string;
 		autoCompressThreshold: string;
@@ -199,9 +203,14 @@ export type TranslationKeys = {
 		toggleHint: string;
 		enterValue: string;
 		createNewProfile: string;
+		renameProfile: string;
 		enterProfileName: string;
+		enterRenameProfileName: string;
+		profileNameLabel: string;
 		profileNamePlaceholder: string;
+		renameProfilePlaceholder: string;
 		createHint: string;
+		renameHint: string;
 		deleteProfile: string;
 		confirmDelete: string;
 		deleteWarning: string;
@@ -229,8 +238,10 @@ export type TranslationKeys = {
 		profileSelectHint: string;
 		requestMethodSelectHint: string;
 		newProfile: string;
+		renameProfileShort: string;
 		deleteProfileShort: string;
 		mark: string;
+		cannotRenameDefault: string;
 		noProfilesMarked: string;
 		confirmDeleteProfiles: string;
 		fetchingModels: string;
@@ -388,6 +399,8 @@ export type TranslationKeys = {
 		backInfo: string;
 		simpleMode: string;
 		simpleModeInfo: string;
+		diffOpacity: string;
+		diffOpacityInfo: string;
 		enabled: string;
 		disabled: string;
 		darkTheme: string;
@@ -563,6 +576,22 @@ export type TranslationKeys = {
 			copyFailedPrefix: string;
 			unknownError: string;
 		};
+		// Command output messages (for command execution results)
+		commandOutput: {
+			// Auto-format command messages
+			autoFormat: {
+				enabled: string;
+				disabled: string;
+				statusEnabled: string;
+				statusDisabled: string;
+			};
+			// Export command messages
+			export: {
+				exporting: string;
+				openingDialog: string;
+				cancelledByUser: string;
+			};
+		};
 	};
 	// Profile Panel
 	profilePanel: {
@@ -684,6 +713,7 @@ export type TranslationKeys = {
 		thinkingLabel: string;
 		requestMethodNotSupportedForThinking: string;
 		requestMethodNotSupportedForThinkingStrength: string;
+		anthropicSpeed: string;
 		saveFailed: string;
 		modelSaveFailed: string;
 		tipLabel: string;
@@ -843,6 +873,7 @@ export type TranslationKeys = {
 		// Profile switch
 		profileCurrent: string;
 		profileSwitchHint: string;
+		gitBranch: string;
 		memoryUsageLabel: string;
 		// Tool execution
 		toolCall: string;
