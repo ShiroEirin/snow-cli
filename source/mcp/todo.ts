@@ -314,7 +314,8 @@ export class TodoService {
 				name: 'todo-get',
 				description: `Get current TODO list with task IDs, status, and hierarchy.
 
-PARALLEL CALLS ONLY: MUST pair with other tools (todo-get + filesystem-read/terminal-execute/etc).
+PARALLEL CALLS ONLY: MUST pair with other tools as SEPARATE tool calls in the same assistant turn (e.g. [todo-get, filesystem-read] or [todo-get, terminal-execute]).
+NEVER concatenate tool names into one fake tool like todo-getfilesystem-read.
 NEVER call todo-get alone - always combine with an action tool.
 
 USE WHEN:
@@ -322,7 +323,7 @@ USE WHEN:
 - User requests modifications → Check current progress before adding tasks
 - Continuing work → Verify status to avoid redoing completed tasks
 
-EXAMPLE: todo-get + filesystem-read (check progress while reading files)`,
+EXAMPLE: emit [todo-get, filesystem-read] to check progress while reading files.`,
 				inputSchema: {
 					type: 'object',
 					properties: {},
@@ -332,13 +333,14 @@ EXAMPLE: todo-get + filesystem-read (check progress while reading files)`,
 				name: 'todo-update',
 				description: `Update TODO status/content - USE FREQUENTLY to track progress!
 
-PARALLEL CALLS ONLY: MUST pair with other tools (todo-update + filesystem-edit/terminal-execute/etc).
+PARALLEL CALLS ONLY: MUST pair with other tools as SEPARATE tool calls in the same assistant turn (e.g. [todo-update, filesystem-edit] or [todo-update, terminal-execute]).
+NEVER concatenate tool names into one fake tool like todo-updatefilesystem-edit.
 NEVER call todo-update alone - always combine with an action tool.
 
 BEST PRACTICE: 
 - Mark "completed" ONLY after task is verified
 - Update while working, not after
-- Example: todo-update(task1, completed) + filesystem-edit(task2) 
+- Example: emit [todo-update(task1, completed), filesystem-edit(task2)] 
 
 This ensures efficient workflow and prevents unnecessary wait times.`,
 
@@ -370,7 +372,8 @@ This ensures efficient workflow and prevents unnecessary wait times.`,
 				name: 'todo-add',
 				description: `Add tasks to TODO list - FIRST STEP for most programming tasks.
 
-PARALLEL CALLS ONLY: MUST pair with other tools (todo-add + filesystem-read/etc).
+PARALLEL CALLS ONLY: MUST pair with other tools as SEPARATE tool calls in the same assistant turn (e.g. [todo-add, filesystem-read]).
+NEVER concatenate tool names into one fake tool like todo-addfilesystem-read.
 NEVER call todo-add alone - always combine with an action tool.
 
 WHEN TO USE (Very common):
@@ -413,7 +416,8 @@ SUPPORTS BATCH ADDING:
 				name: 'todo-delete',
 				description: `Delete TODO item from the list.
 
-PARALLEL CALLS ONLY: MUST pair with other tools (todo-delete + filesystem-edit/todo-get/etc).
+PARALLEL CALLS ONLY: MUST pair with other tools as SEPARATE tool calls in the same assistant turn (e.g. [todo-delete, filesystem-edit] or [todo-delete, todo-get]).
+NEVER concatenate tool names into one fake tool like todo-deletefilesystem-edit.
 NEVER call todo-delete alone - always combine with an action tool.
 
 CASCADE DELETE: Deleting a parent task automatically deletes all its children.

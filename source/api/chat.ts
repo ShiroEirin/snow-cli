@@ -22,6 +22,8 @@ import type {
 import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {getVersionHeader} from '../utils/core/version.js';
+import {ChatToolCallAccumulator} from './chatToolCallAccumulator.js';
+import {shouldUseVcpGateway} from '../utils/session/vcpCompatibility/gateway.js';
 
 export type {
 	ChatMessage,
@@ -87,8 +89,29 @@ export interface ChatCompletionMessageParam {
 				text?: string;
 				image_url?: {url: string};
 		  }>;
+	name?: string;
 	tool_call_id?: string;
 	tool_calls?: ToolCall[];
+}
+
+function buildToolCallNameMap(messages: ChatMessage[]): Map<string, string> {
+	const toolCallNameMap = new Map<string, string>();
+
+	for (const message of messages) {
+		if (message.role !== 'assistant' || !message.tool_calls) {
+			continue;
+		}
+
+		for (const toolCall of message.tool_calls) {
+			if (!toolCall?.id || !toolCall.function?.name) {
+				continue;
+			}
+
+			toolCallNameMap.set(toolCall.id, toolCall.function.name);
+		}
+	}
+
+	return toolCallNameMap;
 }
 
 /**
@@ -101,15 +124,19 @@ export interface ChatCompletionMessageParam {
  * @param includeBuiltinSystemPrompt - Whether to include builtin system prompt (default true)
  * @param customSystemPromptOverride - Optional custom system prompt content (for sub-agents)
  */
-function convertToOpenAIMessages(
+export function convertToOpenAIMessages(
 	messages: ChatMessage[],
 	includeBuiltinSystemPrompt: boolean = true,
 	customSystemPromptOverride?: string[],
 	planMode: boolean = false, // When true, use Plan mode system prompt
 	vulnerabilityHuntingMode: boolean = false, // When true, use Vulnerability Hunting mode system prompt
 	toolSearchDisabled: boolean = false,
+	includeToolMessageNames: boolean = false,
 ): ChatCompletionMessageParam[] {
 	const customSystemPrompts = customSystemPromptOverride;
+	const toolCallNameMap = includeToolMessageNames
+		? buildToolCallNameMap(messages)
+		: undefined;
 
 	let result = messages.map(msg => {
 		// 如果消息包含图片，使用 content 数组格式
@@ -162,6 +189,9 @@ function convertToOpenAIMessages(
 		}
 
 		if (msg.role === 'tool' && msg.tool_call_id) {
+			const resolvedToolName =
+				msg.name || toolCallNameMap?.get(msg.tool_call_id);
+
 			// Handle multimodal tool results with images
 			if (msg.images && msg.images.length > 0) {
 				const content: Array<{
@@ -195,6 +225,7 @@ function convertToOpenAIMessages(
 				return {
 					role: 'tool',
 					content,
+					...(resolvedToolName ? {name: resolvedToolName} : {}),
 					tool_call_id: msg.tool_call_id,
 				} as ChatCompletionMessageParam;
 			}
@@ -202,6 +233,7 @@ function convertToOpenAIMessages(
 			return {
 				role: 'tool',
 				content: msg.content,
+				...(resolvedToolName ? {name: resolvedToolName} : {}),
 				tool_call_id: msg.tool_call_id,
 			} as ChatCompletionMessageParam;
 		}
@@ -494,6 +526,7 @@ export async function* createStreamingChatCompletion(
 	// 使用重试包装生成器
 	yield* withRetryGenerator(
 		async function* () {
+			const includeToolMessageNames = shouldUseVcpGateway(config);
 			const requestBody = {
 				model: options.model || config.advancedModel,
 				messages: convertToOpenAIMessages(
@@ -503,6 +536,7 @@ export async function* createStreamingChatCompletion(
 					options.planMode || false, // Pass planMode to use correct system prompt
 					options.vulnerabilityHuntingMode || false, // Pass vulnerabilityHuntingMode to use correct system prompt
 					options.toolSearchDisabled || false,
+					includeToolMessageNames,
 				),
 				stream: true,
 				stream_options: {include_usage: true},
@@ -562,7 +596,9 @@ export async function* createStreamingChatCompletion(
 			}
 
 			let contentBuffer = '';
-			let toolCallsBuffer: {[index: number]: any} = {};
+			const toolCallAccumulator = new ChatToolCallAccumulator(
+				options.tools?.map(tool => tool.function.name),
+			);
 			let hasToolCalls = false;
 			let usageData: UsageInfo | undefined;
 			let reasoningStarted = false; // Track if reasoning has started
@@ -632,43 +668,11 @@ export async function* createStreamingChatCompletion(
 				const deltaToolCalls = choice.delta?.tool_calls;
 				if (deltaToolCalls) {
 					hasToolCalls = true;
-					for (const deltaCall of deltaToolCalls) {
-						const index = deltaCall.index ?? 0;
-
-						if (!toolCallsBuffer[index]) {
-							toolCallsBuffer[index] = {
-								id: '',
-								type: 'function',
-								function: {
-									name: '',
-									arguments: '',
-								},
-							};
-						}
-
-						if (deltaCall.id) {
-							toolCallsBuffer[index].id = deltaCall.id;
-						}
-
-						// Yield tool call deltas for token counting
-						let deltaText = '';
-						if (deltaCall.function?.name) {
-							toolCallsBuffer[index].function.name += deltaCall.function.name;
-							deltaText += deltaCall.function.name;
-						}
-						if (deltaCall.function?.arguments) {
-							toolCallsBuffer[index].function.arguments +=
-								deltaCall.function.arguments;
-							deltaText += deltaCall.function.arguments;
-						}
-
-						// Stream the delta to frontend for real-time token counting
-						if (deltaText) {
-							yield {
-								type: 'tool_call_delta',
-								delta: deltaText,
-							};
-						}
+					for (const deltaText of toolCallAccumulator.append(deltaToolCalls)) {
+						yield {
+							type: 'tool_call_delta',
+							delta: deltaText,
+						};
 					}
 				}
 
@@ -681,10 +685,10 @@ export async function* createStreamingChatCompletion(
 			}
 
 			// If there are tool calls, yield them
-			if (hasToolCalls) {
+			if (hasToolCalls && toolCallAccumulator.hasToolCalls()) {
 				yield {
 					type: 'tool_calls',
-					tool_calls: Object.values(toolCallsBuffer),
+					tool_calls: toolCallAccumulator.finalize(),
 				};
 			}
 

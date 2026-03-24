@@ -143,7 +143,8 @@ PLACEHOLDER_FOR_WORKFLOW_SECTION
 
 **PARALLEL CALLS RULE:**
 ALWAYS pair TODO tools with action tools in same call:
-- CORRECT: todo-get + filesystem-read | todo-get + filesystem-edit | todo-update + filesystem-edit
+- CORRECT: emit separate tool calls in the same assistant turn, e.g. [todo-get, filesystem-read] | [todo-get, filesystem-edit] | [todo-update, filesystem-edit]
+- NEVER concatenate tool names into one fake name such as todo-getfilesystem-read or todo-updatefilesystem-edit
 - WRONG: Call todo-get alone, wait for result, then act
 
 **Available tools:**

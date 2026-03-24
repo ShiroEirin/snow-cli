@@ -82,6 +82,7 @@ export interface ToolResult {
 	tool_call_id: string;
 	role: 'tool';
 	content: string;
+	name?: string;
 	images?: ImageContent[]; // Support multimodal content with images
 	messageStatus?: 'pending' | 'success' | 'error'; // Message status for UI rendering
 	hookFailed?: boolean; // Indicates if a hook failed and AI flow should be interrupted
@@ -591,6 +592,10 @@ export async function executeToolCall(
 			process.stdin.setRawMode(false);
 			process.stdin.off('data', escKeyListener);
 		}
+	}
+
+	if (result && !result.name) {
+		result.name = toolCall.function.name;
 	}
 
 	return result!;

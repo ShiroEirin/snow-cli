@@ -21,6 +21,7 @@ export interface ChatMessage {
 	role: 'system' | 'user' | 'assistant' | 'tool';
 	content: string;
 	messageStatus?: 'pending' | 'success' | 'error';
+	name?: string; // Tool message name for gateways that require explicit function_response.name
 	tool_call_id?: string;
 	tool_calls?: ToolCall[];
 	images?: ImageContent[]; // 图片内容

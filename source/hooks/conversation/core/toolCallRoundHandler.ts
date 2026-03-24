@@ -11,6 +11,12 @@ import {handleAutoCompression} from './autoCompressHandler.js';
 import {buildToolResultMessages} from './toolResultDisplay.js';
 import {SubAgentUIHandler} from './subAgentMessageHandler.js';
 import {handlePendingMessages} from './pendingMessagesHandler.js';
+import {
+	buildInvalidToolCallCorrectionMessage,
+	buildInvalidToolCallUiMessage,
+	countRecentInvalidToolCallCorrections,
+	detectInvalidToolCalls,
+} from './invalidToolCallGuard.js';
 import {connectionManager} from '../../../utils/connection/ConnectionManager.js';
 import type {
 	ConversationHandlerOptions,
@@ -82,6 +88,40 @@ export async function handleToolCallRound(ctx: {
 	let {accumulatedUsage} = ctx;
 
 	const receivedToolCalls = streamResult.receivedToolCalls!;
+	const invalidToolCallIssues = detectInvalidToolCalls(
+		receivedToolCalls,
+		activeTools.map(tool => tool.function.name),
+	);
+
+	if (invalidToolCallIssues.length > 0) {
+		const repeatCount = countRecentInvalidToolCallCorrections(
+			conversationMessages,
+			invalidToolCallIssues,
+		);
+		const correctionMessage = buildInvalidToolCallCorrectionMessage(
+			invalidToolCallIssues,
+			{repeatCount},
+		);
+
+		conversationMessages.push(correctionMessage);
+		try {
+			await saveMessage(correctionMessage);
+		} catch (error) {
+			console.error('Failed to save invalid tool call correction message:', error);
+		}
+
+		setMessages(prev => [
+			...prev,
+			{
+				role: 'assistant',
+				content: buildInvalidToolCallUiMessage(invalidToolCallIssues),
+				streaming: false,
+				messageStatus: 'error',
+			},
+		]);
+
+		return {type: 'continue', accumulatedUsage};
+	}
 
 	const {parallelGroupId} = await processToolCallsAfterStream({
 		receivedToolCalls,
@@ -127,6 +167,7 @@ export async function handleToolCallRound(ctx: {
 		for (const toolCall of approvedTools) {
 			const abortedResult = {
 				role: 'tool' as const,
+				name: toolCall.function.name,
 				tool_call_id: toolCall.id,
 				content: 'Tool execution aborted by user',
 				messageStatus: 'error' as const,
@@ -198,6 +239,7 @@ export async function handleToolCallRound(ctx: {
 		for (const toolCall of receivedToolCalls) {
 			const abortedResult = {
 				role: 'tool' as const,
+				name: toolCall.function.name,
 				tool_call_id: toolCall.id,
 				content: 'Error: Tool execution aborted by user',
 				messageStatus: 'error' as const,

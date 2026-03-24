@@ -221,6 +221,22 @@ function findLatestUserTimeAnchorBeforeTarget(
 	return null;
 }
 
+function findLatestAssistantTimeAnchorBeforeTarget(
+	messages: ChatMessage[],
+	targetUserIndex: number,
+): string | null {
+	for (let index = targetUserIndex - 1; index >= 0; index--) {
+		const message = messages[index];
+		if (!message || message.role !== 'assistant') {
+			continue;
+		}
+
+		return extractLatestTimeAnchor(getTextContent(message));
+	}
+
+	return null;
+}
+
 export function hasVcpTimeSyntax(messages: ChatMessage[]): boolean {
 	return messages.some(message => {
 		if (message.role !== 'system' && message.role !== 'user') {
@@ -325,6 +341,10 @@ export function buildVcpTimeBridge(messages: ChatMessage[]): string | null {
 		!hasPlaceholder(targetUserContent) &&
 		!looksLikeTimeContinuation(targetUserContent)
 	) {
+		return null;
+	}
+
+	if (findLatestAssistantTimeAnchorBeforeTarget(messages, targetUserIndex)) {
 		return null;
 	}
 
