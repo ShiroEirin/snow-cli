@@ -198,7 +198,7 @@ test('do not bridge ::Time syntax discussion prompts', t => {
 	t.is(bridgedMessages, messages);
 });
 
-test('prefer previous user anchor even if the latest assistant reply also mentions time words', t => {
+test('do not bridge when the latest assistant reply already mentions time words', t => {
 	const messages = [
 		{
 			role: 'system' as const,
@@ -220,13 +220,7 @@ test('prefer previous user anchor even if the latest assistant reply also mentio
 	];
 
 	const bridgedMessages = applyVcpTimeSyntaxBridge(messages);
-	const lastUserMessage = bridgedMessages[bridgedMessages.length - 1];
-
-	t.true(
-		(lastUserMessage?.content || '').includes(
-			'补充时间上下文：本轮 ::Time 检索沿用上一轮用户提到的"昨天"。',
-		),
-	);
+	t.is(bridgedMessages, messages);
 });
 
 test('do not expand wide time words directly in the current user message', t => {
@@ -306,7 +300,9 @@ test('carry wide time anchors as raw phrases instead of expanding time windows',
 	t.false((lastUserMessage?.content || '').includes('近7天时间窗'));
 });
 
-test('preserve compound wide time phrases on follow-up queries', t => {
+test(
+	'do not bridge when the latest assistant reply already carries the same wide time phrase',
+	t => {
 	const messages = [
 		{
 			role: 'system' as const,
@@ -328,14 +324,9 @@ test('preserve compound wide time phrases on follow-up queries', t => {
 	];
 
 	const bridgedMessages = applyVcpTimeSyntaxBridge(messages);
-	const lastUserMessage = bridgedMessages[bridgedMessages.length - 1];
-
-	t.true(
-		(lastUserMessage?.content || '').includes(
-			'补充时间上下文：本轮 ::Time 检索沿用上一轮用户提到的"最近几天"。',
-		),
-	);
-});
+	t.is(bridgedMessages, messages);
+	},
+);
 
 test('respect allowTimeBridge=false when outbound transforms are applied', t => {
 	const messages = [
