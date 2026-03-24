@@ -3,6 +3,7 @@ import test from 'ava';
 import {
 	resolveVcpGatewayModelFetchMethod,
 	resolveVcpGatewayRequest,
+	shouldSanitizeVcpGatewayTools,
 	shouldUseVcpGateway,
 } from './gateway.js';
 
@@ -14,6 +15,50 @@ const TOOL = {
 		parameters: {
 			type: 'object',
 			properties: {},
+		},
+	},
+};
+
+const COMPLEX_TOOL = {
+	type: 'function' as const,
+	function: {
+		name: 'filesystem-read',
+		description: 'demo',
+		parameters: {
+			type: 'object',
+			properties: {
+				filePath: {
+					oneOf: [
+						{
+							type: 'string',
+						},
+						{
+							type: 'array',
+							items: {
+								type: 'string',
+							},
+						},
+						{
+							type: 'array',
+							items: {
+								type: 'object',
+								properties: {
+									path: {
+										type: 'string',
+									},
+								},
+								required: ['path'],
+							},
+						},
+					],
+					description: 'File path(s)',
+				},
+				contextLines: {
+					type: 'number',
+					default: 8,
+				},
+			},
+			required: ['filePath'],
 		},
 	},
 };
@@ -53,7 +98,7 @@ test('auto-enable VCP gateway on localhost endpoints', t => {
 	);
 });
 
-test('route anthropic-like models through chat and strip tools in gateway mode', t => {
+test('route anthropic-like models through chat and keep tools in gateway mode', t => {
 	const resolution = resolveVcpGatewayRequest(
 		{
 			baseUrl: 'http://127.0.0.1:5432/v1',
@@ -68,8 +113,64 @@ test('route anthropic-like models through chat and strip tools in gateway mode',
 
 	t.true(resolution.enabled);
 	t.is(resolution.requestMethod, 'chat');
-	t.is(resolution.tools, undefined);
-	t.is(resolution.toolChoice, undefined);
+	t.deepEqual(resolution.tools, [
+		{
+			type: 'function',
+			function: {
+				name: 'demo_tool',
+				description: 'demo',
+				parameters: {
+					type: 'object',
+					properties: {
+						_noop: {
+							type: 'string',
+							description:
+								'Optional placeholder for zero-argument tool compatibility on Anthropic-style VCP gateways. Omit during normal use.',
+						},
+					},
+					required: [],
+				},
+			},
+		},
+	]);
+	t.is(resolution.toolChoice, 'auto');
+});
+
+test('sanitize anthropic-compatible tool schemas in gateway mode', t => {
+	const resolution = resolveVcpGatewayRequest(
+		{
+			baseUrl: 'http://127.0.0.1:5432/v1',
+			requestMethod: 'anthropic',
+		},
+		{
+			model: 'claude-3-opus',
+			tools: [COMPLEX_TOOL],
+			toolChoice: 'auto',
+		},
+	);
+
+	t.deepEqual(resolution.tools, [
+		{
+			type: 'function',
+			function: {
+				name: 'filesystem-read',
+				description: 'demo',
+				parameters: {
+					type: 'object',
+					properties: {
+						filePath: {
+							type: ['string', 'array'],
+							description: 'File path(s)',
+						},
+						contextLines: {
+							type: 'number',
+						},
+					},
+					required: ['filePath'],
+				},
+			},
+		},
+	]);
 });
 
 test('keep tools for gemini-like models in gateway mode', t => {
@@ -89,6 +190,34 @@ test('keep tools for gemini-like models in gateway mode', t => {
 	t.is(resolution.requestMethod, 'chat');
 	t.deepEqual(resolution.tools, [TOOL]);
 	t.is(resolution.toolChoice, 'auto');
+});
+
+test('only sanitize tool schemas for anthropic-compatible gateway requests', t => {
+	t.true(
+		shouldSanitizeVcpGatewayTools(
+			{
+				baseUrl: 'http://localhost:8080/v1',
+				requestMethod: 'chat',
+			},
+			{
+				model: 'claude-opus-4-6',
+				tools: [TOOL],
+			},
+		),
+	);
+
+	t.false(
+		shouldSanitizeVcpGatewayTools(
+			{
+				baseUrl: 'http://localhost:8080/v1',
+				requestMethod: 'gemini',
+			},
+			{
+				model: 'gemini-2.5-pro',
+				tools: [TOOL],
+			},
+		),
+	);
 });
 
 test('force-enable gateway on remote endpoints when explicitly configured', t => {

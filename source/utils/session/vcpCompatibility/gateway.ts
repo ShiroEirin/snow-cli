@@ -1,5 +1,6 @@
 import type {ChatCompletionTool} from '../../../api/chat.js';
 import type {RequestMethod} from '../../config/apiConfig.js';
+import {sanitizeAnthropicGatewayTools} from './anthropicToolSchemaSanitizer.js';
 import type {VcpCompatibilityConfig} from './types.js';
 
 export type VcpGatewayToolChoice = 'auto' | 'none' | 'required';
@@ -20,10 +21,6 @@ export type VcpGatewayResolution = {
 const LOCALHOST_BASE_URL_PATTERN =
 	/^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/.*)?$/i;
 
-const ANTHROPIC_MODEL_PATTERN =
-	/\b(?:claude|anthropic|opus|sonnet|haiku)\b/i;
-const GEMINI_MODEL_PATTERN = /\b(?:gemini|learnlm)\b/i;
-
 function looksLikeVcpCompatibleEndpoint(baseUrl?: string): boolean {
 	if (!baseUrl) {
 		return false;
@@ -32,16 +29,19 @@ function looksLikeVcpCompatibleEndpoint(baseUrl?: string): boolean {
 	return LOCALHOST_BASE_URL_PATTERN.test(baseUrl);
 }
 
-function shouldStripToolsForModel(model?: string): boolean {
-	if (!model) {
+function looksLikeAnthropicModel(model?: string): boolean {
+	return /(claude|anthropic)/i.test(model ?? '');
+}
+
+export function shouldSanitizeVcpGatewayTools(
+	config: VcpCompatibilityConfig,
+	args: VcpGatewayRequestArgs = {},
+): boolean {
+	if (!shouldUseVcpGateway(config)) {
 		return false;
 	}
 
-	if (GEMINI_MODEL_PATTERN.test(model)) {
-		return false;
-	}
-
-	return ANTHROPIC_MODEL_PATTERN.test(model);
+	return config.requestMethod === 'anthropic' || looksLikeAnthropicModel(args.model);
 }
 
 export function shouldUseVcpGateway(config: VcpCompatibilityConfig): boolean {
@@ -73,8 +73,10 @@ export function resolveVcpGatewayRequest(
 	}
 
 	const resolvedTools =
-		args.tools && args.tools.length > 0 && !shouldStripToolsForModel(args.model)
-			? args.tools
+		args.tools && args.tools.length > 0
+			? shouldSanitizeVcpGatewayTools(config, args)
+				? sanitizeAnthropicGatewayTools(args.tools)
+				: args.tools
 			: undefined;
 
 	return {

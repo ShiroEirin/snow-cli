@@ -13,9 +13,11 @@ import {SubAgentUIHandler} from './subAgentMessageHandler.js';
 import {handlePendingMessages} from './pendingMessagesHandler.js';
 import {
 	buildInvalidToolCallCorrectionMessage,
+	buildInvalidToolCallTerminationMessage,
 	buildInvalidToolCallUiMessage,
 	countRecentInvalidToolCallCorrections,
 	detectInvalidToolCalls,
+	shouldAbortInvalidToolCallLoop,
 } from './invalidToolCallGuard.js';
 import {connectionManager} from '../../../utils/connection/ConnectionManager.js';
 import type {
@@ -98,6 +100,36 @@ export async function handleToolCallRound(ctx: {
 			conversationMessages,
 			invalidToolCallIssues,
 		);
+
+		if (shouldAbortInvalidToolCallLoop(repeatCount)) {
+			const terminationMessage = buildInvalidToolCallTerminationMessage(
+				invalidToolCallIssues,
+				{repeatCount},
+			);
+
+			conversationMessages.push(terminationMessage);
+			try {
+				await saveMessage(terminationMessage);
+			} catch (error) {
+				console.error('Failed to save invalid tool call termination message:', error);
+			}
+
+			setMessages(prev => [
+				...prev,
+				{
+					role: 'assistant',
+					content: buildInvalidToolCallUiMessage(invalidToolCallIssues, {
+						terminated: true,
+						repeatCount,
+					}),
+					streaming: false,
+					messageStatus: 'error',
+				},
+			]);
+
+			return {type: 'break', accumulatedUsage};
+		}
+
 		const correctionMessage = buildInvalidToolCallCorrectionMessage(
 			invalidToolCallIssues,
 			{repeatCount},

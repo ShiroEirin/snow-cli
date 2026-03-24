@@ -2,8 +2,11 @@ import test from 'ava';
 
 import {
 	buildInvalidToolCallCorrectionMessage,
+	buildInvalidToolCallTerminationMessage,
 	countRecentInvalidToolCallCorrections,
 	detectInvalidToolCalls,
+	MAX_INVALID_TOOL_CALL_CORRECTION_REPEATS,
+	shouldAbortInvalidToolCallLoop,
 } from './invalidToolCallGuard.js';
 import type {ToolCall} from '../../../utils/execution/toolExecutor.js';
 
@@ -93,6 +96,34 @@ test('escalates correction wording after repeated invalid tool calls', t => {
 	t.true(correctionMessage.content.includes('再次重发了同一个无效工具名'));
 	t.true(correctionMessage.content.includes('`todo-get`'));
 	t.true(correctionMessage.content.includes('`filesystem-read`'));
+});
+
+test('terminates invalid tool correction loop after too many retries', t => {
+	const terminationMessage = buildInvalidToolCallTerminationMessage(
+		[
+			{
+				toolCall: createToolCall('todo-getfilesystem-read'),
+				reason: 'concatenated_tools',
+				splitToolNames: ['todo-get', 'filesystem-read'],
+			},
+		],
+		{repeatCount: MAX_INVALID_TOOL_CALL_CORRECTION_REPEATS},
+	);
+
+	t.true(terminationMessage.content.includes('[系统工具纠偏-终止]'));
+	t.true(terminationMessage.content.includes('为避免死循环，本轮对话已终止'));
+	t.true(terminationMessage.content.includes('`tool_search`'));
+});
+
+test('aborts only when repeat count reaches configured limit', t => {
+	t.false(
+		shouldAbortInvalidToolCallLoop(
+			MAX_INVALID_TOOL_CALL_CORRECTION_REPEATS - 1,
+		),
+	);
+	t.true(
+		shouldAbortInvalidToolCallLoop(MAX_INVALID_TOOL_CALL_CORRECTION_REPEATS),
+	);
 });
 
 test('counts recent matching correction messages', t => {

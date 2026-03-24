@@ -1,6 +1,8 @@
 import type {ChatMessage} from '../../../api/chat.js';
 import type {ToolCall} from '../../../utils/execution/toolExecutor.js';
 
+export const MAX_INVALID_TOOL_CALL_CORRECTION_REPEATS = 2;
+
 export type InvalidToolCallIssue =
 	| {
 			toolCall: ToolCall;
@@ -151,8 +153,43 @@ export function buildInvalidToolCallCorrectionMessage(
 	};
 }
 
+export function buildInvalidToolCallTerminationMessage(
+	issues: InvalidToolCallIssue[],
+	options?: {
+		repeatCount?: number;
+	},
+): ChatMessage {
+	const repeatCount = options?.repeatCount ?? 0;
+	const lines = issues.map(issue => {
+		if (issue.reason === 'concatenated_tools') {
+			return `- \`${issue.toolCall.function.name}\` 不是有效工具名；它看起来把多个工具拼接到了一起：${issue.splitToolNames
+				.map(name => `\`${name}\``)
+				.join(' + ')}。`;
+		}
+
+		return `- \`${issue.toolCall.function.name}\` 不在当前已加载工具列表中。`;
+	});
+
+	return {
+		role: 'user',
+		content: [
+			'[系统工具纠偏-终止]',
+			'上一轮工具调用已被本地兼容层拦截，未执行，也不会写入工具历史。',
+			...lines,
+			`同类无效工具调用已连续重试 ${repeatCount + 1} 次，为避免死循环，本轮对话已终止。`,
+			'请重新提问，或切换模型后再试。',
+			'如果仍需继续，建议先只调用 `tool_search`，确认工具名后再逐步调用真实工具。',
+		].join('\n'),
+		messageStatus: 'error',
+	};
+}
+
 export function buildInvalidToolCallUiMessage(
 	issues: InvalidToolCallIssue[],
+	options?: {
+		terminated?: boolean;
+		repeatCount?: number;
+	},
 ): string {
 	const summary = issues
 		.map(issue => {
@@ -165,10 +202,25 @@ export function buildInvalidToolCallUiMessage(
 		})
 		.join('\n');
 
+	if (options?.terminated) {
+		return [
+			'⚠ 检测到无效工具调用反复重试，已终止当前轮对话。',
+			summary,
+			`连续失败次数: ${(options.repeatCount ?? 0) + 1}`,
+		].join('\n');
+	}
+
 	return [
 		'⚠ 检测到无效工具调用，已阻止本轮执行并要求模型重发。',
 		summary,
 	].join('\n');
+}
+
+export function shouldAbortInvalidToolCallLoop(
+	repeatCount: number,
+	maxRepeatCount: number = MAX_INVALID_TOOL_CALL_CORRECTION_REPEATS,
+): boolean {
+	return repeatCount >= maxRepeatCount;
 }
 
 export function countRecentInvalidToolCallCorrections(
