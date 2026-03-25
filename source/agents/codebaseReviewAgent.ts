@@ -8,7 +8,7 @@ import {
 	extractStreamTextContent,
 	extractStreamToolCalls,
 } from '../api/streamingUtils.js';
-import {resolveVcpGatewayRequest} from '../utils/session/vcpCompatibility/gateway.js';
+import {resolveVcpModeRequest} from '../utils/session/vcpCompatibility/mode.js';
 
 /**
  * Codebase Review Agent Service
@@ -119,12 +119,12 @@ export class CodebaseReviewAgent {
 		abortSignal?: AbortSignal,
 	): Promise<{content: string; tool_calls?: any[]}> {
 		const config = getOpenAiConfig();
-		const gatewayRequest = resolveVcpGatewayRequest(config, {
+		const resolvedRequest = resolveVcpModeRequest(config, {
 			model: this.modelName,
 			tools: [this.REVIEW_TOOL],
 		});
 		let streamGenerator: AsyncGenerator<any, void, unknown>;
-		const effectiveRequestMethod = gatewayRequest.requestMethod;
+		const effectiveRequestMethod = resolvedRequest.requestMethod;
 
 		switch (effectiveRequestMethod) {
 			case 'anthropic':
@@ -132,7 +132,7 @@ export class CodebaseReviewAgent {
 					{
 						model: this.modelName,
 						messages,
-						tools: gatewayRequest.tools,
+						tools: resolvedRequest.tools,
 						includeBuiltinSystemPrompt: false,
 						disableThinking: true,
 					},
@@ -145,7 +145,7 @@ export class CodebaseReviewAgent {
 					{
 						model: this.modelName,
 						messages,
-						tools: gatewayRequest.tools,
+						tools: resolvedRequest.tools,
 						includeBuiltinSystemPrompt: false,
 						disableThinking: true, // Agents 不使用思考功能
 					},
@@ -158,7 +158,7 @@ export class CodebaseReviewAgent {
 					{
 						model: this.modelName,
 						messages,
-						tools: gatewayRequest.tools,
+						tools: resolvedRequest.tools,
 						stream: true,
 						includeBuiltinSystemPrompt: false,
 						disableThinking: true, // Agents 不使用思考功能
@@ -173,7 +173,7 @@ export class CodebaseReviewAgent {
 					{
 						model: this.modelName,
 						messages,
-						tools: gatewayRequest.tools,
+						tools: resolvedRequest.tools,
 						stream: true,
 						includeBuiltinSystemPrompt: false,
 						disableThinking: true, // Agents 不使用思考功能

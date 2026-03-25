@@ -17,8 +17,8 @@ import {createStreamingGeminiCompletion} from '../../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../../api/anthropic.js';
 import {extractStreamTextContent} from '../../api/streamingUtils.js';
 import type {ChatMessage} from '../../api/types.js';
-import type {RequestMethod} from '../config/apiConfig.js';
-import {resolveVcpGatewayRequest} from '../session/vcpCompatibility/gateway.js';
+import type {BackendMode, RequestMethod} from '../config/apiConfig.js';
+import {resolveVcpModeRequest} from '../session/vcpCompatibility/mode.js';
 
 /** Threshold percentage to trigger compression */
 const COMPRESS_THRESHOLD = 80;
@@ -296,7 +296,7 @@ async function aiSummaryCompress(
 		maxTokens?: number;
 		configProfile?: string;
 		baseUrl?: string;
-		enableVcpGateway?: boolean;
+		backendMode?: BackendMode;
 	},
 ): Promise<ChatMessage[]> {
 	const preserveStartIndex = findRecentRoundsStartIndex(messages, keepRounds);
@@ -314,10 +314,10 @@ async function aiSummaryCompress(
 	let summary = '';
 
 	try {
-		const gatewayRequest = resolveVcpGatewayRequest(config, {
+		const resolvedRequest = resolveVcpModeRequest(config, {
 			model: config.model,
 		});
-		switch (gatewayRequest.requestMethod) {
+		switch (resolvedRequest.requestMethod) {
 			case 'gemini': {
 				for await (const chunk of createStreamingGeminiCompletion({
 					model: config.model,
@@ -479,7 +479,7 @@ export async function compressSubAgentContext(
 		maxTokens?: number;
 		configProfile?: string;
 		baseUrl?: string;
-		enableVcpGateway?: boolean;
+		backendMode?: BackendMode;
 	},
 ): Promise<SubAgentCompressionResult> {
 	const percentage = getContextPercentage(totalTokens, maxContextTokens);

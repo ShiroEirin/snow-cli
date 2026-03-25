@@ -1,6 +1,6 @@
 import {getOpenAiConfig, getCustomHeaders} from '../utils/config/apiConfig.js';
 import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
-import {resolveVcpGatewayModelFetchMethod} from '../utils/session/vcpCompatibility/gateway.js';
+import {resolveVcpModeModelFetchMethod} from '../utils/session/vcpCompatibility/mode.js';
 
 export interface Model {
 	id: string;
@@ -178,7 +178,7 @@ export async function fetchAvailableModels(): Promise<Model[]> {
 	}
 
 	const customHeaders = getCustomHeaders();
-	const requestMethod = resolveVcpGatewayModelFetchMethod(config);
+	const requestMethod = resolveVcpModeModelFetchMethod(config);
 
 	try {
 		let models: Model[];

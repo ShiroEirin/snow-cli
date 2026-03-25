@@ -1,11 +1,11 @@
 import test from 'ava';
 
 import {
-	resolveVcpGatewayModelFetchMethod,
-	resolveVcpGatewayRequest,
-	shouldSanitizeVcpGatewayTools,
-	shouldUseVcpGateway,
-} from './gateway.js';
+	isVcpModeEnabled,
+	resolveVcpModeModelFetchMethod,
+	resolveVcpModeRequest,
+	shouldSanitizeVcpModeTools,
+} from './mode.js';
 
 const TOOL = {
 	type: 'function' as const,
@@ -63,12 +63,12 @@ const COMPLEX_TOOL = {
 	},
 };
 
-test('keep original request routing when VCP gateway is disabled', t => {
-	const resolution = resolveVcpGatewayRequest(
+test('keep original request routing when VCP mode is disabled', t => {
+	const resolution = resolveVcpModeRequest(
 		{
 			baseUrl: 'https://api.example.com/v1',
 			requestMethod: 'anthropic',
-			enableVcpGateway: false,
+			backendMode: 'native',
 		},
 		{
 			model: 'claude-3-7-sonnet',
@@ -83,26 +83,35 @@ test('keep original request routing when VCP gateway is disabled', t => {
 	t.is(resolution.toolChoice, 'auto');
 });
 
-test('auto-enable VCP gateway on localhost endpoints', t => {
+test('require explicit backendMode to enable VCP mode', t => {
 	t.true(
-		shouldUseVcpGateway({
+		isVcpModeEnabled({
+			backendMode: 'vcp',
 			baseUrl: 'http://localhost:8080/v1',
 			requestMethod: 'responses',
 		}),
 	);
 	t.false(
-		shouldUseVcpGateway({
-			baseUrl: 'https://api.example.com/v1',
+		isVcpModeEnabled({
+			baseUrl: 'http://localhost:8080/v1',
+			requestMethod: 'responses',
+		}),
+	);
+	t.false(
+		isVcpModeEnabled({
+			backendMode: 'native',
+			baseUrl: 'http://localhost:8080/v1',
 			requestMethod: 'responses',
 		}),
 	);
 });
 
-test('route anthropic-like models through chat and keep tools in gateway mode', t => {
-	const resolution = resolveVcpGatewayRequest(
+test('route anthropic-like models through chat and keep tools in VCP mode', t => {
+	const resolution = resolveVcpModeRequest(
 		{
-			baseUrl: 'http://127.0.0.1:5432/v1',
+			baseUrl: 'https://vcp.example.com/v1',
 			requestMethod: 'anthropic',
+			backendMode: 'vcp',
 		},
 		{
 			model: 'claude-3-opus',
@@ -125,7 +134,7 @@ test('route anthropic-like models through chat and keep tools in gateway mode', 
 						_noop: {
 							type: 'string',
 							description:
-								'Optional placeholder for zero-argument tool compatibility on Anthropic-style VCP gateways. Omit during normal use.',
+								'Optional placeholder for zero-argument tool compatibility on Anthropic-style VCP mode endpoints. Omit during normal use.',
 						},
 					},
 					required: [],
@@ -136,11 +145,12 @@ test('route anthropic-like models through chat and keep tools in gateway mode', 
 	t.is(resolution.toolChoice, 'auto');
 });
 
-test('sanitize anthropic-compatible tool schemas in gateway mode', t => {
-	const resolution = resolveVcpGatewayRequest(
+test('sanitize anthropic-compatible tool schemas in VCP mode', t => {
+	const resolution = resolveVcpModeRequest(
 		{
-			baseUrl: 'http://127.0.0.1:5432/v1',
+			baseUrl: 'https://vcp.example.com/v1',
 			requestMethod: 'anthropic',
+			backendMode: 'vcp',
 		},
 		{
 			model: 'claude-3-opus',
@@ -173,11 +183,12 @@ test('sanitize anthropic-compatible tool schemas in gateway mode', t => {
 	]);
 });
 
-test('keep tools for gemini-like models in gateway mode', t => {
-	const resolution = resolveVcpGatewayRequest(
+test('keep tools for gemini-like models in VCP mode', t => {
+	const resolution = resolveVcpModeRequest(
 		{
-			baseUrl: 'http://localhost:8080/v1',
+			baseUrl: 'https://vcp.example.com/v1',
 			requestMethod: 'gemini',
+			backendMode: 'vcp',
 		},
 		{
 			model: 'gemini-2.5-pro',
@@ -192,11 +203,11 @@ test('keep tools for gemini-like models in gateway mode', t => {
 	t.is(resolution.toolChoice, 'auto');
 });
 
-test('only sanitize tool schemas for anthropic-compatible gateway requests', t => {
+test('only sanitize tool schemas for anthropic-compatible VCP mode requests', t => {
 	t.true(
-		shouldSanitizeVcpGatewayTools(
+		shouldSanitizeVcpModeTools(
 			{
-				baseUrl: 'http://localhost:8080/v1',
+				backendMode: 'vcp',
 				requestMethod: 'chat',
 			},
 			{
@@ -207,9 +218,9 @@ test('only sanitize tool schemas for anthropic-compatible gateway requests', t =
 	);
 
 	t.false(
-		shouldSanitizeVcpGatewayTools(
+		shouldSanitizeVcpModeTools(
 			{
-				baseUrl: 'http://localhost:8080/v1',
+				backendMode: 'vcp',
 				requestMethod: 'gemini',
 			},
 			{
@@ -220,35 +231,18 @@ test('only sanitize tool schemas for anthropic-compatible gateway requests', t =
 	);
 });
 
-test('force-enable gateway on remote endpoints when explicitly configured', t => {
-	const resolution = resolveVcpGatewayRequest(
-		{
-			baseUrl: 'https://vcp.example.com/v1',
-			requestMethod: 'responses',
-			enableVcpGateway: true,
-		},
-		{
-			model: 'gpt-5',
-		},
-	);
-
-	t.true(resolution.enabled);
-	t.is(resolution.requestMethod, 'chat');
-});
-
-test('fetch models through chat endpoint when gateway is active', t => {
+test('fetch models through chat endpoint when VCP mode is active', t => {
 	t.is(
-		resolveVcpGatewayModelFetchMethod({
-			baseUrl: 'http://localhost:8080/v1',
+		resolveVcpModeModelFetchMethod({
+			backendMode: 'vcp',
 			requestMethod: 'anthropic',
 		}),
 		'chat',
 	);
 	t.is(
-		resolveVcpGatewayModelFetchMethod({
-			baseUrl: 'https://api.example.com/v1',
+		resolveVcpModeModelFetchMethod({
+			backendMode: 'native',
 			requestMethod: 'anthropic',
-			enableVcpGateway: false,
 		}),
 		'anthropic',
 	);

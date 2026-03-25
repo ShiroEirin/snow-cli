@@ -387,10 +387,14 @@ function prepareMessagesForCompression(
 	if (customSystemPrompts && customSystemPrompts.length > 0) {
 		messages.push({role: 'system', content: customSystemPrompts.join('\n\n')});
 	} else {
-		messages.push({
-			role: 'system',
-			content: getSystemPromptForMode(false, false),
-		});
+			messages.push({
+				role: 'system',
+				content: getSystemPromptForMode(
+					false,
+					false,
+					false,
+				),
+			});
 	}
 
 	// Build conversation transcript as a single string

@@ -14,7 +14,7 @@ const STRIPPED_SCHEMA_KEYS = new Set([
 const ZERO_ARGUMENT_COMPAT_PROPERTY = {
 	type: 'string',
 	description:
-		'Optional placeholder for zero-argument tool compatibility on Anthropic-style VCP gateways. Omit during normal use.',
+		'Optional placeholder for zero-argument tool compatibility on Anthropic-style VCP mode endpoints. Omit during normal use.',
 };
 
 function isPlainObject(value: unknown): value is Record<string, any> {
@@ -258,7 +258,7 @@ export function sanitizeAnthropicToolSchema(schema: unknown): unknown {
 	return sanitizeSchemaObject(schema);
 }
 
-export function sanitizeAnthropicGatewayTools(
+export function sanitizeAnthropicVcpTools(
 	tools?: ChatCompletionTool[],
 ): ChatCompletionTool[] | undefined {
 	if (!tools || tools.length === 0) {

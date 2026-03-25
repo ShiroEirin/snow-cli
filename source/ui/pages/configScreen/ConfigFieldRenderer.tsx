@@ -27,7 +27,7 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 		setApiKey,
 		requestMethod,
 		enableVcpTimeBridge,
-		enableVcpGateway,
+		backendMode,
 		requestMethodOptions,
 		systemPromptId,
 		activeSystemPromptIds,
@@ -191,18 +191,16 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 			);
 		}
 
-		case 'enableVcpGateway': {
+		case 'backendMode': {
 			const display =
-				enableVcpGateway === true
-					? t.configScreen.vcpGatewayEnabled
-					: enableVcpGateway === false
-					? t.configScreen.vcpGatewayDisabled
-					: t.configScreen.vcpGatewayAuto;
+				backendMode === 'vcp'
+					? t.configScreen.vcpModeVcp
+					: t.configScreen.vcpModeNative;
 			return (
 				<Box key={field} flexDirection="column">
 					<Text color={activeColor}>
 						{activeIndicator}
-						{t.configScreen.vcpGateway}
+						{t.configScreen.vcpMode}
 					</Text>
 					{!isCurrentlyEditing && (
 						<Box marginLeft={3}>

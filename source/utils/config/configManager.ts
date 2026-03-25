@@ -13,6 +13,7 @@ import {
 	saveConfig,
 	DEFAULT_CONFIG,
 	DEFAULT_STREAM_IDLE_TIMEOUT_SEC,
+	resolveBackendModeWithMigration,
 	type AppConfig,
 } from './apiConfig.js';
 import {codebaseReviewAgent} from '../../agents/codebaseReviewAgent.js';
@@ -176,18 +177,34 @@ export function loadProfile(profileName: string): AppConfig | undefined {
 	try {
 		const configData = readFileSync(profilePath, 'utf8');
 		const parsedConfig = JSON.parse(configData) as Partial<AppConfig>;
+		const {
+			enableVcpGateway: legacyEnableVcpGateway,
+			...profileSnowConfig
+		} = (parsedConfig.snowcfg || {}) as Partial<AppConfig['snowcfg']> & {
+			enableVcpGateway?: boolean;
+		};
+		const backendModeResolution = resolveBackendModeWithMigration({
+			backendMode: profileSnowConfig.backendMode,
+			baseUrl: profileSnowConfig.baseUrl,
+			enableVcpGateway: legacyEnableVcpGateway,
+		});
 
 		const mergedConfig: AppConfig = {
 			...DEFAULT_CONFIG,
 			...parsedConfig,
 			snowcfg: {
 				...DEFAULT_CONFIG.snowcfg,
-				...(parsedConfig.snowcfg || {}),
+				...profileSnowConfig,
+				backendMode: backendModeResolution.backendMode,
 				streamIdleTimeoutSec: normalizeStreamIdleTimeoutSec(
-					parsedConfig.snowcfg?.streamIdleTimeoutSec,
+					profileSnowConfig.streamIdleTimeoutSec,
 				),
 			},
 		};
+
+		if (backendModeResolution.migrated) {
+			saveProfile(profileName, mergedConfig);
+		}
 
 		return mergedConfig;
 	} catch {

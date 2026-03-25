@@ -1,11 +1,14 @@
 import type {ChatMessage} from '../../../api/chat.js';
-import type {RequestMethod} from '../../config/apiConfig.js';
+import type {
+	BackendMode,
+	RequestMethod,
+} from '../../config/apiConfig.js';
 
 export type VcpCompatibilityConfig = {
 	requestMethod?: RequestMethod;
 	baseUrl?: string;
+	backendMode?: BackendMode;
 	enableVcpTimeBridge?: boolean;
-	enableVcpGateway?: boolean;
 };
 
 export type VcpOutboundTransformArgs = {

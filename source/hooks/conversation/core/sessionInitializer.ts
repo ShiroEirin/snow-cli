@@ -36,17 +36,23 @@ export async function initializeConversationSession(
 	const conversationMessages: ChatMessage[] = [
 		{
 			role: 'system',
-			content: getSystemPromptForMode(planMode, vulnerabilityHuntingMode, toolSearchDisabled),
+			content: getSystemPromptForMode(
+				planMode,
+				vulnerabilityHuntingMode,
+				toolSearchDisabled,
+			),
 		},
 	];
 
-	// If there are TODOs, add pinned context message at the front
-	if (existingTodoList && existingTodoList.todos.length > 0) {
+	// If there are renderable TODOs, add pinned context message at the front
+	if (existingTodoList) {
 		const todoContext = formatTodoContext(existingTodoList.todos);
-		conversationMessages.push({
-			role: 'user',
-			content: todoContext,
-		});
+		if (todoContext) {
+			conversationMessages.push({
+				role: 'user',
+				content: todoContext,
+			});
+		}
 	}
 
 	// Add history messages from session (includes tool_calls and tool results)

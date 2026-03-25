@@ -5,7 +5,9 @@ export function formatTodoContext(
 		status: 'pending' | 'inProgress' | 'completed';
 	}>,
 ): string {
-	if (todos.length === 0) {
+	const renderableTodos = todos.filter(todo => todo.status !== 'completed');
+
+	if (renderableTodos.length === 0) {
 		return '';
 	}
 
@@ -18,7 +20,9 @@ export function formatTodoContext(
 	const lines = [
 		'## Current TODO List',
 		'',
-		...todos.map(t => `${statusSymbol[t.status]} ${t.content} (ID: ${t.id})`),
+		...renderableTodos.map(
+			t => `${statusSymbol[t.status]} ${t.content} (ID: ${t.id})`,
+		),
 		'',
 		'**Important**: Update TODO status immediately after completing each task using todo-update tool.',
 		'',

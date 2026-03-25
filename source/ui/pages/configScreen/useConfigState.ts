@@ -5,6 +5,7 @@ import {
 	validateApiConfig,
 	getSystemPromptConfig,
 	getCustomHeadersConfig,
+	type BackendMode,
 	type RequestMethod,
 	type ApiConfig,
 } from '../../../utils/config/apiConfig.js';
@@ -32,7 +33,7 @@ import {
 	MAX_VISIBLE_FIELDS,
 	stripFocusArtifacts,
 } from './types.js';
-import {shouldUseVcpGateway} from '../../../utils/session/vcpCompatibility/gateway.js';
+import {isVcpModeEnabled} from '../../../utils/session/vcpCompatibility/mode.js';
 
 export function useConfigState() {
 	const {t} = useI18n();
@@ -53,9 +54,7 @@ export function useConfigState() {
 	const [enableVcpTimeBridge, setEnableVcpTimeBridge] = useState<
 		boolean | undefined
 	>(undefined);
-	const [enableVcpGateway, setEnableVcpGateway] = useState<
-		boolean | undefined
-	>(undefined);
+	const [backendMode, setBackendMode] = useState<BackendMode>('native');
 	const [systemPromptId, setSystemPromptId] = useState<
 		string | string[] | undefined
 	>(undefined);
@@ -155,7 +154,7 @@ export function useConfigState() {
 			'apiKey',
 			'requestMethod',
 			'enableVcpTimeBridge',
-			'enableVcpGateway',
+			'backendMode',
 			'systemPromptId',
 			'customHeadersSchemeId',
 			'enableAutoCompress',
@@ -297,7 +296,7 @@ export function useConfigState() {
 		setApiKey(config.apiKey);
 		setRequestMethod(config.requestMethod || 'chat');
 		setEnableVcpTimeBridge(config.enableVcpTimeBridge);
-		setEnableVcpGateway(config.enableVcpGateway);
+		setBackendMode(config.backendMode || 'native');
 		setSystemPromptId(config.systemPromptId);
 		setCustomHeadersSchemeId(config.customHeadersSchemeId);
 		setAnthropicBeta(config.anthropicBeta || false);
@@ -354,7 +353,7 @@ export function useConfigState() {
 			baseUrl,
 			apiKey,
 			requestMethod,
-			enableVcpGateway,
+			backendMode,
 		};
 		await updateOpenAiConfig(tempConfig);
 
@@ -448,13 +447,9 @@ export function useConfigState() {
 
 	const getRequestUrl = () => {
 		const resolvedBaseUrl = getResolvedBaseUrl(requestMethod);
-		const gatewayEnabled = shouldUseVcpGateway({
-			baseUrl,
-			requestMethod,
-			enableVcpGateway,
-		});
+		const vcpModeEnabled = isVcpModeEnabled({backendMode});
 
-		if (gatewayEnabled) {
+		if (vcpModeEnabled) {
 			return `${resolvedBaseUrl}/chat/completions`;
 		}
 
@@ -569,7 +564,7 @@ export function useConfigState() {
 					apiKey,
 					requestMethod,
 					enableVcpTimeBridge,
-					enableVcpGateway,
+					backendMode,
 					systemPromptId,
 					customHeadersSchemeId,
 					anthropicBeta,
@@ -699,7 +694,7 @@ export function useConfigState() {
 				apiKey,
 				requestMethod,
 				enableVcpTimeBridge,
-				enableVcpGateway,
+				backendMode,
 				systemPromptId,
 				customHeadersSchemeId,
 				anthropicBeta,
@@ -759,7 +754,7 @@ export function useConfigState() {
 						apiKey,
 						requestMethod,
 						enableVcpTimeBridge,
-						enableVcpGateway,
+						backendMode,
 						systemPromptId,
 						customHeadersSchemeId,
 						anthropicBeta,
@@ -833,8 +828,8 @@ export function useConfigState() {
 		setRequestMethod,
 		enableVcpTimeBridge,
 		setEnableVcpTimeBridge,
-		enableVcpGateway,
-		setEnableVcpGateway,
+		backendMode,
+		setBackendMode,
 		systemPromptId,
 		setSystemPromptId,
 		customHeadersSchemeId,

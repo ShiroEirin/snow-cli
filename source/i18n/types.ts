@@ -161,10 +161,9 @@ export type TranslationKeys = {
 		vcpTimeBridgeAuto: string;
 		vcpTimeBridgeEnabled: string;
 		vcpTimeBridgeDisabled: string;
-		vcpGateway: string;
-		vcpGatewayAuto: string;
-		vcpGatewayEnabled: string;
-		vcpGatewayDisabled: string;
+		vcpMode: string;
+		vcpModeNative: string;
+		vcpModeVcp: string;
 		anthropicBeta: string;
 		anthropicCacheTTL: string;
 		anthropicCacheTTL5m: string;

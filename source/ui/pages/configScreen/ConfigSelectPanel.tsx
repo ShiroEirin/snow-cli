@@ -2,7 +2,10 @@ import React from 'react';
 import {Box, Text} from 'ink';
 import {Alert} from '@inkjs/ui';
 import ScrollableSelectInput from '../../components/common/ScrollableSelectInput.js';
-import type {RequestMethod} from '../../../utils/config/apiConfig.js';
+import type {
+	BackendMode,
+	RequestMethod,
+} from '../../../utils/config/apiConfig.js';
 import {switchProfile} from '../../../utils/config/configManager.js';
 import type {ConfigStateReturn} from './useConfigState.js';
 
@@ -20,8 +23,8 @@ export default function ConfigSelectPanel({state}: Props) {
 		setRequestMethod,
 		enableVcpTimeBridge,
 		setEnableVcpTimeBridge,
-		enableVcpGateway,
-		setEnableVcpGateway,
+		backendMode,
+		setBackendMode,
 		requestMethodOptions,
 		searchTerm,
 		thinkingMode,
@@ -48,8 +51,8 @@ export default function ConfigSelectPanel({state}: Props) {
 				return t.configScreen.requestMethod.replace(':', '');
 			case 'enableVcpTimeBridge':
 				return t.configScreen.vcpTimeBridge.replace(':', '');
-			case 'enableVcpGateway':
-				return t.configScreen.vcpGateway.replace(':', '');
+			case 'backendMode':
+				return t.configScreen.vcpMode.replace(':', '');
 			case 'advancedModel':
 				return t.configScreen.advancedModel.replace(':', '');
 			case 'basicModel':
@@ -127,38 +130,22 @@ export default function ConfigSelectPanel({state}: Props) {
 						}}
 					/>
 				)}
-				{currentField === 'enableVcpGateway' && (
+				{currentField === 'backendMode' && (
 					<ScrollableSelectInput
 						items={[
 							{
-								label: t.configScreen.vcpGatewayAuto,
-								value: 'auto',
+								label: t.configScreen.vcpModeNative,
+								value: 'native',
 							},
 							{
-								label: t.configScreen.vcpGatewayEnabled,
-								value: 'enabled',
-							},
-							{
-								label: t.configScreen.vcpGatewayDisabled,
-								value: 'disabled',
+								label: t.configScreen.vcpModeVcp,
+								value: 'vcp',
 							},
 						]}
-						initialIndex={
-							enableVcpGateway === true
-								? 1
-								: enableVcpGateway === false
-								? 2
-								: 0
-						}
+						initialIndex={backendMode === 'vcp' ? 1 : 0}
 						isFocused={true}
 						onSelect={item => {
-							if (item.value === 'enabled') {
-								setEnableVcpGateway(true);
-							} else if (item.value === 'disabled') {
-								setEnableVcpGateway(false);
-							} else {
-								setEnableVcpGateway(undefined);
-							}
+							setBackendMode(item.value as BackendMode);
 							setIsEditing(false);
 						}}
 					/>

@@ -7,7 +7,7 @@ import {createStreamingChatCompletion, type ChatMessage} from '../api/chat.js';
 import {createStreamingResponse} from '../api/responses.js';
 import {createStreamingGeminiCompletion} from '../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../api/anthropic.js';
-import {resolveVcpGatewayRequest} from '../utils/session/vcpCompatibility/gateway.js';
+import {resolveVcpModeRequest} from '../utils/session/vcpCompatibility/mode.js';
 import {execSync, spawnSync} from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -443,12 +443,12 @@ Please provide your review in a clear, structured format.`;
 				...messages,
 			];
 		}
-		const gatewayRequest = resolveVcpGatewayRequest(getOpenAiConfig(), {
+		const resolvedRequest = resolveVcpModeRequest(getOpenAiConfig(), {
 			model: this.modelName,
 		});
 
 		// Route to appropriate streaming API based on request method
-		switch (gatewayRequest.requestMethod) {
+		switch (resolvedRequest.requestMethod) {
 			case 'anthropic':
 				yield* createStreamingAnthropicCompletion(
 					{

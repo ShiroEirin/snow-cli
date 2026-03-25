@@ -15,7 +15,7 @@ import {createStreamingResponse} from '../../api/responses.js';
 import {createStreamingGeminiCompletion} from '../../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../../api/anthropic.js';
 import {extractStreamTextContent} from '../../api/streamingUtils.js';
-import {resolveVcpGatewayRequest} from '../session/vcpCompatibility/gateway.js';
+import {resolveVcpModeRequest} from '../session/vcpCompatibility/mode.js';
 import {parseJsonWithFix} from '../core/retryUtils.js';
 
 // Skill template metadata
@@ -223,12 +223,12 @@ async function callModelForText(
 	let stream:
 		| AsyncGenerator<any, void, unknown>
 		| AsyncGenerator<{type?: string; content?: string}, void, unknown>;
-	const gatewayRequest = resolveVcpGatewayRequest(config, {
+	const resolvedRequest = resolveVcpModeRequest(config, {
 		model,
 		toolChoice: 'none',
 	});
 
-	switch (gatewayRequest.requestMethod) {
+	switch (resolvedRequest.requestMethod) {
 		case 'anthropic':
 			stream = createStreamingAnthropicCompletion(
 				{
@@ -257,7 +257,7 @@ async function callModelForText(
 					model,
 					messages,
 					includeBuiltinSystemPrompt: false,
-					tool_choice: gatewayRequest.toolChoice,
+					tool_choice: resolvedRequest.toolChoice,
 				},
 				abortSignal,
 			);

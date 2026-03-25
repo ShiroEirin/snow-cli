@@ -5,7 +5,7 @@ import {createStreamingResponse} from '../api/responses.js';
 import {createStreamingGeminiCompletion} from '../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../api/anthropic.js';
 import {extractStreamTextContent} from '../api/streamingUtils.js';
-import {resolveVcpGatewayRequest} from '../utils/session/vcpCompatibility/gateway.js';
+import {resolveVcpModeRequest} from '../utils/session/vcpCompatibility/mode.js';
 
 /**
  * Summary Agent Service
@@ -84,13 +84,13 @@ export class SummaryAgent {
 		abortSignal?: AbortSignal,
 	): Promise<string> {
 		const config = getOpenAiConfig();
-		const gatewayRequest = resolveVcpGatewayRequest(config, {
+		const resolvedRequest = resolveVcpModeRequest(config, {
 			model: this.modelName,
 		});
 		let streamGenerator: AsyncGenerator<any, void, unknown>;
 
 		// Route to appropriate streaming API based on request method
-		switch (gatewayRequest.requestMethod) {
+		switch (resolvedRequest.requestMethod) {
 			case 'anthropic':
 				streamGenerator = createStreamingAnthropicCompletion(
 					{

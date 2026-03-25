@@ -1,11 +1,11 @@
 import test from 'ava';
 
 import {
-	sanitizeAnthropicGatewayTools,
+	sanitizeAnthropicVcpTools,
 	sanitizeAnthropicToolSchema,
 } from './anthropicToolSchemaSanitizer.js';
 
-test('strip default annotations from anthropic gateway schema', t => {
+test('strip default annotations from anthropic VCP mode schema', t => {
 	const sanitized = sanitizeAnthropicToolSchema({
 		type: 'object',
 		properties: {
@@ -60,7 +60,7 @@ test('inject zero-argument compatibility placeholder for empty object schemas', 
 			_noop: {
 				type: 'string',
 				description:
-					'Optional placeholder for zero-argument tool compatibility on Anthropic-style VCP gateways. Omit during normal use.',
+					'Optional placeholder for zero-argument tool compatibility on Anthropic-style VCP mode endpoints. Omit during normal use.',
 			},
 		},
 		required: [],
@@ -144,8 +144,8 @@ test('drop ambiguous array item unions while keeping broad type support', t => {
 	});
 });
 
-test('sanitize tool arrays recursively for anthropic gateway', t => {
-	const sanitized = sanitizeAnthropicGatewayTools([
+test('sanitize tool arrays recursively for anthropic VCP mode requests', t => {
+	const sanitized = sanitizeAnthropicVcpTools([
 		{
 			type: 'function',
 			function: {

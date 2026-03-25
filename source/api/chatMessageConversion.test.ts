@@ -2,7 +2,7 @@ import test from 'ava';
 import type {ChatMessage} from './types.js';
 import {convertToOpenAIMessages} from './chat.js';
 
-test('convertToOpenAIMessages attaches tool message names for VCP gateway requests', t => {
+test('convertToOpenAIMessages attaches tool message names for VCP mode requests', t => {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',
@@ -60,7 +60,7 @@ test('convertToOpenAIMessages attaches tool message names for VCP gateway reques
 	);
 });
 
-test('convertToOpenAIMessages keeps tool messages unchanged when VCP gateway mode is off', t => {
+test('convertToOpenAIMessages keeps tool messages unchanged when VCP mode is off', t => {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',

@@ -5,7 +5,7 @@ import {createStreamingResponse} from '../api/responses.js';
 import {createStreamingGeminiCompletion} from '../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../api/anthropic.js';
 import {extractStreamTextContent} from '../api/streamingUtils.js';
-import {resolveVcpGatewayRequest} from '../utils/session/vcpCompatibility/gateway.js';
+import {resolveVcpModeRequest} from '../utils/session/vcpCompatibility/mode.js';
 
 /**
  * Compact Agent Service
@@ -93,7 +93,7 @@ export class CompactAgent {
 
 		// Temporarily override advancedModel with basicModel
 		const originalAdvancedModel = config.advancedModel;
-		const gatewayRequest = resolveVcpGatewayRequest(config, {
+		const resolvedRequest = resolveVcpModeRequest(config, {
 			model: this.modelName,
 		});
 
@@ -104,7 +104,7 @@ export class CompactAgent {
 			let streamGenerator: AsyncGenerator<any, void, unknown>;
 
 			// Route to appropriate streaming API based on request method (follows main flow exactly)
-			switch (gatewayRequest.requestMethod) {
+			switch (resolvedRequest.requestMethod) {
 				case 'anthropic':
 					streamGenerator = createStreamingAnthropicCompletion(
 						{
@@ -231,13 +231,13 @@ export class CompactAgent {
 					error: error.message,
 					stack: error.stack,
 					name: error.name,
-					requestMethod: gatewayRequest.requestMethod,
+					requestMethod: resolvedRequest.requestMethod,
 					modelName: this.modelName,
 				});
 			} else {
 				logger.error('Compact agent: Unknown API error:', {
 					error,
-					requestMethod: gatewayRequest.requestMethod,
+					requestMethod: resolvedRequest.requestMethod,
 					modelName: this.modelName,
 				});
 			}

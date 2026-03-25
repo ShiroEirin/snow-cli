@@ -9,7 +9,7 @@ import {createStreamingResponse} from '../../api/responses.js';
 import {createStreamingGeminiCompletion} from '../../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../../api/anthropic.js';
 import {extractStreamTextContent} from '../../api/streamingUtils.js';
-import {resolveVcpGatewayRequest} from '../session/vcpCompatibility/gateway.js';
+import {resolveVcpModeRequest} from '../session/vcpCompatibility/mode.js';
 import {getSystemEnvironmentInfo} from '../../prompt/shared/promptHelpers.js';
 import fs from 'fs';
 import path from 'path';
@@ -555,9 +555,9 @@ Output ONLY the generated prompt text, nothing else.`;
 	];
 
 	let stream: AsyncGenerator<any, void, unknown>;
-	const gatewayRequest = resolveVcpGatewayRequest(config, {model});
+	const resolvedRequest = resolveVcpModeRequest(config, {model});
 
-	switch (gatewayRequest.requestMethod) {
+	switch (resolvedRequest.requestMethod) {
 		case 'anthropic':
 			stream = createStreamingAnthropicCompletion(
 				{

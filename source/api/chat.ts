@@ -23,7 +23,7 @@ import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {getVersionHeader} from '../utils/core/version.js';
 import {ChatToolCallAccumulator} from './chatToolCallAccumulator.js';
-import {shouldUseVcpGateway} from '../utils/session/vcpCompatibility/gateway.js';
+import {isVcpModeEnabled} from '../utils/session/vcpCompatibility/mode.js';
 
 export type {
 	ChatMessage,
@@ -268,7 +268,11 @@ export function convertToOpenAIMessages(
 				} as ChatCompletionMessageParam,
 				{
 					role: 'user',
-					content: getSystemPromptForMode(planMode, vulnerabilityHuntingMode, toolSearchDisabled),
+					content: getSystemPromptForMode(
+						planMode,
+						vulnerabilityHuntingMode,
+						toolSearchDisabled,
+					),
 				} as ChatCompletionMessageParam,
 				...result,
 			];
@@ -290,7 +294,11 @@ export function convertToOpenAIMessages(
 		result = [
 			{
 				role: 'system',
-				content: getSystemPromptForMode(planMode, vulnerabilityHuntingMode, toolSearchDisabled),
+				content: getSystemPromptForMode(
+					planMode,
+					vulnerabilityHuntingMode,
+					toolSearchDisabled,
+				),
 			} as ChatCompletionMessageParam,
 			...result,
 		];
@@ -526,7 +534,7 @@ export async function* createStreamingChatCompletion(
 	// 使用重试包装生成器
 	yield* withRetryGenerator(
 		async function* () {
-			const includeToolMessageNames = shouldUseVcpGateway(config);
+			const includeToolMessageNames = isVcpModeEnabled(config);
 			const requestBody = {
 				model: options.model || config.advancedModel,
 				messages: convertToOpenAIMessages(
