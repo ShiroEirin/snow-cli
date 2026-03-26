@@ -560,6 +560,8 @@ export type TranslationKeys = {
 			vulnerabilityHunting: string;
 			autoFormat: string;
 			toolSearch: string;
+			hybridCompress: string;
+			team: string;
 			worktree: string; // Git branch management panel
 			diff: string;
 			connect: string;
@@ -1024,6 +1026,8 @@ export type TranslationKeys = {
 		planModeActive: string;
 		vulnerabilityHuntingModeActive: string;
 		toolSearchEnabled: string;
+		hybridCompressEnabled: string;
+		teamModeActive: string;
 		tokens: string;
 		cached: string;
 		newCache: string;
@@ -1245,6 +1249,7 @@ export type TranslationKeys = {
 		filesCount: string;
 		filesCountWithSelection: string;
 		notebookCount: string;
+		teamCount: string;
 		question: string;
 		conversationOnly: string;
 		conversationAndFiles: string;
@@ -1385,6 +1390,8 @@ export type TranslationKeys = {
 		scrollHint: string;
 		moreAbove: string;
 		moreBelow: string;
+		toolsListTitle: string;
+		toolsNavigationHint: string;
 	};
 	// Running Agents Panel
 	runningAgentsPanel: {
@@ -1395,6 +1402,8 @@ export type TranslationKeys = {
 		scrollHint: string;
 		moreAbove: string;
 		moreBelow: string;
+		subAgentLabel: string;
+		teammateLabel: string;
 	};
 	sseServer: {
 		started: string;

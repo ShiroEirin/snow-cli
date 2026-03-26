@@ -601,6 +601,9 @@ export const en: TranslationKeys = {
 				'Auto-formatting switch after file editing. Usage: /auto-format [on|off|status]',
 			toolSearch:
 				'Toggle Tool Search (progressive tool loading). Enabled by default to save context',
+			hybridCompress:
+				'Toggle Hybrid Compress mode (AI summary + smart truncation for /compact and auto-compress)',
+			team: 'Toggle Agent Team mode - orchestrate multiple agents working together in independent Git worktrees',
 			worktree:
 				'Open Git branch management panel for switching, creating and deleting branches',
 			diff: 'Review file changes from a conversation in IDE diff view',
@@ -1083,6 +1086,10 @@ export const en: TranslationKeys = {
 		vulnerabilityHuntingModeActive:
 			'⍨ Vulnerability Hunting Mode Active - Focused on vulnerability discovery and security analysis',
 		toolSearchEnabled: '♾︎ Tool Search ON - Tools loaded on demand',
+		hybridCompressEnabled:
+			'⇌ Hybrid Compress ON - AI summary + smart truncation',
+		teamModeActive:
+			'⚑ Agent Team Mode Active - Orchestrating multiple agents with independent worktrees',
 		tokens: ' tokens',
 		cached: 'cached',
 		newCache: 'new cache',
@@ -1291,7 +1298,7 @@ export const en: TranslationKeys = {
 		pressEnterToSubmit: 'Press Enter to submit',
 		confirmed: 'Confirmed',
 		approveOnce: 'Approve (once)',
-		alwaysApprove: 'Always approve this tool',
+		alwaysApprove: 'Approve (this project will no longer ask about this tool)',
 		rejectWithReply: 'Reject with reply',
 		rejectEndSession: 'Reject (end session)',
 	},
@@ -1330,6 +1337,8 @@ export const en: TranslationKeys = {
 		filesCountWithSelection:
 			'{count} file(s) will be rolled back ({selected}/{total} selected)',
 		notebookCount: '{count} notebook(s) will also be rolled back',
+		teamCount:
+			'{count} team member(s) will be terminated and worktrees cleaned up',
 		question: 'Choose rollback mode:',
 		conversationOnly: 'Rollback conversation only',
 		conversationAndFiles: 'Rollback conversation + files',
@@ -1463,7 +1472,8 @@ export const en: TranslationKeys = {
 		statusExternal: '(External)',
 		statusDisabled: '(Disabled)',
 		statusFailed: 'Failed',
-		navigationHint: '↑↓ Navigate • Enter Reconnect • Tab Toggle Service',
+		navigationHint:
+			'↑↓ Navigate • Enter Reconnect • Tab Toggle Service • V View Tools',
 		pleaseWait: 'Please wait...',
 		skillsTitle: 'Skills',
 		noSkills: 'No skills available',
@@ -1472,15 +1482,19 @@ export const en: TranslationKeys = {
 		scrollHint: '↑↓ to scroll',
 		moreAbove: '{count} more above',
 		moreBelow: '{count} more below',
+		toolsListTitle: '{service} - Tool List',
+		toolsNavigationHint: '↑↓ Navigate • ESC Back',
 	},
 	runningAgentsPanel: {
-		title: 'Running Sub-Agents',
-		noAgentsRunning: 'No sub-agents are currently running',
+		title: 'Running Agents',
+		noAgentsRunning: 'No agents or teammates are currently running',
 		keyboardHint: '(Space: toggle · Enter: confirm · Esc: cancel)',
 		selected: 'Selected: {count}',
 		scrollHint: '↑↓ to scroll',
 		moreAbove: '{count} more above',
 		moreBelow: '{count} more below',
+		subAgentLabel: '[Agent]',
+		teammateLabel: '[Team]',
 	},
 	sseServer: {
 		started: '✓ SSE Server Started',

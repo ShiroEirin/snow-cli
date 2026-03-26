@@ -16,6 +16,7 @@ export async function initializeConversationSession(
 	planMode: boolean,
 	vulnerabilityHuntingMode: boolean,
 	toolSearchDisabled = false,
+	teamMode = false,
 ): Promise<{
 	conversationMessages: ChatMessage[];
 	currentSession: any;
@@ -40,6 +41,7 @@ export async function initializeConversationSession(
 				planMode,
 				vulnerabilityHuntingMode,
 				toolSearchDisabled,
+				teamMode,
 			),
 		},
 	];

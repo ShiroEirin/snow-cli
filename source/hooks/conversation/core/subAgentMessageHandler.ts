@@ -7,6 +7,68 @@ import {
 	type VcpStreamingSuppressionState,
 } from '../../../utils/session/vcpCompatibility/display.js';
 
+// ── Module-level store: per-teammate streaming data (useSyncExternalStore compatible) ──
+
+export interface TeammateCtxUsage {
+	percentage: number;
+	inputTokens: number;
+	maxTokens: number;
+}
+
+export interface TeammateStreamInfo {
+	agentId: string;
+	agentName: string;
+	tokenCount: number;
+	isReasoning: boolean;
+	ctxUsage?: TeammateCtxUsage;
+}
+
+const _teammateStreamMap = new Map<string, TeammateStreamInfo>();
+const _teammateStreamListeners = new Set<() => void>();
+let _teammateStreamSnapshot: TeammateStreamInfo[] = [];
+let _notifyTimer: ReturnType<typeof setTimeout> | null = null;
+const _NOTIFY_THROTTLE_MS = 200;
+
+function notifyTeammateStreamListeners(): void {
+	for (const listener of _teammateStreamListeners) {
+		try { listener(); } catch { /* noop */ }
+	}
+}
+
+function rebuildTeammateSnapshot(): void {
+	_teammateStreamSnapshot = Array.from(_teammateStreamMap.values());
+	if (!_notifyTimer) {
+		_notifyTimer = setTimeout(() => {
+			_notifyTimer = null;
+			notifyTeammateStreamListeners();
+		}, _NOTIFY_THROTTLE_MS);
+	}
+}
+
+function setTeammateStreamEntry(agentId: string, agentName: string, tokenCount: number, isReasoning: boolean, ctxUsage?: TeammateCtxUsage): void {
+	const prev = _teammateStreamMap.get(agentId);
+	if (prev && prev.tokenCount === tokenCount && prev.isReasoning === isReasoning && prev.ctxUsage?.percentage === ctxUsage?.percentage) return;
+	_teammateStreamMap.set(agentId, {agentId, agentName, tokenCount, isReasoning, ctxUsage});
+	rebuildTeammateSnapshot();
+}
+
+function removeTeammateStreamEntry(agentId: string): void {
+	if (_teammateStreamMap.delete(agentId)) {
+		rebuildTeammateSnapshot();
+	}
+}
+
+export function subscribeTeammateStream(listener: () => void): () => void {
+	_teammateStreamListeners.add(listener);
+	return () => { _teammateStreamListeners.delete(listener); };
+}
+
+export function getTeammateStreamSnapshot(): TeammateStreamInfo[] {
+	return _teammateStreamSnapshot;
+}
+
+// ── Types ──
+
 type CtxUsage = {percentage: number; inputTokens: number; maxTokens: number};
 
 type StreamState = {
@@ -54,7 +116,13 @@ export class SubAgentUIHandler {
 	readonly latestCtxUsage: Record<string, CtxUsage> = {};
 	private readonly streamStates: Record<string, StreamState> = {};
 	private readonly activeReasoningAgents = new Set<string>();
+	private readonly agentNameMap: Record<string, string> = {};
 	private readonly FLUSH_INTERVAL = 100;
+
+	/** Sequential display queue: only one agent streams visible content at a time */
+	private activeDisplayAgentId: string | null = null;
+	private readonly displayQueue: string[] = [];
+	private readonly bufferedStreamLines = new Map<string, Message[]>();
 
 	constructor(
 		private encoder: any,
@@ -70,6 +138,10 @@ export class SubAgentUIHandler {
 	 */
 	handleMessage(prev: Message[], subAgentMessage: SubAgentMessage): Message[] {
 		const {message} = subAgentMessage;
+
+		if (subAgentMessage.agentId.startsWith('teammate-')) {
+			this.agentNameMap[subAgentMessage.agentId] = subAgentMessage.agentName;
+		}
 
 		switch (message.type) {
 			case 'context_usage':
@@ -135,14 +207,25 @@ export class SubAgentUIHandler {
 	private clearStreamState(agentId: string): void {
 		delete this.streamStates[agentId];
 		this.updateGlobalTokenCount();
+		removeTeammateStreamEntry(agentId);
 	}
 
 	private updateGlobalTokenCount(): void {
-		const total = Object.values(this.streamStates).reduce(
-			(sum, state) => sum + state.tokenCount,
-			0,
-		);
-		this.setStreamTokenCount(total);
+		let leadTotal = 0;
+		for (const [agentId, state] of Object.entries(this.streamStates)) {
+			if (agentId.startsWith('teammate-')) {
+				setTeammateStreamEntry(
+					agentId,
+					this.agentNameMap[agentId] || agentId,
+					state.tokenCount,
+					this.activeReasoningAgents.has(agentId),
+					this.latestCtxUsage[agentId] as TeammateCtxUsage | undefined,
+				);
+			} else {
+				leadTotal += state.tokenCount;
+			}
+		}
+		this.setStreamTokenCount(leadTotal);
 	}
 
 	private setAgentReasoning(agentId: string, isReasoning: boolean): void {
@@ -152,6 +235,19 @@ export class SubAgentUIHandler {
 			this.activeReasoningAgents.delete(agentId);
 		}
 		this.setIsReasoning?.(this.activeReasoningAgents.size > 0);
+
+		if (agentId.startsWith('teammate-')) {
+			const state = this.streamStates[agentId];
+			if (state) {
+				setTeammateStreamEntry(
+					agentId,
+					this.agentNameMap[agentId] || agentId,
+					state.tokenCount,
+					isReasoning,
+					this.latestCtxUsage[agentId] as TeammateCtxUsage | undefined,
+				);
+			}
+		}
 	}
 
 	private addTokens(agentId: string, text: string): void {
@@ -181,9 +277,7 @@ export class SubAgentUIHandler {
 		content: string,
 		isThinking: boolean,
 	): void {
-		if (!this.streamingEnabled) {
-			return;
-		}
+		if (!this.streamingEnabled) return;
 
 		const isFirst = state.isFirstStreamLine;
 		const isFirstContent = !isThinking && !state.hasStartedContent;
@@ -191,7 +285,7 @@ export class SubAgentUIHandler {
 		if (isFirstContent) state.hasStartedContent = true;
 		state.hasEmittedStreamLine = true;
 
-		lines.push({
+		const msg: Message = {
 			role: 'assistant' as const,
 			content,
 			streamingLine: true,
@@ -204,7 +298,76 @@ export class SubAgentUIHandler {
 				isComplete: false,
 			},
 			subAgentInternal: true,
+		};
+
+		const agentId = subAgentMessage.agentId;
+
+		if (this.activeDisplayAgentId === null) {
+			this.activeDisplayAgentId = agentId;
+			this.emitAgentTitle(lines, subAgentMessage);
+			lines.push(msg);
+		} else if (agentId === this.activeDisplayAgentId) {
+			lines.push(msg);
+		} else {
+			if (!this.displayQueue.includes(agentId)) {
+				this.displayQueue.push(agentId);
+			}
+			const buf = this.bufferedStreamLines.get(agentId) || [];
+			buf.push(msg);
+			this.bufferedStreamLines.set(agentId, buf);
+		}
+	}
+
+	private emitAgentTitle(lines: Message[], subAgentMessage: SubAgentMessage): void {
+		const name = subAgentMessage.agentName;
+		lines.push({
+			role: 'subagent' as const,
+			content: `\x1b[36m⚇ ${name}\x1b[0m`,
+			streaming: false,
+			subAgent: {
+				agentId: subAgentMessage.agentId,
+				agentName: name,
+				isComplete: false,
+			},
+			subAgentInternal: true,
 		});
+	}
+
+	/**
+	 * When the active display agent finishes, flush the next queued agent(s).
+	 * If the next agent already completed, flush its buffer entirely and move on.
+	 */
+	private flushNextQueuedAgent(): Message[] {
+		const flushed: Message[] = [];
+
+		while (this.displayQueue.length > 0) {
+			const nextId = this.displayQueue.shift()!;
+			this.activeDisplayAgentId = nextId;
+			const agentName = this.agentNameMap[nextId] || nextId;
+
+			flushed.push({
+				role: 'subagent' as const,
+				content: `\x1b[36m⚇ ${agentName}\x1b[0m`,
+				streaming: false,
+				subAgent: {agentId: nextId, agentName, isComplete: false},
+				subAgentInternal: true,
+			});
+
+			const buffered = this.bufferedStreamLines.get(nextId) || [];
+			flushed.push(...buffered);
+			this.bufferedStreamLines.delete(nextId);
+
+			// If this agent is still streaming, stop here — future content will flow normally
+			if (this.streamStates[nextId]) break;
+		}
+
+		if (this.displayQueue.length === 0 &&
+			this.activeDisplayAgentId &&
+			!this.streamStates[this.activeDisplayAgentId]) {
+			this.activeDisplayAgentId = null;
+		}
+
+		return flushed;
 	}
 
 	private cleanThinkingContent(content: string): string {
@@ -538,12 +701,23 @@ export class SubAgentUIHandler {
 		prev: Message[],
 		subAgentMessage: SubAgentMessage,
 	): Message[] {
-		const ctxData = {
+		const ctxData: TeammateCtxUsage = {
 			percentage: subAgentMessage.message.percentage,
 			inputTokens: subAgentMessage.message.inputTokens,
 			maxTokens: subAgentMessage.message.maxTokens,
 		};
 		this.latestCtxUsage[subAgentMessage.agentId] = ctxData;
+
+		if (subAgentMessage.agentId.startsWith('teammate-')) {
+			const state = this.streamStates[subAgentMessage.agentId];
+			setTeammateStreamEntry(
+				subAgentMessage.agentId,
+				this.agentNameMap[subAgentMessage.agentId] || subAgentMessage.agentName,
+				state?.tokenCount ?? 0,
+				this.activeReasoningAgents.has(subAgentMessage.agentId),
+				ctxData,
+			);
+		}
 
 		let targetIndex = -1;
 		for (let i = prev.length - 1; i >= 0; i--) {
@@ -991,14 +1165,14 @@ export class SubAgentUIHandler {
 						},
 					};
 				} else if (
-					resultData.batchResults &&
-					Array.isArray(resultData.batchResults)
+					resultData.results &&
+					Array.isArray(resultData.results)
 				) {
 					fileToolData = {
 						name: msg.tool_name,
 						arguments: {
 							isBatch: true,
-							batchResults: resultData.batchResults,
+							batchResults: resultData.results,
 						},
 					};
 				}
@@ -1091,6 +1265,13 @@ export class SubAgentUIHandler {
 		this.flushRemainingContentBuffers(state, finalLines, subAgentMessage);
 		this.persistCompletedResponse(state, subAgentMessage);
 		this.clearStreamState(subAgentMessage.agentId);
+
+		// Display queue: when the active agent finishes, flush next queued agent(s)
+		if (subAgentMessage.agentId === this.activeDisplayAgentId) {
+			const flushed = this.flushNextQueuedAgent();
+			if (flushed.length > 0) finalLines.push(...flushed);
+		}
+
 		return finalLines.length > 0 ? [...prev, ...finalLines] : prev;
 	}
 }

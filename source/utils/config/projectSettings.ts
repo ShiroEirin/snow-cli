@@ -7,6 +7,11 @@ export interface ProjectSettings {
 	autoFormatEnabled?: boolean;
 	subAgentMaxSpawnDepth?: number;
 	fileListDisplayMode?: 'list' | 'tree';
+	yoloMode?: boolean;
+	planMode?: boolean;
+	vulnerabilityHuntingMode?: boolean;
+	hybridCompressEnabled?: boolean;
+	teamMode?: boolean;
 }
 
 const PROJECT_SNOW_DIR = path.join(process.cwd(), '.snow');
@@ -107,5 +112,60 @@ export function getFileListDisplayMode(): 'list' | 'tree' {
 export function setFileListDisplayMode(mode: 'list' | 'tree'): void {
 	const settings = loadSettings();
 	settings.fileListDisplayMode = mode;
+	saveSettings(settings);
+}
+
+export function getYoloMode(): boolean {
+	const settings = loadSettings();
+	return settings.yoloMode ?? false;
+}
+
+export function setYoloMode(enabled: boolean): void {
+	const settings = loadSettings();
+	settings.yoloMode = enabled;
+	saveSettings(settings);
+}
+
+export function getPlanMode(): boolean {
+	const settings = loadSettings();
+	return settings.planMode ?? false;
+}
+
+export function setPlanMode(enabled: boolean): void {
+	const settings = loadSettings();
+	settings.planMode = enabled;
+	saveSettings(settings);
+}
+
+export function getVulnerabilityHuntingMode(): boolean {
+	const settings = loadSettings();
+	return settings.vulnerabilityHuntingMode ?? false;
+}
+
+export function setVulnerabilityHuntingMode(enabled: boolean): void {
+	const settings = loadSettings();
+	settings.vulnerabilityHuntingMode = enabled;
+	saveSettings(settings);
+}
+
+export function getHybridCompressEnabled(): boolean {
+	const settings = loadSettings();
+	return settings.hybridCompressEnabled ?? false;
+}
+
+export function setHybridCompressEnabled(enabled: boolean): void {
+	const settings = loadSettings();
+	settings.hybridCompressEnabled = enabled;
+	saveSettings(settings);
+}
+
+export function getTeamMode(): boolean {
+	const settings = loadSettings();
+	return settings.teamMode ?? false;
+}
+
+export function setTeamMode(enabled: boolean): void {
+	const settings = loadSettings();
+	settings.teamMode = enabled;
 	saveSettings(settings);
 }

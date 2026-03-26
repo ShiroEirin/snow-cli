@@ -42,6 +42,8 @@ export interface CommandResult {
 		| 'reindexCodebase'
 		| 'copyLastMessage'
 		| 'toggleCodebase'
+		| 'toggleHybridCompress'
+		| 'toggleTeam'
 		| 'showBranchPanel'
 		| 'showDiffReviewPanel'
 		| 'showConnectionPanel'

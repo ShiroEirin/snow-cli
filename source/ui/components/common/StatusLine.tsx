@@ -208,6 +208,8 @@ type Props = {
 	planMode?: boolean;
 	vulnerabilityHuntingMode?: boolean;
 	toolSearchDisabled?: boolean;
+	hybridCompressEnabled?: boolean;
+	teamMode?: boolean;
 
 	// IDE连接信息
 	vscodeConnectionStatus?: VSCodeConnectionStatus;
@@ -283,6 +285,8 @@ export default function StatusLine({
 	planMode = false,
 	vulnerabilityHuntingMode = false,
 	toolSearchDisabled = true,
+	hybridCompressEnabled = false,
+	teamMode = false,
 	vscodeConnectionStatus,
 	editorContext,
 	connectionStatus,
@@ -332,6 +336,8 @@ export default function StatusLine({
 					plan: planMode,
 					vulnerabilityHunting: vulnerabilityHuntingMode,
 					toolSearchEnabled: !toolSearchDisabled,
+					hybridCompress: hybridCompressEnabled,
+					team: teamMode,
 					simple: simpleMode,
 				},
 				ide: {
@@ -409,6 +415,8 @@ export default function StatusLine({
 		simpleMode,
 		t.chatScreen.gitBranch,
 		toolSearchDisabled,
+		hybridCompressEnabled,
+		teamMode,
 		vscodeConnectionStatus,
 		vulnerabilityHuntingMode,
 		watcherEnabled,
@@ -489,7 +497,9 @@ export default function StatusLine({
 		yoloMode ||
 		planMode ||
 		vulnerabilityHuntingMode ||
+		teamMode ||
 		!toolSearchDisabled ||
+		hybridCompressEnabled ||
 		(vscodeConnectionStatus && vscodeConnectionStatus !== 'disconnected') ||
 		(connectionStatus && connectionStatus !== 'disconnected') ||
 		contextUsage ||
@@ -539,6 +549,17 @@ export default function StatusLine({
 		if (!toolSearchDisabled) {
 			statusItems.push({
 				text: '♾︎ ToolSearch ON',
+				color: theme.colors.menuInfo,
+			});
+		}
+
+		if (teamMode) {
+			statusItems.push({text: '⚑ Team', color: '#10B981'});
+		}
+
+		if (hybridCompressEnabled) {
+			statusItems.push({
+				text: '⇌ Hybrid Compress',
 				color: theme.colors.menuInfo,
 			});
 		}
@@ -693,6 +714,22 @@ export default function StatusLine({
 				<Box>
 					<Text color={theme.colors.menuInfo} dimColor>
 						{t.chatScreen.toolSearchEnabled}
+					</Text>
+				</Box>
+			)}
+
+			{teamMode && (
+				<Box>
+					<Text color="#10B981" dimColor>
+						{t.chatScreen.teamModeActive}
+					</Text>
+				</Box>
+			)}
+
+			{hybridCompressEnabled && (
+				<Box>
+					<Text color={theme.colors.menuInfo} dimColor>
+						{t.chatScreen.hybridCompressEnabled}
 					</Text>
 				</Box>
 			)}

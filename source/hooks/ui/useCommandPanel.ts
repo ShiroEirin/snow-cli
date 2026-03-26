@@ -160,6 +160,12 @@ export function useCommandPanel(buffer: TextBuffer, isProcessing = false) {
 					'Open Git branch management panel',
 			},
 			{
+				name: 'hybrid-compress',
+				description:
+					t.commandPanel.commands.hybridCompress ||
+					'Toggle Hybrid Compress mode (AI summary + smart truncation)',
+			},
+			{
 				name: 'diff',
 				description:
 					t.commandPanel.commands.diff ||
@@ -188,6 +194,12 @@ export function useCommandPanel(buffer: TextBuffer, isProcessing = false) {
 				description:
 					t.commandPanel.commands.newPrompt ||
 					'Generate a refined prompt from your requirement using AI',
+			},
+			{
+				name: 'team',
+				description:
+					t.commandPanel.commands.team ||
+					'Toggle Agent Team mode - orchestrate multiple agents working together',
 			},
 			{
 				name: 'quit',

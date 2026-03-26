@@ -4,6 +4,16 @@ import {getOpenAiConfig} from '../../../utils/config/apiConfig.js';
 import {
 	getToolSearchEnabled,
 	setToolSearchEnabled as persistToolSearchEnabled,
+	getYoloMode,
+	setYoloMode as persistYoloMode,
+	getPlanMode,
+	setPlanMode as persistPlanMode,
+	getVulnerabilityHuntingMode,
+	setVulnerabilityHuntingMode as persistVulnerabilityHuntingMode,
+	getHybridCompressEnabled,
+	setHybridCompressEnabled as persistHybridCompressEnabled,
+	getTeamMode,
+	setTeamMode as persistTeamMode,
 } from '../../../utils/config/projectSettings.js';
 import {getSimpleMode} from '../../../utils/config/themeConfig.js';
 
@@ -12,35 +22,31 @@ type Options = {
 	enablePlan?: boolean;
 };
 
-function readStoredFlag(key: string) {
-	try {
-		return localStorage.getItem(key) === 'true';
-	} catch {
-		return false;
-	}
-}
-
 export function useChatScreenModes({enableYolo, enablePlan}: Options) {
 	const [yoloMode, setYoloMode] = useState(() => {
 		if (enableYolo !== undefined) {
 			return enableYolo;
 		}
 
-		return readStoredFlag('snow-yolo-mode');
+		return getYoloMode();
 	});
 	const [planMode, setPlanMode] = useState(() => {
 		if (enablePlan !== undefined) {
 			return enablePlan;
 		}
 
-		return readStoredFlag('snow-plan-mode');
+		return getPlanMode();
 	});
-	const [vulnerabilityHuntingMode, setVulnerabilityHuntingMode] = useState(
-		() => readStoredFlag('snow-vulnerability-hunting-mode'),
+	const [vulnerabilityHuntingMode, setVulnerabilityHuntingMode] = useState(() =>
+		getVulnerabilityHuntingMode(),
 	);
 	const [toolSearchDisabled, setToolSearchDisabled] = useState(
 		() => !getToolSearchEnabled(),
 	);
+	const [hybridCompressEnabled, setHybridCompressEnabled] = useState(
+		() => getHybridCompressEnabled(),
+	);
+	const [teamMode, setTeamMode] = useState(() => getTeamMode());
 	const [simpleMode, setSimpleMode] = useState(() => getSimpleMode());
 	const [showThinking, setShowThinking] = useState(() => {
 		const config = getOpenAiConfig();
@@ -48,35 +54,28 @@ export function useChatScreenModes({enableYolo, enablePlan}: Options) {
 	});
 
 	useEffect(() => {
-		try {
-			localStorage.setItem('snow-yolo-mode', String(yoloMode));
-		} catch {
-			// Ignore localStorage errors
-		}
+		persistYoloMode(yoloMode);
 	}, [yoloMode]);
 
 	useEffect(() => {
-		try {
-			localStorage.setItem('snow-plan-mode', String(planMode));
-		} catch {
-			// Ignore localStorage errors
-		}
+		persistPlanMode(planMode);
 	}, [planMode]);
 
 	useEffect(() => {
-		try {
-			localStorage.setItem(
-				'snow-vulnerability-hunting-mode',
-				String(vulnerabilityHuntingMode),
-			);
-		} catch {
-			// Ignore localStorage errors
-		}
+		persistVulnerabilityHuntingMode(vulnerabilityHuntingMode);
 	}, [vulnerabilityHuntingMode]);
 
 	useEffect(() => {
 		persistToolSearchEnabled(!toolSearchDisabled);
 	}, [toolSearchDisabled]);
+
+	useEffect(() => {
+		persistHybridCompressEnabled(hybridCompressEnabled);
+	}, [hybridCompressEnabled]);
+
+	useEffect(() => {
+		persistTeamMode(teamMode);
+	}, [teamMode]);
 
 	useEffect(() => {
 		const interval = setInterval(() => {
@@ -112,6 +111,10 @@ export function useChatScreenModes({enableYolo, enablePlan}: Options) {
 		setVulnerabilityHuntingMode,
 		toolSearchDisabled,
 		setToolSearchDisabled,
+		hybridCompressEnabled,
+		setHybridCompressEnabled,
+		teamMode,
+		setTeamMode,
 		simpleMode,
 		showThinking,
 	};
