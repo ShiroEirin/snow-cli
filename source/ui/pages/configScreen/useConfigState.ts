@@ -7,6 +7,7 @@ import {
 	getCustomHeadersConfig,
 	type BackendMode,
 	type RequestMethod,
+	type ToolTransport,
 	type ApiConfig,
 } from '../../../utils/config/apiConfig.js';
 import {
@@ -55,6 +56,12 @@ export function useConfigState() {
 		boolean | undefined
 	>(undefined);
 	const [backendMode, setBackendMode] = useState<BackendMode>('native');
+	const [toolTransport, setToolTransport] = useState<ToolTransport>('local');
+	const [vcpToolBridgeWsUrl, setVcpToolBridgeWsUrl] = useState('');
+	const [vcpToolBridgeToken, setVcpToolBridgeToken] = useState('');
+	const [vcpToolBridgeToolFilter, setVcpToolBridgeToolFilter] = useState('');
+	const [vcpToolBridgeFallbackToLocal, setVcpToolBridgeFallbackToLocal] =
+		useState(true);
 	const [systemPromptId, setSystemPromptId] = useState<
 		string | string[] | undefined
 	>(undefined);
@@ -155,6 +162,19 @@ export function useConfigState() {
 			'requestMethod',
 			'enableVcpTimeBridge',
 			'backendMode',
+			...(backendMode === 'vcp'
+				? [
+						'toolTransport' as ConfigField,
+						...(toolTransport === 'bridge'
+							? [
+									'vcpToolBridgeWsUrl' as ConfigField,
+									'vcpToolBridgeToken' as ConfigField,
+									'vcpToolBridgeToolFilter' as ConfigField,
+									'vcpToolBridgeFallbackToLocal' as ConfigField,
+							  ]
+							: []),
+				  ]
+				: []),
 			'systemPromptId',
 			'customHeadersSchemeId',
 			'enableAutoCompress',
@@ -268,6 +288,31 @@ export function useConfigState() {
 	}, [requestMethod, currentField]);
 
 	useEffect(() => {
+		if (
+			backendMode !== 'vcp' &&
+			(currentField === 'toolTransport' ||
+				currentField === 'vcpToolBridgeWsUrl' ||
+				currentField === 'vcpToolBridgeToken' ||
+				currentField === 'vcpToolBridgeToolFilter' ||
+				currentField === 'vcpToolBridgeFallbackToLocal')
+		) {
+			setCurrentField('advancedModel');
+		}
+	}, [backendMode, currentField]);
+
+	useEffect(() => {
+		if (
+			toolTransport !== 'bridge' &&
+			(currentField === 'vcpToolBridgeWsUrl' ||
+				currentField === 'vcpToolBridgeToken' ||
+				currentField === 'vcpToolBridgeToolFilter' ||
+				currentField === 'vcpToolBridgeFallbackToLocal')
+		) {
+			setCurrentField('systemPromptId');
+		}
+	}, [toolTransport, currentField]);
+
+	useEffect(() => {
 		if (!enableAutoCompress && currentField === 'autoCompressThreshold') {
 			setCurrentField('showThinking');
 		}
@@ -297,6 +342,13 @@ export function useConfigState() {
 		setRequestMethod(config.requestMethod || 'chat');
 		setEnableVcpTimeBridge(config.enableVcpTimeBridge);
 		setBackendMode(config.backendMode || 'native');
+		setToolTransport(config.toolTransport || 'local');
+		setVcpToolBridgeWsUrl(config.vcpToolBridgeWsUrl || '');
+		setVcpToolBridgeToken(config.vcpToolBridgeToken || '');
+		setVcpToolBridgeToolFilter(config.vcpToolBridgeToolFilter || '');
+		setVcpToolBridgeFallbackToLocal(
+			config.vcpToolBridgeFallbackToLocal !== false,
+		);
 		setSystemPromptId(config.systemPromptId);
 		setCustomHeadersSchemeId(config.customHeadersSchemeId);
 		setAnthropicBeta(config.anthropicBeta || false);
@@ -389,6 +441,10 @@ export function useConfigState() {
 		if (currentField === 'profile') return activeProfile;
 		if (currentField === 'baseUrl') return baseUrl;
 		if (currentField === 'apiKey') return apiKey;
+		if (currentField === 'vcpToolBridgeWsUrl') return vcpToolBridgeWsUrl;
+		if (currentField === 'vcpToolBridgeToken') return vcpToolBridgeToken;
+		if (currentField === 'vcpToolBridgeToolFilter')
+			return vcpToolBridgeToolFilter;
 		if (currentField === 'advancedModel') return advancedModel;
 		if (currentField === 'basicModel') return basicModel;
 		if (currentField === 'maxContextTokens') return maxContextTokens.toString();
@@ -565,6 +621,11 @@ export function useConfigState() {
 					requestMethod,
 					enableVcpTimeBridge,
 					backendMode,
+					toolTransport,
+					vcpToolBridgeWsUrl,
+					vcpToolBridgeToken,
+					vcpToolBridgeToolFilter,
+					vcpToolBridgeFallbackToLocal,
 					systemPromptId,
 					customHeadersSchemeId,
 					anthropicBeta,
@@ -687,6 +748,9 @@ export function useConfigState() {
 			baseUrl,
 			apiKey,
 			requestMethod,
+			backendMode,
+			toolTransport,
+			vcpToolBridgeWsUrl,
 		});
 		if (validationErrors.length === 0) {
 			const config: Partial<ApiConfig> = {
@@ -695,6 +759,11 @@ export function useConfigState() {
 				requestMethod,
 				enableVcpTimeBridge,
 				backendMode,
+				toolTransport,
+				vcpToolBridgeWsUrl,
+				vcpToolBridgeToken,
+				vcpToolBridgeToolFilter,
+				vcpToolBridgeFallbackToLocal,
 				systemPromptId,
 				customHeadersSchemeId,
 				anthropicBeta,
@@ -755,6 +824,11 @@ export function useConfigState() {
 						requestMethod,
 						enableVcpTimeBridge,
 						backendMode,
+						toolTransport,
+						vcpToolBridgeWsUrl,
+						vcpToolBridgeToken,
+						vcpToolBridgeToolFilter,
+						vcpToolBridgeFallbackToLocal,
 						systemPromptId,
 						customHeadersSchemeId,
 						anthropicBeta,
@@ -830,6 +904,16 @@ export function useConfigState() {
 		setEnableVcpTimeBridge,
 		backendMode,
 		setBackendMode,
+		toolTransport,
+		setToolTransport,
+		vcpToolBridgeWsUrl,
+		setVcpToolBridgeWsUrl,
+		vcpToolBridgeToken,
+		setVcpToolBridgeToken,
+		vcpToolBridgeToolFilter,
+		setVcpToolBridgeToolFilter,
+		vcpToolBridgeFallbackToLocal,
+		setVcpToolBridgeFallbackToLocal,
 		systemPromptId,
 		setSystemPromptId,
 		customHeadersSchemeId,

@@ -5,6 +5,7 @@ import ScrollableSelectInput from '../../components/common/ScrollableSelectInput
 import type {
 	BackendMode,
 	RequestMethod,
+	ToolTransport,
 } from '../../../utils/config/apiConfig.js';
 import {switchProfile} from '../../../utils/config/configManager.js';
 import type {ConfigStateReturn} from './useConfigState.js';
@@ -25,6 +26,8 @@ export default function ConfigSelectPanel({state}: Props) {
 		setEnableVcpTimeBridge,
 		backendMode,
 		setBackendMode,
+		toolTransport,
+		setToolTransport,
 		requestMethodOptions,
 		searchTerm,
 		thinkingMode,
@@ -53,6 +56,8 @@ export default function ConfigSelectPanel({state}: Props) {
 				return t.configScreen.vcpTimeBridge.replace(':', '');
 			case 'backendMode':
 				return t.configScreen.vcpMode.replace(':', '');
+			case 'toolTransport':
+				return t.configScreen.vcpToolTransport.replace(':', '');
 			case 'advancedModel':
 				return t.configScreen.advancedModel.replace(':', '');
 			case 'basicModel':
@@ -146,6 +151,26 @@ export default function ConfigSelectPanel({state}: Props) {
 						isFocused={true}
 						onSelect={item => {
 							setBackendMode(item.value as BackendMode);
+							setIsEditing(false);
+						}}
+					/>
+				)}
+				{currentField === 'toolTransport' && (
+					<ScrollableSelectInput
+						items={[
+							{
+								label: t.configScreen.vcpToolTransportLocal,
+								value: 'local',
+							},
+							{
+								label: t.configScreen.vcpToolTransportBridge,
+								value: 'bridge',
+							},
+						]}
+						initialIndex={toolTransport === 'bridge' ? 1 : 0}
+						isFocused={true}
+						onSelect={item => {
+							setToolTransport(item.value as ToolTransport);
 							setIsEditing(false);
 						}}
 					/>

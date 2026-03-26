@@ -7,6 +7,11 @@ export type ConfigField =
 	| 'requestMethod'
 	| 'enableVcpTimeBridge'
 	| 'backendMode'
+	| 'toolTransport'
+	| 'vcpToolBridgeWsUrl'
+	| 'vcpToolBridgeToken'
+	| 'vcpToolBridgeToolFilter'
+	| 'vcpToolBridgeFallbackToLocal'
 	| 'systemPromptId'
 	| 'customHeadersSchemeId'
 	| 'anthropicBeta'
@@ -91,6 +96,7 @@ export const SELECT_FIELDS: ConfigField[] = [
 	'requestMethod',
 	'enableVcpTimeBridge',
 	'backendMode',
+	'toolTransport',
 	'systemPromptId',
 	'customHeadersSchemeId',
 	'advancedModel',
@@ -121,6 +127,7 @@ export const TOGGLE_FIELDS: ConfigField[] = [
 	'enableAutoCompress',
 	'showThinking',
 	'streamingDisplay',
+	'vcpToolBridgeFallbackToLocal',
 	'thinkingEnabled',
 	'geminiThinkingEnabled',
 	'responsesReasoningEnabled',

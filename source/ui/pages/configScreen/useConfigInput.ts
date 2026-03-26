@@ -40,6 +40,8 @@ export function useConfigInput(
 		loadModels,
 		getCurrentValue,
 		getAllFields,
+		vcpToolBridgeFallbackToLocal,
+		setVcpToolBridgeFallbackToLocal,
 		anthropicBeta,
 		setAnthropicBeta,
 		enableAutoCompress,
@@ -221,7 +223,13 @@ export function useConfigInput(
 
 		// Handle editing mode
 		if (isEditing) {
-			if (currentField === 'baseUrl' || currentField === 'apiKey') {
+			if (
+				currentField === 'baseUrl' ||
+				currentField === 'apiKey' ||
+				currentField === 'vcpToolBridgeWsUrl' ||
+				currentField === 'vcpToolBridgeToken' ||
+				currentField === 'vcpToolBridgeToolFilter'
+			) {
 				if (key.return) {
 					setIsEditing(false);
 				}
@@ -423,6 +431,8 @@ export function useConfigInput(
 			setShowThinking(!showThinking);
 		} else if (currentField === 'streamingDisplay') {
 			setStreamingDisplay(!streamingDisplay);
+		} else if (currentField === 'vcpToolBridgeFallbackToLocal') {
+			setVcpToolBridgeFallbackToLocal(!vcpToolBridgeFallbackToLocal);
 		} else if (currentField === 'thinkingEnabled') {
 			setThinkingEnabled(!thinkingEnabled);
 		} else if (currentField === 'geminiThinkingEnabled') {

@@ -3,7 +3,11 @@ import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 // Intentionally kept for backward compatibility fallback, despite deprecation
 import {SSEClientTransport} from '@modelcontextprotocol/sdk/client/sse.js';
-import {getMCPConfig, type MCPServer} from '../config/apiConfig.js';
+import {
+	getMCPConfig,
+	getOpenAiConfig,
+	type MCPServer,
+} from '../config/apiConfig.js';
 import {mcpTools as filesystemTools} from '../../mcp/filesystem.js';
 import {mcpTools as terminalTools} from '../../mcp/bash.js';
 import {mcpTools as aceCodeSearchTools} from '../../mcp/aceCodeSearch.js';
@@ -35,6 +39,12 @@ import {
 	getDisabledBuiltInServices,
 } from '../config/disabledBuiltInTools.js';
 import {getDisabledSkills} from '../config/disabledSkills.js';
+import {
+	cleanupIdleVcpBridgeConnection,
+	closeVcpBridgeConnection,
+	discoverVcpBridgeTools,
+	executeVcpBridgeTool,
+} from '../session/vcpCompatibility/toolBridge.js';
 import {logger} from '../core/logger.js';
 import {resourceMonitor} from '../core/resourceMonitor.js';
 import {HookFailedError} from './hookFailedError.js';
@@ -100,6 +110,7 @@ interface PersistentMCPClient {
 
 const persistentClients = new Map<string, PersistentMCPClient>();
 const CLIENT_IDLE_TIMEOUT = 10 * 60 * 1000; // 10 minutes idle timeout
+const VCP_BRIDGE_SERVICE_NAME = 'snowbridge';
 
 /**
  * Get the TODO service instance (lazy initialization)
@@ -161,12 +172,23 @@ export function getRegisteredServicePrefixes(): string[] {
 	}
 }
 
+function isVcpBridgeToolCached(toolName: string): boolean {
+	return (
+		toolsCache?.servicesInfo.some(
+			service =>
+				service.serviceName === VCP_BRIDGE_SERVICE_NAME &&
+				service.tools.some(tool => tool.name === toolName),
+		) ?? false
+	);
+}
+
 /**
  * Generate a hash of the current MCP configuration and sub-agents
  */
 async function generateConfigHash(): Promise<string> {
 	try {
 		const mcpConfig = getMCPConfig();
+		const apiConfig = getOpenAiConfig();
 		const subAgents = getSubAgentTools(); // Include sub-agents in hash
 
 		// Include skills in hash (both project and global)
@@ -184,6 +206,12 @@ async function generateConfigHash(): Promise<string> {
 			codebaseEnabled: codebaseConfig.enabled, // 🔥 Must include to invalidate cache on enable/disable
 			disabledBuiltInServices: getDisabledBuiltInServices(), // Include disabled built-in services in hash
 			disabledSkills: getDisabledSkills(), // Include disabled skills in hash
+			backendMode: apiConfig.backendMode,
+			toolTransport: apiConfig.toolTransport,
+			vcpToolBridgeWsUrl: apiConfig.vcpToolBridgeWsUrl,
+			vcpToolBridgeToolFilter: apiConfig.vcpToolBridgeToolFilter,
+			vcpToolBridgeToken: apiConfig.vcpToolBridgeToken,
+			vcpToolBridgeFallbackToLocal: apiConfig.vcpToolBridgeFallbackToLocal,
 		});
 	} catch {
 		return '';
@@ -397,6 +425,54 @@ async function refreshToolsCache(): Promise<void> {
 				});
 			}
 		}
+	}
+
+	// Add SnowBridge-exported tools when VCP mode explicitly enables bridge transport
+	try {
+		const apiConfig = getOpenAiConfig();
+		if (
+			apiConfig.backendMode === 'vcp' &&
+			apiConfig.toolTransport === 'bridge'
+		) {
+			const bridgeResult = await discoverVcpBridgeTools(apiConfig);
+			const reservedNames = new Set(allTools.map(tool => tool.function.name));
+			const filteredBridgeTools = bridgeResult.tools.filter(tool => {
+				const toolName = tool.function.name;
+				if (reservedNames.has(toolName)) {
+					logger.warn(
+						`Skipping VCP bridge tool "${toolName}" because the name already exists locally.`,
+					);
+					return false;
+				}
+				reservedNames.add(toolName);
+				return true;
+			});
+			const filteredServiceInfo = {
+				...bridgeResult.serviceInfo,
+				tools: bridgeResult.serviceInfo.tools.filter(tool =>
+					filteredBridgeTools.some(
+						bridgeTool => bridgeTool.function.name === tool.name,
+					),
+				),
+			};
+			servicesInfo.push(filteredServiceInfo);
+
+			if (filteredServiceInfo.connected) {
+				for (const tool of filteredBridgeTools) {
+					allTools.push(tool);
+				}
+			} else if (apiConfig.vcpToolBridgeFallbackToLocal === false) {
+				allTools.length = 0;
+			}
+		}
+	} catch (error) {
+		servicesInfo.push({
+			serviceName: VCP_BRIDGE_SERVICE_NAME,
+			tools: [],
+			isBuiltIn: false,
+			connected: false,
+			error: error instanceof Error ? error.message : 'Unknown bridge error',
+		});
 	}
 
 	// Add built-in Codebase Search tools (conditionally loaded if enabled and index is available)
@@ -1056,6 +1132,8 @@ export async function cleanupIdleMCPConnections(): Promise<void> {
 			persistentClients.delete(serviceName);
 		}
 	}
+
+	await cleanupIdleVcpBridgeConnection(CLIENT_IDLE_TIMEOUT);
 }
 
 /**
@@ -1072,6 +1150,7 @@ export async function closeAllMCPConnections(): Promise<void> {
 		}
 	}
 	persistentClients.clear();
+	await closeVcpBridgeConnection();
 }
 
 /**
@@ -1136,6 +1215,20 @@ export async function executeMCPTool(
 				args.maxResults,
 			);
 			return textResult;
+		}
+
+		const apiConfig = getOpenAiConfig();
+		if (
+			apiConfig.backendMode === 'vcp' &&
+			apiConfig.toolTransport === 'bridge' &&
+			isVcpBridgeToolCached(toolName)
+		) {
+			return await executeVcpBridgeTool(
+				apiConfig,
+				toolName,
+				args ?? {},
+				abortSignal,
+			);
 		}
 
 		// Find the service name by checking against known services

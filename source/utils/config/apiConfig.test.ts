@@ -1,12 +1,14 @@
 import test from 'ava';
 
-import {resolveBackendModeWithMigration} from './apiConfig.js';
+import {
+	resolveBackendModeWithMigration,
+	validateApiConfig,
+} from './apiConfig.js';
 
 test('keep explicit backend mode without migration', t => {
 	t.deepEqual(
 		resolveBackendModeWithMigration({
 			backendMode: 'vcp',
-			baseUrl: 'http://localhost:6005/v1',
 		}),
 		{
 			backendMode: 'vcp',
@@ -15,22 +17,9 @@ test('keep explicit backend mode without migration', t => {
 	);
 });
 
-test('migrate legacy localhost fallback into explicit vcp mode', t => {
+test('migrate missing backend mode to explicit native mode', t => {
 	t.deepEqual(
 		resolveBackendModeWithMigration({
-			baseUrl: 'http://localhost:6005/v1',
-		}),
-		{
-			backendMode: 'vcp',
-			migrated: true,
-		},
-	);
-});
-
-test('migrate missing backend mode to explicit native mode for non-vcp endpoints', t => {
-	t.deepEqual(
-		resolveBackendModeWithMigration({
-			baseUrl: 'https://api.openai.com/v1',
 		}),
 		{
 			backendMode: 'native',
@@ -39,24 +28,27 @@ test('migrate missing backend mode to explicit native mode for non-vcp endpoints
 	);
 });
 
-test('migrate legacy enableVcpGateway flag into backend mode', t => {
-	t.deepEqual(
-		resolveBackendModeWithMigration({
-			enableVcpGateway: true,
-		}),
-		{
+test('require bridge websocket url when vcp bridge transport is enabled', t => {
+	t.true(
+		validateApiConfig({
+			baseUrl: 'http://127.0.0.1:6005/v1',
 			backendMode: 'vcp',
-			migrated: true,
-		},
+			toolTransport: 'bridge',
+		}).includes(
+			'VCP bridge WebSocket URL is required when bridge transport is enabled',
+		),
 	);
+});
 
+test('accept valid bridge websocket url when vcp bridge transport is enabled', t => {
 	t.deepEqual(
-		resolveBackendModeWithMigration({
-			enableVcpGateway: false,
+		validateApiConfig({
+			baseUrl: 'http://127.0.0.1:6005/v1',
+			backendMode: 'vcp',
+			toolTransport: 'bridge',
+			vcpToolBridgeWsUrl:
+				'ws://127.0.0.1:6005/vcp-distributed-server/VCP_Key=test',
 		}),
-		{
-			backendMode: 'native',
-			migrated: true,
-		},
+		[],
 	);
 });

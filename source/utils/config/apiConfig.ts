@@ -10,6 +10,7 @@ import {
 
 export type RequestMethod = 'chat' | 'responses' | 'gemini' | 'anthropic';
 export type BackendMode = 'native' | 'vcp';
+export type ToolTransport = 'local' | 'bridge';
 export interface ThinkingConfig {
 	type: 'enabled' | 'adaptive';
 	budget_tokens?: number; // For 'enabled' type
@@ -31,6 +32,11 @@ export interface ApiConfig {
 	apiKey: string;
 	requestMethod: RequestMethod;
 	backendMode?: BackendMode; // Native = provider direct path, VCP = VCP-compatible chat endpoint mode
+	toolTransport?: ToolTransport; // VCP mode only: local = Snow tools only, bridge = add SnowBridge tools
+	vcpToolBridgeWsUrl?: string; // Full WebSocket endpoint, e.g. ws://127.0.0.1:6005/vcp-distributed-server/VCP_Key=xxx
+	vcpToolBridgeToken?: string; // Optional plugin-level bridge access token
+	vcpToolBridgeToolFilter?: string; // Optional CSV allowlist / keyword filter for exported bridge tools
+	vcpToolBridgeFallbackToLocal?: boolean; // If bridge discovery fails, keep local Snow tools available
 	advancedModel?: string;
 	basicModel?: string;
 	maxContextTokens?: number;
@@ -142,6 +148,8 @@ export const DEFAULT_CONFIG: AppConfig = {
 		apiKey: '',
 		requestMethod: 'chat',
 		backendMode: 'native',
+		toolTransport: 'local',
+		vcpToolBridgeFallbackToLocal: true,
 		advancedModel: '',
 		basicModel: '',
 		maxContextTokens: 120000,
@@ -205,17 +213,6 @@ function normalizeRequestMethod(method: unknown): RequestMethod {
 	return DEFAULT_CONFIG.snowcfg.requestMethod;
 }
 
-const LOCALHOST_BASE_URL_PATTERN =
-	/^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/.*)?$/i;
-
-function looksLikeLegacyVcpBaseUrl(baseUrl?: string): boolean {
-	if (!baseUrl) {
-		return false;
-	}
-
-	return LOCALHOST_BASE_URL_PATTERN.test(baseUrl);
-}
-
 function normalizeBackendMode(mode: unknown): BackendMode | undefined {
 	if (mode === 'native' || mode === 'vcp') {
 		return mode;
@@ -226,43 +223,18 @@ function normalizeBackendMode(mode: unknown): BackendMode | undefined {
 
 export function resolveBackendMode(options: {
 	backendMode?: unknown;
-	baseUrl?: string;
-	enableVcpGateway?: unknown;
 }): BackendMode {
 	return resolveBackendModeWithMigration(options).backendMode;
 }
 
 export function resolveBackendModeWithMigration(options: {
 	backendMode?: unknown;
-	baseUrl?: string;
-	enableVcpGateway?: unknown;
 }): BackendModeResolution {
 	const normalizedMode = normalizeBackendMode(options.backendMode);
 	if (normalizedMode) {
 		return {
 			backendMode: normalizedMode,
 			migrated: false,
-		};
-	}
-
-	if (options.enableVcpGateway === true) {
-		return {
-			backendMode: 'vcp',
-			migrated: true,
-		};
-	}
-
-	if (options.enableVcpGateway === false) {
-		return {
-			backendMode: 'native',
-			migrated: true,
-		};
-	}
-
-	if (looksLikeLegacyVcpBaseUrl(options.baseUrl)) {
-		return {
-			backendMode: 'vcp',
-			migrated: true,
 		};
 	}
 
@@ -314,21 +286,14 @@ export function loadConfig(): AppConfig {
 		const configWithoutMcp = restConfig as Partial<AppConfig>;
 
 		// 向下兼容：如果存在 openai 配置但没有 snowcfg，则使用 openai 配置
-		type LegacyApiConfig = Partial<ApiConfig> & {
-			enableVcpGateway?: boolean;
-		};
+		type LegacyApiConfig = Partial<ApiConfig>;
 
 		let apiConfig: ApiConfig;
 		let shouldPersistResolvedApiConfig = false;
 		if (configWithoutMcp.snowcfg) {
-			const {
-				enableVcpGateway: legacyEnableVcpGateway,
-				...snowConfig
-			} = configWithoutMcp.snowcfg as LegacyApiConfig;
+			const snowConfig = configWithoutMcp.snowcfg as LegacyApiConfig;
 			const backendModeResolution = resolveBackendModeWithMigration({
 				backendMode: snowConfig.backendMode,
-				baseUrl: snowConfig.baseUrl,
-				enableVcpGateway: legacyEnableVcpGateway,
 			});
 			apiConfig = {
 				...DEFAULT_CONFIG.snowcfg,
@@ -344,14 +309,9 @@ export function loadConfig(): AppConfig {
 			shouldPersistResolvedApiConfig = backendModeResolution.migrated;
 		} else if (configWithoutMcp.openai) {
 			// 向下兼容旧版本
-			const {
-				enableVcpGateway: legacyEnableVcpGateway,
-				...legacyOpenAiConfig
-			} = configWithoutMcp.openai as LegacyApiConfig;
+			const legacyOpenAiConfig = configWithoutMcp.openai as LegacyApiConfig;
 			const backendModeResolution = resolveBackendModeWithMigration({
 				backendMode: legacyOpenAiConfig.backendMode,
-				baseUrl: legacyOpenAiConfig.baseUrl,
-				enableVcpGateway: legacyEnableVcpGateway,
 			});
 			apiConfig = {
 				...DEFAULT_CONFIG.snowcfg,
@@ -485,6 +445,22 @@ export function validateApiConfig(config: Partial<ApiConfig>): string[] {
 		errors.push('API key cannot be empty');
 	}
 
+	if (
+		config.backendMode === 'vcp' &&
+		config.toolTransport === 'bridge' &&
+		!config.vcpToolBridgeWsUrl?.trim()
+	) {
+		errors.push('VCP bridge WebSocket URL is required when bridge transport is enabled');
+	}
+
+	if (
+		config.toolTransport === 'bridge' &&
+		config.vcpToolBridgeWsUrl &&
+		!isValidWsUrl(config.vcpToolBridgeWsUrl)
+	) {
+		errors.push('Invalid VCP bridge WebSocket URL format');
+	}
+
 	return errors;
 }
 
@@ -492,6 +468,15 @@ function isValidUrl(url: string): boolean {
 	try {
 		new URL(url);
 		return true;
+	} catch {
+		return false;
+	}
+}
+
+function isValidWsUrl(url: string): boolean {
+	try {
+		const parsed = new URL(url);
+		return parsed.protocol === 'ws:' || parsed.protocol === 'wss:';
 	} catch {
 		return false;
 	}

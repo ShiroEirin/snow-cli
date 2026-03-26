@@ -164,6 +164,15 @@ export type TranslationKeys = {
 		vcpMode: string;
 		vcpModeNative: string;
 		vcpModeVcp: string;
+		vcpToolTransport: string;
+		vcpToolTransportLocal: string;
+		vcpToolTransportBridge: string;
+		vcpToolBridgeWsUrl: string;
+		vcpToolBridgeToken: string;
+		vcpToolBridgeTokenPlaceholder: string;
+		vcpToolBridgeToolFilter: string;
+		vcpToolBridgeToolFilterPlaceholder: string;
+		vcpToolBridgeFallbackToLocal: string;
 		anthropicBeta: string;
 		anthropicCacheTTL: string;
 		anthropicCacheTTL5m: string;

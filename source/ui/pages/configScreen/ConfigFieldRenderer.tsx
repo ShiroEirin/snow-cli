@@ -28,6 +28,14 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 		requestMethod,
 		enableVcpTimeBridge,
 		backendMode,
+		toolTransport,
+		vcpToolBridgeWsUrl,
+		setVcpToolBridgeWsUrl,
+		vcpToolBridgeToken,
+		setVcpToolBridgeToken,
+		vcpToolBridgeToolFilter,
+		setVcpToolBridgeToolFilter,
+		vcpToolBridgeFallbackToLocal,
 		requestMethodOptions,
 		systemPromptId,
 		activeSystemPromptIds,
@@ -210,6 +218,132 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 				</Box>
 			);
 		}
+
+		case 'toolTransport': {
+			const display =
+				toolTransport === 'bridge'
+					? t.configScreen.vcpToolTransportBridge
+					: t.configScreen.vcpToolTransportLocal;
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.vcpToolTransport}
+					</Text>
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>{display}</Text>
+						</Box>
+					)}
+				</Box>
+			);
+		}
+
+		case 'vcpToolBridgeWsUrl':
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.vcpToolBridgeWsUrl}
+					</Text>
+					{isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<TextInput
+								value={vcpToolBridgeWsUrl}
+								onChange={value =>
+									setVcpToolBridgeWsUrl(stripFocusArtifacts(value))
+								}
+								placeholder="ws://127.0.0.1:6005/vcp-distributed-server/VCP_Key=..."
+							/>
+						</Box>
+					)}
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>
+								{vcpToolBridgeWsUrl || t.configScreen.notSet}
+							</Text>
+						</Box>
+					)}
+				</Box>
+			);
+
+		case 'vcpToolBridgeToken':
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.vcpToolBridgeToken}
+					</Text>
+					{isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<TextInput
+								value={vcpToolBridgeToken}
+								onChange={value =>
+									setVcpToolBridgeToken(stripFocusArtifacts(value))
+								}
+								placeholder={t.configScreen.vcpToolBridgeTokenPlaceholder}
+								mask="*"
+							/>
+						</Box>
+					)}
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>
+								{vcpToolBridgeToken
+									? '*'.repeat(Math.min(vcpToolBridgeToken.length, 20))
+									: t.configScreen.notSet}
+							</Text>
+						</Box>
+					)}
+				</Box>
+			);
+
+		case 'vcpToolBridgeToolFilter':
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.vcpToolBridgeToolFilter}
+					</Text>
+					{isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<TextInput
+								value={vcpToolBridgeToolFilter}
+								onChange={value =>
+									setVcpToolBridgeToolFilter(stripFocusArtifacts(value))
+								}
+								placeholder={t.configScreen.vcpToolBridgeToolFilterPlaceholder}
+							/>
+						</Box>
+					)}
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>
+								{vcpToolBridgeToolFilter || t.configScreen.notSet}
+							</Text>
+						</Box>
+					)}
+				</Box>
+			);
+
+		case 'vcpToolBridgeFallbackToLocal':
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.vcpToolBridgeFallbackToLocal}
+					</Text>
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>
+								{vcpToolBridgeFallbackToLocal
+									? t.configScreen.enabled
+									: t.configScreen.disabled}
+							</Text>
+						</Box>
+					)}
+				</Box>
+			);
 
 		case 'systemPromptId': {
 			let display = t.configScreen.followGlobalNone;

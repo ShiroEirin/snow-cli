@@ -177,16 +177,11 @@ export function loadProfile(profileName: string): AppConfig | undefined {
 	try {
 		const configData = readFileSync(profilePath, 'utf8');
 		const parsedConfig = JSON.parse(configData) as Partial<AppConfig>;
-		const {
-			enableVcpGateway: legacyEnableVcpGateway,
-			...profileSnowConfig
-		} = (parsedConfig.snowcfg || {}) as Partial<AppConfig['snowcfg']> & {
-			enableVcpGateway?: boolean;
-		};
+		const profileSnowConfig = (parsedConfig.snowcfg || {}) as Partial<
+			AppConfig['snowcfg']
+		>;
 		const backendModeResolution = resolveBackendModeWithMigration({
 			backendMode: profileSnowConfig.backendMode,
-			baseUrl: profileSnowConfig.baseUrl,
-			enableVcpGateway: legacyEnableVcpGateway,
 		});
 
 		const mergedConfig: AppConfig = {
