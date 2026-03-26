@@ -76,8 +76,12 @@ export class ChatToolCallAccumulator {
 			}
 
 			if (deltaCall.function?.name) {
-				buffer.function.name += deltaCall.function.name;
-				deltaText += deltaCall.function.name;
+				const previousName = buffer.function.name;
+				buffer.function.name = mergeField(
+					buffer.function.name,
+					deltaCall.function.name,
+				);
+				deltaText += buffer.function.name.slice(previousName.length);
 			}
 
 			if (deltaCall.function?.arguments) {

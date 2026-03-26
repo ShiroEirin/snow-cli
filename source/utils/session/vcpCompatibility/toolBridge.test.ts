@@ -62,3 +62,40 @@ test('deduplicate duplicate bridge plugin names', t => {
 		['Randomness', 'Randomness_2'],
 	);
 });
+
+test('simplify single-command bridge plugins into direct tool schemas', t => {
+	const mapped = mapBridgePluginsToTools([
+		{
+			name: 'ServerCodeSearcher',
+			displayName: '代码搜索器',
+			description: '高性能代码搜索。',
+			bridgeCommands: [
+				{
+					commandName: 'SearchCode',
+					parameters: [
+						{name: 'workspaceRoot', type: 'string', required: true},
+						{name: 'query', type: 'string', required: true},
+						{name: 'maxResults', type: 'integer'},
+					],
+				},
+			],
+		},
+	]);
+
+	t.is(mapped.tools.length, 1);
+	t.is(mapped.tools[0]?.function.name, 'ServerCodeSearcher');
+	t.true(
+		mapped.tools[0]?.function.description.includes(
+			'Command: SearchCode. Pass the needed top-level fields directly.',
+		),
+	);
+
+	const schema = mapped.tools[0]?.function.parameters as Record<string, any>;
+	t.is(schema['type'], 'object');
+	t.true(schema['additionalProperties']);
+	t.deepEqual(schema['required'], ['workspaceRoot', 'query']);
+	t.falsy(schema['properties']?.command);
+	t.is(schema['properties']?.workspaceRoot?.type, 'string');
+	t.is(schema['properties']?.query?.type, 'string');
+	t.is(schema['properties']?.maxResults?.type, 'integer');
+});

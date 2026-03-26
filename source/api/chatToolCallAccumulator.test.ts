@@ -235,3 +235,85 @@ test('keeps anonymous name fragments together when they form a known tool name',
 		},
 	]);
 });
+
+test('does not duplicate a complete tool name when the same id repeats it', t => {
+	const accumulator = new ChatToolCallAccumulator(['tool_search']);
+
+	const firstDeltaTexts = accumulator.append([
+		{
+			id: 'toolu_functions.tool_search:1',
+			function: {
+				name: 'tool_search',
+			},
+		},
+	]);
+
+	const secondDeltaTexts = accumulator.append([
+		{
+			id: 'toolu_functions.tool_search:1',
+			function: {
+				name: 'tool_search',
+			},
+		},
+		{
+			id: 'toolu_functions.tool_search:1',
+			function: {
+				arguments: '{}',
+			},
+		},
+	]);
+
+	t.deepEqual(firstDeltaTexts, ['tool_search']);
+	t.deepEqual(secondDeltaTexts, ['{}']);
+	t.deepEqual(accumulator.finalize(), [
+		{
+			id: 'toolu_functions.tool_search:1',
+			type: 'function',
+			function: {
+				name: 'tool_search',
+				arguments: '{}',
+			},
+		},
+	]);
+});
+
+test('upgrades a partial streamed tool name when the same id later sends the full name', t => {
+	const accumulator = new ChatToolCallAccumulator(['tool_search']);
+
+	const firstDeltaTexts = accumulator.append([
+		{
+			id: 'toolu_functions.tool_search:1',
+			function: {
+				name: 'tool_',
+			},
+		},
+	]);
+
+	const secondDeltaTexts = accumulator.append([
+		{
+			id: 'toolu_functions.tool_search:1',
+			function: {
+				name: 'tool_search',
+			},
+		},
+		{
+			id: 'toolu_functions.tool_search:1',
+			function: {
+				arguments: '{}',
+			},
+		},
+	]);
+
+	t.deepEqual(firstDeltaTexts, ['tool_']);
+	t.deepEqual(secondDeltaTexts, ['search', '{}']);
+	t.deepEqual(accumulator.finalize(), [
+		{
+			id: 'toolu_functions.tool_search:1',
+			type: 'function',
+			function: {
+				name: 'tool_search',
+				arguments: '{}',
+			},
+		},
+	]);
+});

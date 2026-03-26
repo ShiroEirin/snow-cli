@@ -284,6 +284,40 @@ function mergePropertySchemas(
 }
 
 function buildToolParameters(commands: VcpBridgeCommand[]): Record<string, unknown> {
+	if (commands.length === 1) {
+		const [singleCommand] = commands;
+		if (!singleCommand) {
+			return {
+				type: 'object',
+				additionalProperties: true,
+				properties: {},
+			};
+		}
+
+		const properties: Record<string, Record<string, unknown>> = {};
+		const required = (singleCommand.parameters || [])
+			.filter(parameter => parameter?.name && parameter.required)
+			.map(parameter => String(parameter.name));
+
+		for (const parameter of singleCommand.parameters || []) {
+			if (!parameter.name) {
+				continue;
+			}
+
+			properties[parameter.name] = buildParameterSchema(
+				parameter,
+				singleCommand.commandName,
+			);
+		}
+
+		return {
+			type: 'object',
+			additionalProperties: true,
+			properties,
+			...(required.length > 0 ? {required} : {}),
+		};
+	}
+
 	const properties: Record<string, Record<string, unknown>> = {
 		command: {
 			type: 'string',
@@ -321,6 +355,16 @@ function buildToolParameters(commands: VcpBridgeCommand[]): Record<string, unkno
 function buildToolDescription(plugin: VcpBridgePlugin): string {
 	const summary = summarizeText(plugin.description, 180);
 	const commandNames = plugin.bridgeCommands.map(command => command.commandName);
+	if (commandNames.length === 1) {
+		return [
+			`[SnowBridge] ${plugin.displayName || plugin.name}`,
+			summary || 'Remote VCP plugin exported through SnowBridge.',
+			`Command: ${commandNames[0]}. Pass the needed top-level fields directly.`,
+		]
+			.filter(Boolean)
+			.join(' ');
+	}
+
 	const commandSummary = commandNames
 		.slice(0, MAX_COMMAND_SUMMARY_COUNT)
 		.join(', ');
@@ -788,6 +832,9 @@ class VcpToolBridgeClient {
 		const payloadArgs = Object.fromEntries(
 			Object.entries(args || {}).filter(([, value]) => value !== undefined),
 		);
+		if (!payloadArgs['command'] && definition.commands.length === 1) {
+			payloadArgs['command'] = definition.commands[0]?.commandName;
+		}
 
 		return await new Promise<unknown>((resolve, reject) => {
 			const timer = setTimeout(() => {
