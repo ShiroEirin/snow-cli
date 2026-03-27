@@ -3,6 +3,7 @@ import {getOpenAiConfig} from '../../../utils/config/apiConfig.js';
 import {
 	collectAllMCPTools,
 	getMCPServicesInfo,
+	type MCPServiceTools,
 	type MCPTool,
 } from '../../../utils/execution/mcpToolsManager.js';
 import {toolSearchService} from '../../../utils/execution/toolSearchService.js';
@@ -11,11 +12,11 @@ import {snowBridgeClient} from '../../../utils/session/vcpCompatibility/bridgeCl
 import {
 	buildSessionBridgeToolSnapshot,
 	clearBridgeToolSnapshotSession,
-	type BridgeModelToolDescriptor,
+	type SessionBridgeToolSnapshot,
 } from '../../../utils/session/vcpCompatibility/toolSnapshot.js';
 import {
-	shouldIncludeBridgeTools,
-	shouldIncludeLocalTools,
+	resolveToolRegistry,
+	resolveToolTransport,
 } from '../../../utils/session/vcpCompatibility/toolRouteArbiter.js';
 import {initializeConversationSession} from './sessionInitializer.js';
 import {buildEditorContextContent} from './editorContextBuilder.js';
@@ -29,19 +30,6 @@ export type PreparedConversationSetup = {
 	useToolSearch: boolean;
 	toolSnapshotKey?: string;
 };
-
-function projectBridgeToolsToModelTools(
-	tools: BridgeModelToolDescriptor[],
-): MCPTool[] {
-	return tools.map(tool => ({
-		type: tool.type,
-		function: {
-			name: tool.function.name,
-			description: tool.function.description,
-			parameters: tool.function.parameters,
-		},
-	}));
-}
 
 export async function prepareConversationSetup(
 	options: Pick<
@@ -57,29 +45,41 @@ export async function prepareConversationSetup(
 	);
 
 	const config = getOpenAiConfig();
-	const includeBridgeTools = shouldIncludeBridgeTools(config);
-	const includeLocalTools = shouldIncludeLocalTools(config);
+	const transport = resolveToolTransport(config);
 	const currentSessionId = sessionManager.getCurrentSession()?.id;
-	const allMCPTools: MCPTool[] = [];
-	const servicesInfo = [];
+	let localTools: MCPTool[] = [];
+	let localServicesInfo: MCPServiceTools[] = [];
+	let bridgeSnapshot: SessionBridgeToolSnapshot | undefined;
 	let toolSnapshotKey: string | undefined;
 
-	if (includeBridgeTools) {
+	if (transport === 'bridge' || transport === 'hybrid') {
 		const manifest = await snowBridgeClient.getManifest(config);
-		const bridgeSnapshot = buildSessionBridgeToolSnapshot(
+		bridgeSnapshot = buildSessionBridgeToolSnapshot(
 			currentSessionId,
 			manifest,
 		);
 		toolSnapshotKey = bridgeSnapshot.snapshotKey;
-		allMCPTools.push(...projectBridgeToolsToModelTools(bridgeSnapshot.modelTools));
-		servicesInfo.push(...bridgeSnapshot.servicesInfo);
 	} else {
 		clearBridgeToolSnapshotSession(currentSessionId);
 	}
 
-	if (includeLocalTools) {
-		allMCPTools.push(...(await collectAllMCPTools()));
-		servicesInfo.push(...(await getMCPServicesInfo()));
+	if (transport === 'local' || transport === 'hybrid') {
+		localTools = await collectAllMCPTools();
+		localServicesInfo = await getMCPServicesInfo();
+	}
+
+	const {tools: allMCPTools, servicesInfo, duplicateToolNames} =
+		resolveToolRegistry({
+			config,
+			localTools,
+			localServicesInfo,
+			bridgeSnapshot,
+		});
+
+	if (duplicateToolNames.length > 0) {
+		console.warn(
+			`[Snow VCP] Ignored duplicate tool registrations: ${duplicateToolNames.join(', ')}`,
+		);
 	}
 
 	toolSearchService.updateRegistry(allMCPTools, servicesInfo);

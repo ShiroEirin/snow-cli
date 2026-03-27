@@ -5,6 +5,7 @@ const test = anyTest as any;
 import {validateApiConfig} from '../../config/apiConfig.js';
 import {
 	resolveToolExecutionRoute,
+	resolveToolRegistry,
 	resolveToolTransport,
 	shouldIncludeBridgeTools,
 	shouldIncludeLocalTools,
@@ -90,4 +91,126 @@ test('validate hybrid transport requires bridge key like bridge mode', (t: any) 
 		}),
 		[],
 	);
+});
+
+test('resolve tool registry keeps local and bridge planes isolated by transport', (t: any) => {
+	const localTool = {
+		type: 'function' as const,
+		function: {
+			name: 'filesystem-read',
+			description: 'Read file from local MCP.',
+			parameters: {type: 'object', properties: {}},
+		},
+	};
+	const localService = {
+		serviceName: 'filesystem',
+		tools: [
+			{
+				name: 'filesystem-read',
+				description: 'Read file from local MCP.',
+				inputSchema: {type: 'object', properties: {}},
+			},
+		],
+		isBuiltIn: false,
+		connected: true,
+	};
+	const bridgeSnapshot = {
+		modelTools: [
+			{
+				type: 'function' as const,
+				function: {
+					name: 'vcp-fileoperator-readfile',
+					description: 'Read file from SnowBridge.',
+					parameters: {type: 'object', properties: {}},
+				},
+			},
+		],
+		servicesInfo: [
+			{
+				serviceName: 'vcp-fileoperator',
+				tools: [
+					{
+						name: 'vcp-fileoperator-readfile',
+						description: 'Read file from SnowBridge.',
+						inputSchema: {type: 'object', properties: {}},
+					},
+				],
+				isBuiltIn: false,
+				connected: true,
+			},
+		],
+	};
+
+	const localOnly = resolveToolRegistry({
+		config: {toolTransport: 'local'},
+		localTools: [localTool],
+		localServicesInfo: [localService],
+		bridgeSnapshot,
+	});
+	t.deepEqual(
+		localOnly.tools.map(tool => tool.function.name),
+		['filesystem-read'],
+	);
+
+	const bridgeOnly = resolveToolRegistry({
+		config: {toolTransport: 'bridge'},
+		localTools: [localTool],
+		localServicesInfo: [localService],
+		bridgeSnapshot,
+	});
+	t.deepEqual(
+		bridgeOnly.tools.map(tool => tool.function.name),
+		['vcp-fileoperator-readfile'],
+	);
+});
+
+test('resolve tool registry prefers local tools when hybrid sees duplicates', (t: any) => {
+	const localTool = {
+		type: 'function' as const,
+		function: {
+			name: 'shared-read',
+			description: 'Local tool description.',
+			parameters: {type: 'object', properties: {}},
+		},
+	};
+	const bridgeSnapshot = {
+		modelTools: [
+			{
+				type: 'function' as const,
+				function: {
+					name: 'shared-read',
+					description: 'Bridge tool description.',
+					parameters: {type: 'object', properties: {}},
+				},
+			},
+		],
+		servicesInfo: [
+			{
+				serviceName: 'vcp-shared',
+				tools: [
+					{
+						name: 'shared-read',
+						description: 'Bridge tool description.',
+						inputSchema: {type: 'object', properties: {}},
+					},
+				],
+				isBuiltIn: false,
+				connected: true,
+			},
+		],
+	};
+
+	const registry = resolveToolRegistry({
+		config: {toolTransport: 'hybrid'},
+		localTools: [localTool],
+		localServicesInfo: [],
+		bridgeSnapshot,
+	});
+
+	t.deepEqual(
+		registry.tools.map(tool => tool.function.name),
+		['shared-read'],
+	);
+	t.is(registry.tools[0]?.function.description, 'Local tool description.');
+	t.deepEqual(registry.duplicateToolNames, ['shared-read']);
 });
