@@ -30,9 +30,9 @@ export interface ResponsesReasoningConfig {
 export interface ApiConfig {
 	baseUrl: string;
 	apiKey: string;
-	requestMethod: RequestMethod;
-	backendMode?: BackendMode; // Native = provider direct path, VCP = VCP-compatible chat endpoint mode
-	toolTransport?: ToolTransport; // VCP mode only: local = Snow tools only, bridge = add SnowBridge tools
+	requestMethod: RequestMethod; // Northbound request dialect: chat / responses / gemini / anthropic
+	backendMode?: BackendMode; // Backend product mode: native = provider direct path, vcp = VCP-compatible backend mode
+	toolTransport?: ToolTransport; // Tool plane transport: local = Snow tools only, bridge = Snow tools + SnowBridge exported tools
 	vcpToolBridgeWsUrl?: string; // Full WebSocket endpoint, e.g. ws://127.0.0.1:6005/vcp-distributed-server/VCP_Key=xxx
 	vcpToolBridgeToken?: string; // Optional plugin-level bridge access token
 	vcpToolBridgeToolFilter?: string; // Optional CSV allowlist / keyword filter for exported bridge tools

@@ -21,6 +21,12 @@ import type {
 import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {getVersionHeader} from '../utils/core/version.js';
+import {
+	adaptToolsToResponses,
+	buildResponsesAssistantToolCallItems,
+	buildResponsesToolResultItem,
+	toResponsesImageUrl,
+} from '../tooling/core/providerAdapters/responsesAdapter.js';
 export interface ResponseOptions {
 	model: string;
 	messages: ChatMessage[];
@@ -45,89 +51,6 @@ export interface ResponseOptions {
 	configProfile?: string; // 子代理配置文件名（覆盖模型等设置）
 	customSystemPromptId?: string; // 自定义系统提示词 ID
 	customHeaders?: Record<string, string>; // 自定义请求头
-}
-
-/**
- * 确保 schema 符合 Responses API 的要求：
- * 1. additionalProperties: false
- * 2. 保持原有的 required 数组（不修改）
- */
-function ensureStrictSchema(
-	schema?: Record<string, any>,
-): Record<string, any> | undefined {
-	if (!schema) {
-		return undefined;
-	}
-
-	// 深拷贝 schema
-	const stringified = JSON.stringify(schema);
-	const parseResult = parseJsonWithFix(stringified, {
-		toolName: 'Schema deep copy',
-		fallbackValue: schema, // 如果失败，使用原始 schema
-		logWarning: true,
-		logError: true,
-	});
-	const strictSchema = parseResult.data as Record<string, any>;
-
-	if (strictSchema?.['type'] === 'object') {
-		// 添加 additionalProperties: false
-		strictSchema['additionalProperties'] = false;
-
-		// 递归处理嵌套的 object 属性
-		if (strictSchema['properties']) {
-			for (const key of Object.keys(strictSchema['properties'])) {
-				const prop = strictSchema['properties'][key];
-
-				// 递归处理嵌套的 object
-				if (
-					prop['type'] === 'object' ||
-					(Array.isArray(prop['type']) && prop['type'].includes('object'))
-				) {
-					if (!('additionalProperties' in prop)) {
-						prop['additionalProperties'] = false;
-					}
-				}
-			}
-		}
-
-		// 如果 properties 为空且有 required 字段，删除它
-		if (
-			strictSchema['properties'] &&
-			Object.keys(strictSchema['properties']).length === 0 &&
-			strictSchema['required']
-		) {
-			delete strictSchema['required'];
-		}
-	}
-
-	return strictSchema;
-}
-
-/**
- * 转换 Chat Completions 格式的工具为 Responses API 格式
- * Chat Completions: {type: 'function', function: {name, description, parameters}}
- * Responses API: {type: 'function', name, description, parameters, strict}
- */
-function convertToolsForResponses(tools?: ChatCompletionTool[]):
-	| Array<{
-			type: 'function';
-			name: string;
-			description?: string;
-			strict?: boolean;
-			parameters?: Record<string, any>;
-	  }>
-	| undefined {
-	if (!tools || tools.length === 0) {
-		return undefined;
-	}
-
-	return tools.map(tool => ({
-		type: 'function',
-		name: tool.function.name,
-		description: tool.function.description,
-		strict: false,
-		parameters: ensureStrictSchema(tool.function.parameters),
-	}));
 }
 
 export interface ResponseStreamChunk {
@@ -177,19 +100,6 @@ export function resetOpenAIClient(): void {
 	// No-op: kept for backward compatibility
 }
 
-function toResponseImageUrl(image: {data: string; mimeType?: string}): string {
-	const data = image.data?.trim() || '';
-	if (!data) return '';
-
-	// Keep remote URLs and existing data URLs unchanged.
-	if (/^https?:\/\//i.test(data) || /^data:/i.test(data)) {
-		return data;
-	}
-
-	const mimeType = image.mimeType?.trim() || 'image/png';
-	return `data:${mimeType};base64,${data}`;
-}
-
 function convertToResponseInput(
 	messages: ChatMessage[],
 	includeBuiltinSystemPrompt: boolean = true,
@@ -229,7 +139,7 @@ function convertToResponseInput(
 				for (const image of msg.images) {
 					contentParts.push({
 						type: 'input_image',
-						image_url: toResponseImageUrl(image),
+						image_url: toResponsesImageUrl(image),
 					});
 				}
 			}
@@ -264,14 +174,7 @@ function convertToResponseInput(
 			}
 
 			// 为每个工具调用添加 function_call 项
-			for (const toolCall of msg.tool_calls) {
-				result.push({
-					type: 'function_call',
-					name: toolCall.function.name,
-					arguments: toolCall.function.arguments,
-					call_id: toolCall.id,
-				});
-			}
+			result.push(...buildResponsesAssistantToolCallItems(msg));
 			continue;
 		}
 
@@ -292,40 +195,7 @@ function convertToResponseInput(
 
 		// Tool 消息：转换为 function_call_output
 		if (msg.role === 'tool' && msg.tool_call_id) {
-			// Handle multimodal tool results with images
-			if (msg.images && msg.images.length > 0) {
-				// For Responses API, we need to include images in a structured way
-				// The output can be an array of content items
-				const outputContent: any[] = [];
-
-				// Add text content
-				if (msg.content) {
-					outputContent.push({
-						type: 'input_text',
-						text: msg.content,
-					});
-				}
-
-				// Add images as base64 data URLs (Responses API format)
-				for (const image of msg.images) {
-					outputContent.push({
-						type: 'input_image',
-						image_url: toResponseImageUrl(image),
-					});
-				}
-
-				result.push({
-					type: 'function_call_output',
-					call_id: msg.tool_call_id,
-					output: outputContent,
-				});
-			} else {
-				result.push({
-					type: 'function_call_output',
-					call_id: msg.tool_call_id,
-					output: msg.content,
-				});
-			}
+			result.push(buildResponsesToolResultItem(msg));
 			continue;
 		}
 	}
@@ -568,7 +438,7 @@ export async function* createStreamingResponse(
 				model: options.model || config.advancedModel,
 				instructions: systemInstructions,
 				input: requestInput,
-				tools: convertToolsForResponses(options.tools),
+				tools: adaptToolsToResponses(options.tools),
 				tool_choice: options.tool_choice,
 				parallel_tool_calls: true,
 				// 只有当 reasoning 启用且未禁用思考功能时才添加 reasoning 字段

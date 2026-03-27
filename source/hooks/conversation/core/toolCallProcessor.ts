@@ -1,8 +1,10 @@
 import type {ChatMessage} from '../../../api/chat.js';
 import type {Message} from '../../../ui/components/chat/MessageList.js';
 import type {ToolCall} from '../../../utils/execution/toolExecutor.js';
+import {getToolRegistrySnapshot} from '../../../utils/execution/mcpToolsManager.js';
 import {formatToolCallMessage} from '../../../utils/ui/messageFormatter.js';
 import {isToolNeedTwoStepDisplay} from '../../../utils/config/toolDisplayConfig.js';
+import {resolveSnowToolSpec} from '../../../tooling/core/toolRouter.js';
 import {extractThinkingContent} from '../utils/thinkingExtractor.js';
 
 export type ProcessToolCallsOptions = {
@@ -34,16 +36,46 @@ export async function processToolCallsAfterStream(
 		setMessages,
 	} = options;
 
+	const registry = await getToolRegistrySnapshot();
+	const normalizedToolCalls = receivedToolCalls.map(toolCall => {
+		const rawName = toolCall.rawName || toolCall.function.name;
+		const requestedPublicName = toolCall.publicName || rawName;
+		const resolvedTool = resolveSnowToolSpec(registry, {
+			toolId: toolCall.toolId,
+			publicName: requestedPublicName,
+			rawName,
+		});
+		const publicName = resolvedTool?.publicName || requestedPublicName;
+
+		return {
+			...toolCall,
+			toolId: resolvedTool?.toolId,
+			publicName,
+			rawName,
+			function: {
+				name: publicName,
+				arguments: toolCall.function.arguments,
+			},
+		};
+	});
+
+	for (const [index, toolCall] of normalizedToolCalls.entries()) {
+		receivedToolCalls[index] = toolCall;
+	}
+
 	const sharedThoughtSignature = (
-		receivedToolCalls.find(tc => (tc as any).thoughtSignature) as any
+		normalizedToolCalls.find(tc => (tc as any).thoughtSignature) as any
 	)?.thoughtSignature as string | undefined;
 
 	const assistantMessage: ChatMessage = {
 		role: 'assistant',
 		content: streamedContent || '',
-		tool_calls: receivedToolCalls.map(tc => ({
+		tool_calls: normalizedToolCalls.map(tc => ({
 			id: tc.id,
 			type: 'function' as const,
+			toolId: tc.toolId,
+			publicName: tc.publicName,
+			rawName: tc.rawName,
 			function: {
 				name: tc.function.name,
 				arguments: tc.function.arguments,
@@ -87,14 +119,14 @@ export async function processToolCallsAfterStream(
 	}
 
 	const parallelGroupId =
-		receivedToolCalls.length > 1
+		normalizedToolCalls.length > 1
 			? `parallel-${Date.now()}-${Math.random()}`
 			: undefined;
 
 	// Batch all two-step display messages into a single setMessages call
 	// to avoid triggering multiple re-renders in rapid succession
 	const pendingDisplayMessages: Message[] = [];
-	for (const toolCall of receivedToolCalls) {
+	for (const toolCall of normalizedToolCalls) {
 		const toolDisplay = formatToolCallMessage(toolCall);
 		let toolArgs;
 		try {
@@ -106,10 +138,10 @@ export async function processToolCallsAfterStream(
 		if (isToolNeedTwoStepDisplay(toolCall.function.name)) {
 			pendingDisplayMessages.push({
 				role: 'assistant',
-				content: `⚡ ${toolDisplay.toolName}`,
+				content: `⚡ ${toolCall.publicName || toolDisplay.toolName}`,
 				streaming: false,
 				toolCall: {
-					name: toolCall.function.name,
+					name: toolCall.publicName || toolCall.function.name,
 					arguments: toolArgs,
 				},
 				toolDisplay,

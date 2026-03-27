@@ -24,6 +24,12 @@ import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {getVersionHeader} from '../utils/core/version.js';
 import {ChatToolCallAccumulator} from './chatToolCallAccumulator.js';
 import {isVcpModeEnabled} from '../utils/session/vcpCompatibility/mode.js';
+import {
+	adaptToolsToOpenAI,
+	buildOpenAIToolMessageNameMap,
+	buildOpenAIToolResultContent,
+	resolveOpenAIToolMessageName,
+} from '../tooling/core/providerAdapters/openaiAdapter.js';
 
 export type {
 	ChatMessage,
@@ -94,26 +100,6 @@ export interface ChatCompletionMessageParam {
 	tool_calls?: ToolCall[];
 }
 
-function buildToolCallNameMap(messages: ChatMessage[]): Map<string, string> {
-	const toolCallNameMap = new Map<string, string>();
-
-	for (const message of messages) {
-		if (message.role !== 'assistant' || !message.tool_calls) {
-			continue;
-		}
-
-		for (const toolCall of message.tool_calls) {
-			if (!toolCall?.id || !toolCall.function?.name) {
-				continue;
-			}
-
-			toolCallNameMap.set(toolCall.id, toolCall.function.name);
-		}
-	}
-
-	return toolCallNameMap;
-}
-
 /**
  * Convert internal ChatMessage to OpenAI's message format
  * Supports both text-only and multimodal (text + images) messages
@@ -135,7 +121,7 @@ export function convertToOpenAIMessages(
 ): ChatCompletionMessageParam[] {
 	const customSystemPrompts = customSystemPromptOverride;
 	const toolCallNameMap = includeToolMessageNames
-		? buildToolCallNameMap(messages)
+		? buildOpenAIToolMessageNameMap(messages)
 		: undefined;
 
 	let result = messages.map(msg => {
@@ -189,42 +175,16 @@ export function convertToOpenAIMessages(
 		}
 
 		if (msg.role === 'tool' && msg.tool_call_id) {
-			const resolvedToolName =
-				msg.name || toolCallNameMap?.get(msg.tool_call_id);
+			const resolvedToolName = resolveOpenAIToolMessageName(
+				msg,
+				toolCallNameMap,
+			);
 
 			// Handle multimodal tool results with images
 			if (msg.images && msg.images.length > 0) {
-				const content: Array<{
-					type: 'text' | 'image_url';
-					text?: string;
-					image_url?: {url: string};
-				}> = [];
-
-				// Add text content
-				if (msg.content) {
-					content.push({
-						type: 'text',
-						text: msg.content,
-					});
-				}
-
-				// Add images as base64 data URLs
-				for (const image of msg.images) {
-					const imageUrl =
-						/^data:/i.test(image.data) || /^https?:\/\//i.test(image.data)
-							? image.data
-							: `data:${image.mimeType};base64,${image.data}`;
-					content.push({
-						type: 'image_url',
-						image_url: {
-							url: imageUrl,
-						},
-					});
-				}
-
 				return {
 					role: 'tool',
-					content,
+					content: buildOpenAIToolResultContent(msg),
 					...(resolvedToolName ? {name: resolvedToolName} : {}),
 					tool_call_id: msg.tool_call_id,
 				} as ChatCompletionMessageParam;
@@ -550,7 +510,7 @@ export async function* createStreamingChatCompletion(
 				stream_options: {include_usage: true},
 				temperature: options.temperature || 0.7,
 				max_tokens: options.max_tokens,
-				tools: options.tools,
+				tools: adaptToolsToOpenAI(options.tools),
 				tool_choice: options.tool_choice,
 			};
 

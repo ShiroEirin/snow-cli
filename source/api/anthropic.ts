@@ -20,6 +20,12 @@ import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {isDevMode, getDevUserId} from '../utils/core/devMode.js';
 import {getVersionHeader} from '../utils/core/version.js';
+import {
+	adaptToolsToAnthropic,
+	buildAnthropicToolResultBlock,
+	buildAnthropicToolUseBlocks,
+	toAnthropicImageSource,
+} from '../tooling/core/providerAdapters/anthropicAdapter.js';
 
 export interface AnthropicOptions {
 	model: string;
@@ -66,13 +72,6 @@ export interface AnthropicStreamChunk {
 	};
 }
 
-export interface AnthropicTool {
-	name: string;
-	description: string;
-	input_schema: any;
-	cache_control?: {type: 'ephemeral'; ttl?: '5m' | '1h'};
-}
-
 export interface AnthropicMessageParam {
 	role: 'user' | 'assistant';
 	content: string | Array<any>;
@@ -90,50 +89,6 @@ let anthropicConfig: {
 
 // Persistent userId that remains the same until application restart
 let persistentUserId: string | null = null;
-
-/**
- * 将图片数据转换为 Anthropic API 所需的格式
- * 处理三种情况：
- * 1. 远程 URL (http/https): 返回 URL 类型（Anthropic 支持某些图片 URL）
- * 2. 已经是 data URL: 解析出 media_type 和 base64 数据
- * 3. 纯 base64 数据: 使用提供的 mimeType 补齐为完整格式
- */
-function toAnthropicImageSource(image: {
-	data: string;
-	mimeType?: string;
-}):
-	| {type: 'base64'; media_type: string; data: string}
-	| {type: 'url'; url: string}
-	| null {
-	const data = image.data?.trim() || '';
-	if (!data) return null;
-
-	// 远程 URL (http/https) - Anthropic 支持某些图片 URL
-	if (/^https?:\/\//i.test(data)) {
-		return {
-			type: 'url',
-			url: data,
-		};
-	}
-
-	// 已经是 data URL 格式，解析它
-	const dataUrlMatch = data.match(/^data:([^;]+);base64,(.+)$/);
-	if (dataUrlMatch) {
-		return {
-			type: 'base64',
-			media_type: dataUrlMatch[1] || image.mimeType || 'image/png',
-			data: dataUrlMatch[2] || '',
-		};
-	}
-
-	// 纯 base64 数据，补齐格式
-	const mimeType = image.mimeType?.trim() || 'image/png';
-	return {
-		type: 'base64',
-		media_type: mimeType,
-		data: data,
-	};
-}
 
 // Deprecated: Client reset is no longer needed with new config loading approach
 export function resetAnthropicClient(): void {
@@ -164,39 +119,6 @@ function getPersistentUserId(): string {
 		persistentUserId = `user_${hash}_account__session_${sessionId}`;
 	}
 	return persistentUserId;
-}
-
-/**
- * Convert OpenAI-style tools to Anthropic tool format
- * Adds cache_control to the last tool for prompt caching
- */
-function convertToolsToAnthropic(
-	tools?: ChatCompletionTool[],
-): AnthropicTool[] | undefined {
-	if (!tools || tools.length === 0) {
-		return undefined;
-	}
-
-	const convertedTools = tools
-		.filter(tool => tool.type === 'function' && 'function' in tool)
-		.map(tool => {
-			if (tool.type === 'function' && 'function' in tool) {
-				return {
-					name: tool.function.name,
-					description: tool.function.description || '',
-					input_schema: tool.function.parameters as any,
-				};
-			}
-			throw new Error('Invalid tool format');
-		});
-
-	// Do not add cache_control to tools to avoid TTL ordering issues
-	// if (convertedTools.length > 0) {
-	// 	const lastTool = convertedTools[convertedTools.length - 1];
-	// 	(lastTool as any).cache_control = {type: 'ephemeral', ttl: '5m'};
-	// }
-
-	return convertedTools;
 }
 
 /**
@@ -242,53 +164,7 @@ function convertToAnthropicMessages(
 		}
 
 		if (msg.role === 'tool' && msg.tool_call_id) {
-			// Build tool_result content - can be text or array with images
-			let toolResultContent: string | any[];
-
-			if (msg.images && msg.images.length > 0) {
-				// Multimodal tool result with images
-				const contentArray: any[] = [];
-
-				// Add text content first
-				if (msg.content) {
-					contentArray.push({
-						type: 'text',
-						text: msg.content,
-					});
-				}
-
-				// Add images - 使用辅助函数处理各种格式的图片数据
-				for (const image of msg.images) {
-					const imageSource = toAnthropicImageSource(image);
-					if (imageSource) {
-						if (imageSource.type === 'url') {
-							contentArray.push({
-								type: 'image',
-								source: {
-									type: 'url',
-									url: imageSource.url,
-								},
-							});
-						} else {
-							contentArray.push({
-								type: 'image',
-								source: imageSource,
-							});
-						}
-					}
-				}
-
-				toolResultContent = contentArray;
-			} else {
-				// Text-only tool result
-				toolResultContent = msg.content;
-			}
-
-			toolResults.push({
-				type: 'tool_result',
-				tool_use_id: msg.tool_call_id,
-				content: toolResultContent,
-			});
+			toolResults.push(buildAnthropicToolResultBlock(msg));
 			continue;
 		}
 
@@ -354,14 +230,7 @@ function convertToAnthropicMessages(
 				});
 			}
 
-			for (const toolCall of msg.tool_calls) {
-				content.push({
-					type: 'tool_use',
-					id: toolCall.id,
-					name: toolCall.function.name,
-					input: JSON.parse(toolCall.function.arguments),
-				});
-			}
+			content.push(...buildAnthropicToolUseBlocks(msg));
 
 			anthropicMessages.push({
 				role: 'assistant',
@@ -705,7 +574,7 @@ export async function* createStreamingAnthropicCompletion(
 				max_tokens: options.max_tokens || 4096,
 				system,
 				messages,
-				tools: convertToolsToAnthropic(options.tools),
+				tools: adaptToolsToAnthropic(options.tools),
 				metadata: {
 					user_id: userId,
 				},

@@ -16,6 +16,14 @@ import type {ChatMessage, ChatCompletionTool, UsageInfo} from './types.js';
 import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {getVersionHeader} from '../utils/core/version.js';
+import {
+	adaptToolsToGemini,
+	buildGeminiAssistantParts,
+	buildGeminiStreamToolCall,
+	buildGeminiToolMessageNameMap,
+	buildGeminiToolResponseParts,
+	toGeminiImagePart,
+} from '../tooling/core/providerAdapters/geminiAdapter.js';
 
 export interface GeminiOptions {
 	model: string;
@@ -76,85 +84,6 @@ export function resetGeminiClient(): void {
 }
 
 /**
- * 将图片数据转换为 Gemini API 所需的格式
- * 处理三种情况：
- * 1. 远程 URL (http/https): 返回 fileData 格式
- * 2. 已经是 data URL: 返回 inlineData 格式，并确保 data 带 data: 头
- * 3. 纯 base64 数据: 使用提供的 mimeType 补齐 data URL 格式
- */
-function toGeminiImagePart(image: {
-	data: string;
-	mimeType?: string;
-}):
-	| {inlineData: {mimeType: string; data: string}}
-	| {fileData: {mimeType: string; fileUri: string}}
-	| null {
-	const data = image.data?.trim() || '';
-	if (!data) return null;
-
-	// 远程 URL (http/https) - Gemini 支持通过 fileData 提供
-	if (/^https?:\/\//i.test(data)) {
-		return {
-			fileData: {
-				mimeType: image.mimeType?.trim() || 'image/png',
-				fileUri: data,
-			},
-		};
-	}
-
-	// 已经是 data URL 格式，直接使用原值作为 data
-	const dataUrlMatch = data.match(/^data:([^;]+);base64,(.+)$/);
-	if (dataUrlMatch) {
-		return {
-			inlineData: {
-				mimeType: dataUrlMatch[1] || image.mimeType || 'image/png',
-				data: image.data, // 保留完整的 data URL
-			},
-		};
-	}
-
-	// 纯 base64 数据，补齐 data URL 格式
-	const mimeType = image.mimeType?.trim() || 'image/png';
-	return {
-		inlineData: {
-			mimeType,
-			data: `data:${mimeType};base64,${data}`, // 补齐 data: 头
-		},
-	};
-}
-
-/**
- * Convert OpenAI-style tools to Gemini function declarations
- */
-function convertToolsToGemini(tools?: ChatCompletionTool[]): any[] | undefined {
-	if (!tools || tools.length === 0) {
-		return undefined;
-	}
-
-	const functionDeclarations = tools
-		.filter(tool => tool.type === 'function' && 'function' in tool)
-		.map(tool => {
-			if (tool.type === 'function' && 'function' in tool) {
-				// Convert OpenAI parameters schema to Gemini format
-				const params = tool.function.parameters as any;
-
-				return {
-					name: tool.function.name,
-					description: tool.function.description || '',
-					parametersJsonSchema: {
-						type: 'object',
-						properties: params.properties || {},
-						required: params.required || [],
-					},
-				};
-			}
-			throw new Error('Invalid tool format');
-		});
-
-	return [{functionDeclarations}];
-}
-
-/**
  * Convert our ChatMessage format to Gemini's format
  * @param messages - The messages to convert
  * @param includeBuiltinSystemPrompt - Whether to include builtin system prompt (default true)
@@ -173,10 +102,9 @@ function convertToGeminiMessages(
 	const customSystemPrompts = customSystemPromptOverride;
 	let systemInstruction: string[] | undefined;
 	const contents: any[] = [];
+	const toolCallNameMap = buildGeminiToolMessageNameMap(messages);
 
 	// Build tool_call_id to function_name mapping for parallel calls
-	const toolCallIdToFunctionName = new Map<string, string>();
-
 	for (let i = 0; i < messages.length; i++) {
 		const msg = messages[i];
 		if (!msg) continue;
@@ -193,55 +121,9 @@ function convertToGeminiMessages(
 			msg.tool_calls &&
 			msg.tool_calls.length > 0
 		) {
-			const parts: any[] = [];
-
-			// Add thinking content first if exists (required by Gemini thinking mode)
-			if (msg.thinking) {
-				parts.push({
-					thought: true,
-					text: msg.thinking.thinking,
-				});
-			}
-
-			// Add text content if exists
-			if (msg.content) {
-				parts.push({text: msg.content});
-			}
-
-			// Add function calls and build mapping
-			for (const toolCall of msg.tool_calls) {
-				// Store tool_call_id -> function_name mapping
-				toolCallIdToFunctionName.set(toolCall.id, toolCall.function.name);
-
-				const argsParseResult = parseJsonWithFix(toolCall.function.arguments, {
-					toolName: `Gemini function call: ${toolCall.function.name}`,
-					fallbackValue: {},
-					logWarning: true,
-					logError: true,
-				});
-
-				const functionCallPart: any = {
-					functionCall: {
-						name: toolCall.function.name,
-						args: argsParseResult.data,
-					},
-				};
-
-				// Include thoughtSignature at part level (sibling to functionCall, not inside it)
-				// According to Gemini docs, thoughtSignature is required for function calls in thinking mode
-				const signature =
-					(toolCall as any).thoughtSignature ||
-					(toolCall as any).thought_signature;
-				if (signature) {
-					functionCallPart.thoughtSignature = signature;
-				}
-
-				parts.push(functionCallPart);
-			}
-
 			contents.push({
 				role: 'model',
-				parts,
+				parts: buildGeminiAssistantParts(msg),
 			});
 			continue;
 		}
@@ -249,11 +131,9 @@ function convertToGeminiMessages(
 		// Handle tool results - collect consecutive tool messages
 		if (msg.role === 'tool') {
 			// Collect all consecutive tool messages starting from current position
-			const toolResponses: Array<{
-				tool_call_id: string;
-				content: string;
-				images?: any[];
-			}> = [];
+			const toolResponses: Array<
+				Pick<ChatMessage, 'tool_call_id' | 'content' | 'images'>
+			> = [];
 
 			let j = i;
 			while (j < messages.length && messages[j]?.role === 'tool') {
@@ -271,88 +151,10 @@ function convertToGeminiMessages(
 			// Update loop index to skip processed tool messages
 			i = j - 1;
 
-			// Build a single user message with multiple functionResponse parts
-			const parts: any[] = [];
-
-			for (const toolResp of toolResponses) {
-				// Use tool_call_id to find the correct function name
-				const functionName =
-					toolCallIdToFunctionName.get(toolResp.tool_call_id) ||
-					'unknown_function';
-
-				// Tool response must be a valid object for Gemini API
-				let responseData: any;
-
-				if (!toolResp.content) {
-					responseData = {};
-				} else {
-					let contentToParse = toolResp.content;
-
-					// Sometimes the content is double-encoded as JSON
-					// First, try to parse it once
-					const firstParseResult = parseJsonWithFix(contentToParse, {
-						toolName: 'Gemini tool response (first parse)',
-						logWarning: false,
-						logError: false,
-					});
-
-					if (
-						firstParseResult.success &&
-						typeof firstParseResult.data === 'string'
-					) {
-						// If it's a string, it might be double-encoded, try parsing again
-						contentToParse = firstParseResult.data;
-					}
-
-					// Now parse or wrap the final content
-					const finalParseResult = parseJsonWithFix(contentToParse, {
-						toolName: 'Gemini tool response (final parse)',
-						logWarning: false,
-						logError: false,
-					});
-
-					if (finalParseResult.success) {
-						const parsed = finalParseResult.data;
-						// If parsed result is an object (not array, not null), use it directly
-						if (
-							typeof parsed === 'object' &&
-							parsed !== null &&
-							!Array.isArray(parsed)
-						) {
-							responseData = parsed;
-						} else {
-							// If it's a primitive, array, or null, wrap it
-							responseData = {content: parsed};
-						}
-					} else {
-						// Not valid JSON, wrap the raw string
-						responseData = {content: contentToParse};
-					}
-				}
-
-				// Add functionResponse part
-				parts.push({
-					functionResponse: {
-						name: functionName,
-						response: responseData,
-					},
-				});
-
-				// Handle images from tool result
-				if (toolResp.images && toolResp.images.length > 0) {
-					for (const image of toolResp.images) {
-						const imagePart = toGeminiImagePart(image);
-						if (imagePart) {
-							parts.push(imagePart);
-						}
-					}
-				}
-			}
-
 			// Push single user message with all function responses
 			contents.push({
 				role: 'user',
-				parts,
+				parts: buildGeminiToolResponseParts(toolResponses, toolCallNameMap),
 			});
 			continue;
 		}
@@ -500,7 +302,7 @@ export async function* createStreamingGeminiCompletion(
 			}
 
 			// Add tools if provided
-			const geminiTools = convertToolsToGemini(options.tools);
+			const geminiTools = adaptToolsToGemini(options.tools);
 			if (geminiTools) {
 				requestBody.tools = geminiTools;
 			}
@@ -707,32 +509,14 @@ export async function* createStreamingGeminiCompletion(
 												hasToolCalls = true;
 												const fc = part.functionCall;
 
-												const toolCall: any = {
-													id: `call_${toolCallIndex++}`,
-													type: 'function' as const,
-													function: {
-														name: fc.name,
-														arguments: JSON.stringify(fc.args || {}),
-													},
-												};
-
-												// Capture thoughtSignature from part level (Gemini thinking mode)
-												// According to Gemini docs, thoughtSignature is at part level, sibling to functionCall
-												// IMPORTANT: Gemini only returns thoughtSignature on the FIRST function call
-												// We need to save it and reuse for all subsequent function calls
-												const partSignature =
-													part.thoughtSignature || part.thought_signature;
-												if (partSignature) {
-													// Save the first signature for reuse
-													if (!sharedThoughtSignature) {
-														sharedThoughtSignature = partSignature;
-													}
-													toolCall.thoughtSignature = partSignature;
-												} else if (sharedThoughtSignature) {
-													// Use shared signature for subsequent function calls
-													toolCall.thoughtSignature = sharedThoughtSignature;
-												}
-
+												const builtToolCall = buildGeminiStreamToolCall(
+													part,
+													toolCallIndex++,
+													sharedThoughtSignature,
+												);
+												sharedThoughtSignature =
+													builtToolCall.sharedThoughtSignature;
+												const toolCall = builtToolCall.toolCall;
 												toolCallsBuffer.push(toolCall);
 
 												// Yield delta for token counting

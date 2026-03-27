@@ -1,4 +1,4 @@
-import {executeMCPTool} from './mcpToolsManager.js';
+import {executeMCPToolCall} from './mcpToolsManager.js';
 import {subAgentService} from '../../mcp/subagent.js';
 import {teamService} from '../../mcp/team.js';
 import {runningSubAgentTracker} from './runningSubAgentTracker.js';
@@ -7,6 +7,7 @@ import type {SubAgentMessage} from './subAgentExecutor.js';
 import type {ConfirmationResult} from '../../ui/components/tools/ToolConfirmation.js';
 import type {ImageContent} from '../../api/types.js';
 import type {MultimodalContent} from '../../mcp/types/filesystem.types.js';
+import type {SnowToolCall} from '../../tooling/core/types.js';
 
 //安全解析JSON，处理可能被拼接的多个JSON对象
 function safeParseToolArguments(argsString: string): Record<string, any> {
@@ -73,6 +74,11 @@ function safeParseToolArguments(argsString: string): Record<string, any> {
 
 export interface ToolCall {
 	id: string;
+	toolId?: string;
+	publicName?: string;
+	rawName?: string;
+	thoughtSignature?: string;
+	argumentsText?: string;
 	type: 'function';
 	function: {
 		name: string;
@@ -85,6 +91,9 @@ export interface ToolResult {
 	role: 'tool';
 	content: string;
 	name?: string;
+	toolId?: string;
+	publicName?: string;
+	rawName?: string;
 	images?: ImageContent[]; // Support multimodal content with images
 	messageStatus?: 'pending' | 'success' | 'error'; // Message status for UI rendering
 	hookFailed?: boolean; // Indicates if a hook failed and AI flow should be interrupted
@@ -95,6 +104,33 @@ export interface ToolResult {
 		output?: string;
 		error?: string;
 	}; // Hook error details for UI rendering
+}
+
+export function toSnowToolCall(toolCall: ToolCall): SnowToolCall {
+	return {
+		id: toolCall.id,
+		toolId: toolCall.toolId,
+		publicName: toolCall.publicName || toolCall.function.name,
+		rawName: toolCall.rawName || toolCall.function.name,
+		argumentsText: toolCall.argumentsText || toolCall.function.arguments,
+		thoughtSignature: toolCall.thoughtSignature,
+	};
+}
+
+export function withToolResultMetadata(
+	toolCall: Pick<ToolCall, 'id' | 'toolId' | 'publicName' | 'rawName' | 'function'>,
+	result: ToolResult,
+): ToolResult {
+	const publicName = result.publicName || toolCall.publicName || toolCall.function.name;
+	const rawName = result.rawName || toolCall.rawName || toolCall.function.name;
+
+	return {
+		...result,
+		toolId: result.toolId || toolCall.toolId,
+		publicName,
+		rawName,
+		name: result.name || publicName,
+	};
 }
 
 export type SubAgentMessageCallback = (message: SubAgentMessage) => void;
@@ -276,17 +312,17 @@ export async function executeToolCall(
 
 					if (exitCode === 1) {
 						// Exit code 1: Block tool execution, return stderr/stdout as tool result
-						return {
+						return withToolResultMetadata(toolCall, {
 							tool_call_id: toolCall.id,
 							role: 'tool',
 							content:
 								error ||
 								output ||
 								`[beforeToolCall Hook Warning] Command: ${command} exited with code 1`,
-						};
+						});
 					} else if (exitCode >= 2 || exitCode < 0) {
 						// Exit code 2+: Set hookFailed flag and return result immediately
-						return {
+						return withToolResultMetadata(toolCall, {
 							tool_call_id: toolCall.id,
 							role: 'tool',
 							content: '', // Content will be rendered by HookErrorDisplay component
@@ -298,7 +334,7 @@ export async function executeToolCall(
 								output,
 								error,
 							},
-						};
+						});
 					}
 					// Exit code 0: Success, continue
 				}
@@ -470,8 +506,8 @@ export async function executeToolCall(
 			}
 		} else {
 			// Regular tool execution
-			const toolResult = await executeMCPTool(
-				toolCall.function.name,
+			const toolResult = await executeMCPToolCall(
+				toSnowToolCall(toolCall),
 				args,
 				abortSignal,
 				onTokenUpdate,
@@ -500,12 +536,12 @@ export async function executeToolCall(
 			if (onUserInteractionNeeded) {
 				// Check abort before calling user interaction
 				if (abortSignal?.aborted) {
-					result = {
+					result = withToolResultMetadata(toolCall, {
 						tool_call_id: toolCall.id,
 						role: 'tool',
 						content: 'Error: User question interaction aborted',
 						messageStatus: 'error' as const,
-					};
+					});
 					return result;
 				}
 
@@ -517,12 +553,12 @@ export async function executeToolCall(
 
 				// Check abort after getting response
 				if (abortSignal?.aborted) {
-					result = {
+					result = withToolResultMetadata(toolCall, {
 						tool_call_id: toolCall.id,
 						role: 'tool',
 						content: 'Error: User question interaction aborted',
 						messageStatus: 'error' as const,
-					};
+					});
 					return result;
 				}
 
@@ -530,12 +566,12 @@ export async function executeToolCall(
 				if (response.cancelled) {
 					// 用户取消时，返回拒绝结果而不是抛出错误
 					// 这样工具记录会保留在 session 中
-					result = {
+					result = withToolResultMetadata(toolCall, {
 						tool_call_id: toolCall.id,
 						role: 'tool',
 						content: 'Error: User cancelled the question interaction',
 						messageStatus: 'error' as const,
-					};
+					});
 					return result;
 				}
 
@@ -643,11 +679,7 @@ export async function executeToolCall(
 		}
 	}
 
-	if (result && !result.name) {
-		result.name = toolCall.function.name;
-	}
-
-	return result!;
+	return withToolResultMetadata(toolCall, result!);
 }
 
 /**

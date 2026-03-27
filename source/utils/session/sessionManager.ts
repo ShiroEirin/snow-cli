@@ -330,6 +330,7 @@ class SessionManager {
 			return null;
 		}
 
+		await this.hydrateToolIdentity(session);
 		this.cleanIncompleteToolCalls(session);
 
 		for (let i = session.messages.length - 1; i >= 0; i--) {
@@ -352,6 +353,7 @@ class SessionManager {
 			return null;
 		}
 
+		await this.hydrateToolIdentity(session);
 		// 清理未完成的 tool_calls（防止强制退出时留下无效会话）
 		this.cleanIncompleteToolCalls(session);
 
@@ -690,6 +692,36 @@ class SessionManager {
 			}
 		} catch (error) {
 			// Skip directory if it can't be read
+		}
+	}
+
+	private async hydrateToolIdentity(session: Session): Promise<void> {
+		if (
+			!session.messages.some(
+				message =>
+					(message.role === 'assistant' && message.tool_calls?.length) ||
+					(message.role === 'tool' && message.tool_call_id),
+			)
+		) {
+			return;
+		}
+
+		try {
+			const [{getToolRegistrySnapshot}, {hydrateSessionToolIdentity}] =
+				await Promise.all([
+					import('../execution/mcpToolsManager.js'),
+					import('./toolIdentityHydrator.js'),
+				]);
+			const registry = await getToolRegistrySnapshot();
+			const changed = hydrateSessionToolIdentity(
+				session.messages as APIChatMessage[],
+				registry,
+			);
+			if (changed) {
+				session.updatedAt = Date.now();
+			}
+		} catch (error) {
+			logger.warn('Failed to hydrate tool identity for session load:', error);
 		}
 	}
 

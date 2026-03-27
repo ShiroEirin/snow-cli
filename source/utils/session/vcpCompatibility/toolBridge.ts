@@ -16,6 +16,10 @@ type BridgeServiceToolShape = {
 	name: string;
 	description: string;
 	inputSchema: Record<string, unknown>;
+	toolId?: string;
+	originName?: string;
+	displayName?: string;
+	capabilityTags?: string[];
 };
 
 type BridgeServiceInfoShape = {
@@ -49,11 +53,30 @@ type VcpBridgeCommand = {
 	example?: string;
 };
 
+type VcpBridgeError = {
+	code?: string;
+	message?: string;
+	retryable?: boolean;
+	source?: 'snowbridge' | 'plugin';
+	details?: Record<string, unknown>;
+};
+
+type VcpBridgeAsyncStatus = {
+	enabled?: boolean;
+	state?: 'accepted' | 'running' | 'completed' | 'error' | 'cancelled';
+	event?: 'lifecycle' | 'log' | 'info' | 'result';
+	taskId?: string;
+};
+
 type VcpBridgePlugin = {
 	name: string;
+	publicName?: string;
+	originName?: string;
+	toolId?: string;
 	displayName?: string;
 	description?: string;
 	bridgeCommands: VcpBridgeCommand[];
+	capabilityTags?: string[];
 };
 
 type VcpBridgeCapabilities = {
@@ -71,16 +94,35 @@ type VcpManifestResponsePayload = {
 	vcpVersion?: string;
 	capabilities?: VcpBridgeCapabilities;
 	plugins?: VcpBridgePlugin[];
-	error?: {code?: string; message?: string};
+	error?: VcpBridgeError;
+};
+
+type VcpToolResultPayload = {
+	requestId?: string;
+	invocationId?: string;
+	status?: 'success' | 'error';
+	toolId?: string;
+	toolName?: string;
+	originName?: string;
+	asyncStatus?: VcpBridgeAsyncStatus;
+	taskId?: string;
+	result?: unknown;
+	error?: VcpBridgeError;
 };
 
 type VcpToolStatusPayload = {
 	requestId?: string;
 	invocationId?: string;
+	toolId?: string;
+	toolName?: string;
+	originName?: string;
 	status?: string;
 	async?: boolean;
 	taskId?: string;
+	asyncStatus?: VcpBridgeAsyncStatus;
 	result?: unknown;
+	bridgeType?: string;
+	error?: VcpBridgeError;
 };
 
 type VcpToolCancelAckPayload = {
@@ -88,7 +130,7 @@ type VcpToolCancelAckPayload = {
 	invocationId?: string;
 	accepted?: boolean;
 	mode?: 'cancelled' | 'ignored' | 'unsupported';
-	error?: {code?: string; message?: string};
+	error?: VcpBridgeError;
 };
 
 type PendingRequest<T> = {
@@ -102,17 +144,27 @@ type PendingExecutionRequest = PendingRequest<unknown> & {
 };
 
 export type VcpBridgeToolDefinition = {
+	toolId: string;
 	toolName: string;
 	pluginName: string;
+	originName: string;
+	publicName: string;
 	displayName: string;
 	description: string;
 	commands: VcpBridgeCommand[];
 	parameters: Record<string, unknown>;
+	capabilityTags: string[];
 };
 
 export type VcpBridgeDiscoveryResult = {
 	tools: BridgeToolShape[];
 	serviceInfo: BridgeServiceInfoShape;
+	capabilities?: {
+		cancellable?: boolean;
+		asyncCallback?: boolean;
+		statusEvents?: boolean;
+		clientAuth?: boolean;
+	};
 };
 
 const BRIDGE_SERVICE_NAME = 'snowbridge';
@@ -147,6 +199,34 @@ function summarizeText(value?: string, maxLength = 160): string {
 	}
 
 	return `${firstSentence.slice(0, maxLength - 1)}…`;
+}
+
+function normalizeToolIdSegment(value: string): string {
+	return (
+		String(value || '')
+			.trim()
+			.toLowerCase()
+			.replace(/[^a-z0-9_-]+/g, '_')
+			.replace(/^_+|_+$/g, '') || 'tool'
+	);
+}
+
+function createBridgeToolId(originName: string): string {
+	return [
+		normalizeToolIdSegment('vcp_bridge'),
+		normalizeToolIdSegment(BRIDGE_SERVICE_NAME),
+		normalizeToolIdSegment(originName),
+	].join(':');
+}
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+	return Array.from(
+		new Set(
+			values
+				.map(value => String(value || '').trim())
+				.filter(Boolean),
+		),
+	);
 }
 
 function normalizeBridgeToolName(rawName: string, usedNames: Set<string>): string {
@@ -283,6 +363,33 @@ function mergePropertySchemas(
 	return merged;
 }
 
+function buildBridgeCapabilityTags(
+	commands: VcpBridgeCommand[],
+	bridgeCapabilities: VcpBridgeCapabilities = {},
+	existingTags: string[] = [],
+): string[] {
+	const tags = [...existingTags, 'bridge_transport'];
+	tags.push(commands.length > 1 ? 'multi_command' : 'single_command');
+
+	if (bridgeCapabilities.cancelVcpTool) {
+		tags.push('cancellable');
+	}
+
+	if (bridgeCapabilities.asyncCallbacks) {
+		tags.push('async_callback');
+	}
+
+	if (bridgeCapabilities.statusEvents) {
+		tags.push('status_events');
+	}
+
+	if (bridgeCapabilities.clientAuth) {
+		tags.push('client_auth');
+	}
+
+	return uniqueStrings(tags);
+}
+
 function buildToolParameters(commands: VcpBridgeCommand[]): Record<string, unknown> {
 	if (commands.length === 1) {
 		const [singleCommand] = commands;
@@ -384,6 +491,7 @@ function buildToolDescription(plugin: VcpBridgePlugin): string {
 
 export function mapBridgePluginsToTools(
 	plugins: VcpBridgePlugin[],
+	bridgeCapabilities: VcpBridgeCapabilities = {},
 ): {
 	tools: BridgeToolShape[];
 	definitions: Map<string, VcpBridgeToolDefinition>;
@@ -406,16 +514,27 @@ export function mapBridgePluginsToTools(
 			continue;
 		}
 
-		const toolName = normalizeBridgeToolName(plugin.name, usedNames);
+		const originName = plugin.originName || plugin.name;
+		const publicName = plugin.publicName || plugin.name;
+		const toolName = normalizeBridgeToolName(publicName, usedNames);
 		const parameters = buildToolParameters(filteredCommands);
 		const description = buildToolDescription(plugin);
+		const capabilityTags = buildBridgeCapabilityTags(
+			filteredCommands,
+			bridgeCapabilities,
+			plugin.capabilityTags || [],
+		);
 		const definition: VcpBridgeToolDefinition = {
+			toolId: plugin.toolId || createBridgeToolId(originName),
 			toolName,
-			pluginName: plugin.name,
+			pluginName: originName,
+			originName,
+			publicName: toolName,
 			displayName: plugin.displayName || plugin.name,
 			description,
 			commands: filteredCommands,
 			parameters,
+			capabilityTags,
 		};
 
 		definitions.set(toolName, definition);
@@ -431,6 +550,10 @@ export function mapBridgePluginsToTools(
 			name: toolName,
 			description,
 			inputSchema: parameters,
+			toolId: definition.toolId,
+			originName,
+			displayName: definition.displayName,
+			capabilityTags,
 		});
 	}
 
@@ -455,7 +578,22 @@ function toErrorMessage(error: unknown): string {
 		return error.message;
 	}
 
+	if (error && typeof error === 'object' && 'message' in error) {
+		return String(error.message);
+	}
+
 	return String(error);
+}
+
+function toBridgeExecutionError(
+	error: VcpBridgeError | undefined,
+	fallbackMessage: string,
+): Error {
+	const codePrefix = error?.code ? `[${error.code}] ` : '';
+	const nextError = new Error(`${codePrefix}${error?.message || fallbackMessage}`);
+	nextError.name = 'VcpBridgeError';
+	Object.assign(nextError, {bridgeError: error});
+	return nextError;
 }
 
 function buildClientInfo() {
@@ -529,6 +667,22 @@ class VcpToolBridgeClient {
 		this.pendingCancelRequests.clear();
 	}
 
+	private setDefinitions(definitions: Map<string, VcpBridgeToolDefinition>): void {
+		this.definitions.clear();
+
+		for (const definition of definitions.values()) {
+			for (const key of uniqueStrings([
+				definition.toolId,
+				definition.toolName,
+				definition.publicName,
+				definition.originName,
+				definition.pluginName,
+			])) {
+				this.definitions.set(key, definition);
+			}
+		}
+	}
+
 	private handleSocketMessage(raw: WebSocket.RawData): void {
 		let payload: any;
 		try {
@@ -559,7 +713,8 @@ class VcpToolBridgeClient {
 			}
 
 			case 'vcp_tool_result': {
-				const invocationId = data.invocationId;
+				const resultPayload = data as VcpToolResultPayload;
+				const invocationId = resultPayload.invocationId;
 				if (!invocationId) {
 					return;
 				}
@@ -569,13 +724,16 @@ class VcpToolBridgeClient {
 				}
 				clearTimer(pending.timer);
 				this.pendingExecutionRequests.delete(invocationId);
-				if (data.status === 'error') {
+				if (resultPayload.status === 'error') {
 					pending.reject(
-						new Error(data.error?.message || 'VCP bridge tool execution failed.'),
+						toBridgeExecutionError(
+							resultPayload.error,
+							'VCP bridge tool execution failed.',
+						),
 					);
 					return;
 				}
-				pending.resolve(data.result);
+				pending.resolve(resultPayload.result);
 				return;
 			}
 
@@ -731,9 +889,9 @@ class VcpToolBridgeClient {
 		);
 
 		if (response.status === 'error') {
-			throw new Error(
-				response.error?.message ||
-					'SnowBridge returned an error while listing tools.',
+			throw toBridgeExecutionError(
+				response.error,
+				'SnowBridge returned an error while listing tools.',
 			);
 		}
 
@@ -786,26 +944,36 @@ class VcpToolBridgeClient {
 		config: VcpToolBridgeConfig,
 	): Promise<VcpBridgeDiscoveryResult> {
 		if (!isBridgeEnabled(config)) {
-			this.definitions.clear();
+			this.setDefinitions(new Map());
 			return {
 				tools: [],
 				serviceInfo: createBridgeServiceInfo([]),
+				capabilities: {},
 			};
 		}
 
 		const manifest = await this.requestManifests(config);
-		const mapped = mapBridgePluginsToTools(manifest.plugins || []);
-		this.definitions = mapped.definitions;
+		const mapped = mapBridgePluginsToTools(
+			manifest.plugins || [],
+			manifest.capabilities || {},
+		);
+		this.setDefinitions(mapped.definitions);
 
 		return {
 			tools: mapped.tools,
 			serviceInfo: createBridgeServiceInfo(mapped.serviceTools),
+			capabilities: {
+				cancellable: manifest.capabilities?.cancelVcpTool,
+				asyncCallback: manifest.capabilities?.asyncCallbacks,
+				statusEvents: manifest.capabilities?.statusEvents,
+				clientAuth: manifest.capabilities?.clientAuth,
+			},
 		};
 	}
 
 	async executeTool(
 		config: VcpToolBridgeConfig,
-		toolName: string,
+		toolRef: string,
 		args: Record<string, unknown>,
 		abortSignal?: AbortSignal,
 	): Promise<unknown> {
@@ -817,13 +985,13 @@ class VcpToolBridgeClient {
 			throw new Error('Tool execution aborted by user');
 		}
 
-		if (!this.definitions.has(toolName)) {
+		if (!this.definitions.has(toolRef)) {
 			await this.discoverTools(config);
 		}
 
-		const definition = this.definitions.get(toolName);
+		const definition = this.definitions.get(toolRef);
 		if (!definition) {
-			throw new Error(`Unknown VCP bridge tool: ${toolName}`);
+			throw new Error(`Unknown VCP bridge tool: ${toolRef}`);
 		}
 
 		await this.ensureConnected(config);
@@ -839,7 +1007,7 @@ class VcpToolBridgeClient {
 		return await new Promise<unknown>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.pendingExecutionRequests.delete(invocationId);
-				reject(new Error(`VCP bridge tool "${toolName}" timed out.`));
+				reject(new Error(`VCP bridge tool "${toolRef}" timed out.`));
 			}, BRIDGE_EXECUTION_TIMEOUT_MS);
 
 			const pending: PendingExecutionRequest = {
@@ -871,7 +1039,10 @@ class VcpToolBridgeClient {
 				data: {
 					requestId,
 					invocationId,
+					toolId: definition.toolId,
 					toolName: definition.pluginName,
+					originName: definition.originName,
+					publicName: definition.publicName,
 					toolArgs: payloadArgs,
 					accessToken: config.vcpToolBridgeToken?.trim() || undefined,
 					clientInfo: buildClientInfo(),
@@ -916,7 +1087,7 @@ class VcpToolBridgeClient {
 		this.socket = null;
 		this.socketConfigKey = null;
 		this.connectPromise = null;
-		this.definitions.clear();
+		this.setDefinitions(new Map());
 		this.capabilities = {};
 		this.cleanupPendingRequests(new Error('VCP bridge connection was closed.'));
 
@@ -944,6 +1115,7 @@ export async function discoverVcpBridgeTools(
 		return {
 			tools: [],
 			serviceInfo: createBridgeServiceInfo([], message),
+			capabilities: {},
 		};
 	}
 }

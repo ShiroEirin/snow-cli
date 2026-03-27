@@ -128,6 +128,10 @@ export async function handleToolCallRound(ctx: {
 			const abortedResult = {
 				role: 'tool' as const,
 				tool_call_id: toolCall.id,
+				toolId: toolCall.toolId,
+				publicName: toolCall.publicName || toolCall.function.name,
+				rawName: toolCall.rawName || toolCall.function.name,
+				name: toolCall.publicName || toolCall.function.name,
 				content: 'Tool execution aborted by user',
 				messageStatus: 'error' as const,
 			};
@@ -186,6 +190,8 @@ export async function handleToolCallRound(ctx: {
 				opts,
 				{
 					id: 'fake-tool-call',
+					publicName: 'askuser',
+					rawName: 'askuser',
 					type: 'function',
 					function: {name: 'askuser', arguments: '{}'},
 				},
@@ -199,6 +205,10 @@ export async function handleToolCallRound(ctx: {
 			const abortedResult = {
 				role: 'tool' as const,
 				tool_call_id: toolCall.id,
+				toolId: toolCall.toolId,
+				publicName: toolCall.publicName || toolCall.function.name,
+				rawName: toolCall.rawName || toolCall.function.name,
+				name: toolCall.publicName || toolCall.function.name,
 				content: 'Error: Tool execution aborted by user',
 				messageStatus: 'error' as const,
 			};

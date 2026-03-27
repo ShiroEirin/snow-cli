@@ -1,13 +1,4 @@
-import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-// Intentionally kept for backward compatibility fallback, despite deprecation
-import {SSEClientTransport} from '@modelcontextprotocol/sdk/client/sse.js';
-import {
-	getMCPConfig,
-	getOpenAiConfig,
-	type MCPServer,
-} from '../config/apiConfig.js';
+import {getMCPConfig, getOpenAiConfig} from '../config/apiConfig.js';
 import {mcpTools as filesystemTools} from '../../mcp/filesystem.js';
 import {mcpTools as terminalTools} from '../../mcp/bash.js';
 import {mcpTools as aceCodeSearchTools} from '../../mcp/aceCodeSearch.js';
@@ -17,22 +8,10 @@ import {mcpTools as codebaseSearchTools} from '../../mcp/codebaseSearch.js';
 import {mcpTools as askUserQuestionTools} from '../../mcp/askUserQuestion.js';
 import {mcpTools as schedulerTools} from '../../mcp/scheduler.js';
 import {TodoService} from '../../mcp/todo.js';
-import {
-	mcpTools as notebookTools,
-	executeNotebookTool,
-} from '../../mcp/notebook.js';
-import {
-	getMCPTools as getSubAgentTools,
-	subAgentService,
-} from '../../mcp/subagent.js';
-import {
-	getTeamMCPTools as getTeamTools,
-	teamService,
-} from '../../mcp/team.js';
-import {
-	getMCPTools as getSkillTools,
-	executeSkillTool,
-} from '../../mcp/skills.js';
+import {mcpTools as notebookTools} from '../../mcp/notebook.js';
+import {getMCPTools as getSubAgentTools} from '../../mcp/subagent.js';
+import {getTeamMCPTools as getTeamTools} from '../../mcp/team.js';
+import {getMCPTools as getSkillTools} from '../../mcp/skills.js';
 import {sessionManager} from '../session/sessionManager.js';
 import {
 	isBuiltInServiceEnabled,
@@ -43,11 +22,32 @@ import {
 	cleanupIdleVcpBridgeConnection,
 	closeVcpBridgeConnection,
 	discoverVcpBridgeTools,
-	executeVcpBridgeTool,
 } from '../session/vcpCompatibility/toolBridge.js';
 import {logger} from '../core/logger.js';
-import {resourceMonitor} from '../core/resourceMonitor.js';
 import {HookFailedError} from './hookFailedError.js';
+import {executeBridgeToolCall} from '../../tooling/core/toolExecutors/bridgeExecutor.js';
+import {
+	executeLocalToolCall,
+	isLocalToolService,
+} from '../../tooling/core/toolExecutors/localExecutor.js';
+import {
+	EXTERNAL_MCP_CLIENT_IDLE_TIMEOUT,
+	cleanupIdleExternalMcpConnections,
+	closeAllExternalMcpConnections,
+	closeExternalMcpConnection,
+	executeExternalMcpToolCall,
+	probeExternalMcpTools,
+} from '../../tooling/core/toolExecutors/mcpExecutor.js';
+import {buildBridgeToolSpecs} from '../../tooling/core/toolProviders/bridgeProvider.js';
+import {buildLocalToolSpecs} from '../../tooling/core/toolProviders/localProvider.js';
+import {buildMcpToolSpecs} from '../../tooling/core/toolProviders/mcpProvider.js';
+import {buildToolRegistrySnapshot} from '../../tooling/core/toolRegistry.js';
+import {tryRouteSnowToolCall} from '../../tooling/core/toolRouter.js';
+import type {
+	SnowToolCall,
+	SnowToolSpec,
+	ToolRegistrySnapshot,
+} from '../../tooling/core/types.js';
 import os from 'os';
 import path from 'path';
 
@@ -67,12 +67,6 @@ export interface MCPTool {
 	};
 }
 
-interface InternalMCPTool {
-	name: string;
-	description: string;
-	inputSchema: any;
-}
-
 export interface MCPServiceTools {
 	serviceName: string;
 	tools: Array<{
@@ -90,6 +84,7 @@ export interface MCPServiceTools {
 interface MCPToolsCache {
 	tools: MCPTool[];
 	servicesInfo: MCPServiceTools[];
+	registry: ToolRegistrySnapshot;
 	lastUpdate: number;
 	configHash: string;
 }
@@ -99,18 +94,14 @@ const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 // Lazy initialization of TODO service to avoid circular dependencies
 let todoService: TodoService | null = null;
-
-// 🔥 FIX: Persistent MCP client connections for all external services
-// MCP protocol supports multiple calls over same connection - no need to reconnect each time
-interface PersistentMCPClient {
-	client: Client;
-	transport: any;
-	lastUsed: number;
-}
-
-const persistentClients = new Map<string, PersistentMCPClient>();
-const CLIENT_IDLE_TIMEOUT = 10 * 60 * 1000; // 10 minutes idle timeout
 const VCP_BRIDGE_SERVICE_NAME = 'snowbridge';
+
+function toSchemaRecord(value: any): Record<string, unknown> {
+	return (value && typeof value === 'object' ? value : {}) as Record<
+		string,
+		unknown
+	>;
+}
 
 /**
  * Get the TODO service instance (lazy initialization)
@@ -170,16 +161,6 @@ export function getRegisteredServicePrefixes(): string[] {
 	} catch {
 		return builtInPrefixes;
 	}
-}
-
-function isVcpBridgeToolCached(toolName: string): boolean {
-	return (
-		toolsCache?.servicesInfo.some(
-			service =>
-				service.serviceName === VCP_BRIDGE_SERVICE_NAME &&
-				service.tools.some(tool => tool.name === toolName),
-		) ?? false
-	);
 }
 
 /**
@@ -243,12 +224,22 @@ async function getCachedTools(): Promise<MCPTool[]> {
 	return toolsCache!.tools;
 }
 
+export async function getToolRegistrySnapshot(): Promise<ToolRegistrySnapshot> {
+	if (await isCacheValid()) {
+		return toolsCache!.registry;
+	}
+
+	await refreshToolsCache();
+	return toolsCache!.registry;
+}
+
 /**
  * Refresh the tools cache by collecting all available tools
  */
 async function refreshToolsCache(): Promise<void> {
 	const allTools: MCPTool[] = [];
 	const servicesInfo: MCPServiceTools[] = [];
+	const canonicalSpecs: SnowToolSpec[] = [];
 
 	// Helper: Add a built-in service, respecting disabled state
 	// Disabled services are added to servicesInfo (for MCP panel display) but NOT to allTools (AI cannot use them)
@@ -285,6 +276,20 @@ async function refreshToolsCache(): Promise<void> {
 				});
 			}
 		}
+
+		canonicalSpecs.push(
+			...buildLocalToolSpecs(
+				tools.map(tool => ({
+					serviceName,
+					publicName: tool.name,
+					originName: tool.name.replace(`${prefix}-`, ''),
+					description: tool.description,
+					inputSchema: toSchemaRecord(tool.inputSchema),
+					enabled,
+					connected: true,
+				})),
+			),
+		);
 	};
 
 	// Add built-in filesystem tools
@@ -368,6 +373,21 @@ async function refreshToolsCache(): Promise<void> {
 				});
 			}
 		}
+
+		canonicalSpecs.push(
+			...buildLocalToolSpecs(
+				subAgentTools.map(tool => ({
+					serviceName: 'subagent',
+					publicName: `subagent-${tool.name}`,
+					originName: tool.name,
+					description: tool.description,
+					inputSchema: toSchemaRecord(tool.inputSchema),
+					owner: 'snow_subagent',
+					enabled,
+					connected: true,
+				})),
+			),
+		);
 	}
 
 	// Add team tools (for Agent Team mode)
@@ -396,6 +416,21 @@ async function refreshToolsCache(): Promise<void> {
 					});
 				}
 			}
+
+			canonicalSpecs.push(
+				...buildLocalToolSpecs(
+					teamTools.map(tool => ({
+						serviceName: 'team',
+						publicName: `team-${tool.name}`,
+						originName: tool.name,
+						description: tool.description,
+						inputSchema: toSchemaRecord(tool.inputSchema),
+						owner: 'snow_team',
+						enabled: teamEnabled !== false,
+						connected: true,
+					})),
+				),
+			);
 		}
 	}
 
@@ -425,6 +460,21 @@ async function refreshToolsCache(): Promise<void> {
 				});
 			}
 		}
+
+		canonicalSpecs.push(
+			...buildLocalToolSpecs(
+				skillTools.map(tool => ({
+					serviceName: 'skill',
+					publicName: tool.name,
+					originName: tool.name.replace(/^skill-/, ''),
+					description: tool.description,
+					inputSchema: toSchemaRecord(tool.inputSchema),
+					owner: 'snow_skill',
+					enabled,
+					connected: true,
+				})),
+			),
+		);
 	}
 
 	// Add SnowBridge-exported tools when VCP mode explicitly enables bridge transport
@@ -456,6 +506,13 @@ async function refreshToolsCache(): Promise<void> {
 				),
 			};
 			servicesInfo.push(filteredServiceInfo);
+			canonicalSpecs.push(
+				...buildBridgeToolSpecs({
+					tools: filteredBridgeTools,
+					serviceInfo: filteredServiceInfo,
+					capabilities: bridgeResult.capabilities,
+				}),
+			);
 
 			if (filteredServiceInfo.connected) {
 				for (const tool of filteredBridgeTools) {
@@ -527,6 +584,20 @@ async function refreshToolsCache(): Promise<void> {
 							},
 						});
 					}
+
+					canonicalSpecs.push(
+						...buildLocalToolSpecs(
+							codebaseSearchTools.map(tool => ({
+								serviceName: 'codebase',
+								publicName: tool.name,
+								originName: tool.name.replace('codebase-', ''),
+								description: tool.description,
+								inputSchema: toSchemaRecord(tool.inputSchema),
+								enabled: true,
+								connected: true,
+							})),
+						),
+					);
 				}
 			}
 		}
@@ -552,7 +623,10 @@ async function refreshToolsCache(): Promise<void> {
 			}
 
 			try {
-				const serviceTools = await probeServiceTools(serviceName, server);
+				const serviceTools = await probeExternalMcpTools(
+					serviceName,
+					server,
+				);
 				servicesInfo.push({
 					serviceName,
 					tools: serviceTools,
@@ -570,6 +644,7 @@ async function refreshToolsCache(): Promise<void> {
 						},
 					});
 				}
+				canonicalSpecs.push(...buildMcpToolSpecs(serviceName, serviceTools));
 			} catch (error) {
 				servicesInfo.push({
 					serviceName,
@@ -584,10 +659,13 @@ async function refreshToolsCache(): Promise<void> {
 		logger.warn('Failed to load MCP config:', error);
 	}
 
+	const registry = buildToolRegistrySnapshot(canonicalSpecs);
+
 	// Update cache
 	toolsCache = {
-		tools: allTools,
+		tools: registry.publicTools as MCPTool[],
 		servicesInfo,
+		registry,
 		lastUpdate: Date.now(),
 		configHash: await generateConfigHash(),
 	};
@@ -607,7 +685,6 @@ export async function refreshMCPToolsCache(): Promise<void> {
  */
 export async function reconnectMCPService(serviceName: string): Promise<void> {
 	if (!toolsCache) {
-		// If no cache, do full refresh
 		await refreshToolsCache();
 		return;
 	}
@@ -636,60 +713,8 @@ export async function reconnectMCPService(serviceName: string): Promise<void> {
 		throw new Error(`Service ${serviceName} not found in configuration`);
 	}
 
-	// Find and update the service in cache
-	const serviceIndex = toolsCache.servicesInfo.findIndex(
-		s => s.serviceName === serviceName,
-	);
-
-	if (serviceIndex === -1) {
-		// Service not in cache, do full refresh
-		await refreshToolsCache();
-		return;
-	}
-
-	try {
-		// Try to reconnect to the service
-		const serviceTools = await probeServiceTools(serviceName, server);
-
-		// Update service info in cache
-		toolsCache.servicesInfo[serviceIndex] = {
-			serviceName,
-			tools: serviceTools,
-			isBuiltIn: false,
-			connected: true,
-		};
-
-		// Remove old tools for this service from the tools list
-		toolsCache.tools = toolsCache.tools.filter(
-			tool => !tool.function.name.startsWith(`${serviceName}-`),
-		);
-
-		// Add new tools for this service
-		for (const tool of serviceTools) {
-			toolsCache.tools.push({
-				type: 'function',
-				function: {
-					name: `${serviceName}-${tool.name}`,
-					description: tool.description,
-					parameters: tool.inputSchema,
-				},
-			});
-		}
-	} catch (error) {
-		// Update service as failed
-		toolsCache.servicesInfo[serviceIndex] = {
-			serviceName,
-			tools: [],
-			isBuiltIn: false,
-			connected: false,
-			error: error instanceof Error ? error.message : 'Unknown error',
-		};
-
-		// Remove tools for this service from the tools list
-		toolsCache.tools = toolsCache.tools.filter(
-			tool => !tool.function.name.startsWith(`${serviceName}-`),
-		);
-	}
+	await closeExternalMcpConnection(serviceName);
+	await refreshToolsCache();
 }
 
 /**
@@ -720,436 +745,18 @@ export async function getMCPServicesInfo(): Promise<MCPServiceTools[]> {
 }
 
 /**
- * Quick probe of MCP service tools without maintaining connections
- * This is used for caching tool definitions
- */
-async function probeServiceTools(
-	serviceName: string,
-	server: MCPServer,
-): Promise<InternalMCPTool[]> {
-	// HTTP 服务需要更长超时时间
-	const timeout = getMCPServerTransportType(server) === 'http' ? 15000 : 5000;
-	return await connectAndGetTools(serviceName, server, timeout);
-}
-
-const MCP_ENV_VAR_PATTERN = /\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-
-function getMCPServerTransportType(server: MCPServer): 'http' | 'stdio' | null {
-	if (server.type) {
-		// 'local' 是 'stdio' 的别名
-		if (server.type === 'local') {
-			return 'stdio';
-		}
-		return server.type as 'http' | 'stdio';
-	}
-
-	if (server.url) {
-		return 'http';
-	}
-
-	if (server.command) {
-		return 'stdio';
-	}
-
-	return null;
-}
-
-function getServerProcessEnv(server: MCPServer): Record<string, string> {
-	const processEnv: Record<string, string> = {};
-
-	Object.entries(process.env).forEach(([key, value]) => {
-		if (value !== undefined) {
-			processEnv[key] = value;
-		}
-	});
-
-	if (server.env) {
-		Object.assign(processEnv, server.env);
-	}
-
-	// environment 是 env 的别名，与 env 等价
-	if (server.environment) {
-		Object.assign(processEnv, server.environment);
-	}
-
-	return processEnv;
-}
-
-function interpolateMCPConfigValue(
-	value: string,
-	env: Record<string, string>,
-): string {
-	return value.replace(MCP_ENV_VAR_PATTERN, (match, braced, simple) => {
-		const varName = braced || simple;
-		return env[varName] ?? match;
-	});
-}
-
-function getHttpTransportConfig(server: MCPServer): {
-	url: URL;
-	requestInit: RequestInit;
-} {
-	if (!server.url) {
-		throw new Error('No URL specified');
-	}
-
-	const env = getServerProcessEnv(server);
-	const url = new URL(interpolateMCPConfigValue(server.url, env));
-	const headers: Record<string, string> = {
-		'Content-Type': 'application/json',
-		Accept: 'application/json, text/event-stream',
-	};
-
-	if (env['MCP_API_KEY']) {
-		headers['Authorization'] = `Bearer ${env['MCP_API_KEY']}`;
-	}
-
-	if (env['MCP_AUTH_HEADER']) {
-		headers['Authorization'] = env['MCP_AUTH_HEADER'];
-	}
-
-	if (server.headers) {
-		Object.entries(server.headers).forEach(([key, value]) => {
-			headers[key] = interpolateMCPConfigValue(value, env);
-		});
-	}
-
-	return {
-		url,
-		requestInit: {headers},
-	};
-}
-
-function createMCPClient(serviceName: string): Client {
-	return new Client(
-		{
-			name: `snow-cli-${serviceName}`,
-			version: '1.0.0',
-		},
-		{
-			capabilities: {},
-		},
-	);
-}
-
-function getMCPErrorMessage(error: unknown): string {
-	if (error instanceof Error) {
-		return error.message;
-	}
-
-	return String(error);
-}
-
-function shouldFallbackToSSE(error: unknown): boolean {
-	const errorCode = (error as {code?: unknown})?.code;
-	if (typeof errorCode === 'number') {
-		return [404, 405, 406, 415, 501].includes(errorCode);
-	}
-
-	const message = getMCPErrorMessage(error).toLowerCase();
-	return (
-		message.includes('error posting to endpoint (http 404)') ||
-		message.includes('error posting to endpoint (http 405)') ||
-		message.includes('error posting to endpoint (http 406)') ||
-		message.includes('error posting to endpoint (http 415)') ||
-		message.includes('error posting to endpoint (http 501)') ||
-		message.includes('method not allowed') ||
-		message.includes('unexpected content type')
-	);
-}
-
-/**
- * Connect to MCP service and get tools (used for both caching and execution)
- * @param serviceName - Name of the service
- * @param server - Server configuration
- * @param timeoutMs - Timeout in milliseconds (default 10000)
- */
-async function connectAndGetTools(
-	serviceName: string,
-	server: MCPServer,
-	timeoutMs: number = 10000,
-): Promise<InternalMCPTool[]> {
-	let client = createMCPClient(serviceName);
-	let transport: any;
-	let timeoutId: NodeJS.Timeout | null = null;
-	let connectionAborted = false;
-
-	const abortConnection = () => {
-		connectionAborted = true;
-		if (timeoutId) {
-			clearTimeout(timeoutId);
-			timeoutId = null;
-		}
-	};
-
-	const runWithTimeout = async <T>(
-		operation: Promise<T>,
-		timeoutMessage: string,
-	): Promise<T> => {
-		try {
-			return await Promise.race([
-				operation,
-				new Promise<never>((_, reject) => {
-					timeoutId = setTimeout(() => {
-						abortConnection();
-						reject(new Error(timeoutMessage));
-					}, timeoutMs);
-				}),
-			]);
-		} finally {
-			if (timeoutId) {
-				clearTimeout(timeoutId);
-				timeoutId = null;
-			}
-		}
-	};
-
-	try {
-		resourceMonitor.trackMCPConnectionOpened(serviceName);
-
-		const transportType = getMCPServerTransportType(server);
-		if (transportType === 'http') {
-			const {url, requestInit} = getHttpTransportConfig(server);
-
-			try {
-				logger.debug(
-					`[MCP] Attempting StreamableHTTP connection to ${serviceName}...`,
-				);
-
-				transport = new StreamableHTTPClientTransport(url, {
-					requestInit,
-				});
-				await runWithTimeout(
-					client.connect(transport),
-					'StreamableHTTP connection timeout',
-				);
-
-				logger.debug(
-					`[MCP] Successfully connected to ${serviceName} using StreamableHTTP`,
-				);
-			} catch (httpError) {
-				const streamableHttpErrorMessage = getMCPErrorMessage(httpError);
-
-				try {
-					await client.close();
-				} catch {}
-
-				if (connectionAborted) {
-					throw new Error('Connection aborted due to timeout');
-				}
-
-				if (!shouldFallbackToSSE(httpError)) {
-					throw httpError;
-				}
-
-				logger.debug(
-					`[MCP] StreamableHTTP is not supported for ${serviceName} (${streamableHttpErrorMessage}), falling back to SSE (deprecated)...`,
-				);
-
-				client = createMCPClient(serviceName);
-				try {
-					transport = new SSEClientTransport(url, {
-						requestInit,
-					});
-					await runWithTimeout(
-						client.connect(transport),
-						'SSE connection timeout',
-					);
-
-					logger.debug(
-						`[MCP] Successfully connected to ${serviceName} using SSE (deprecated)`,
-					);
-				} catch (sseError) {
-					throw new Error(
-						`StreamableHTTP failed for ${serviceName}: ${streamableHttpErrorMessage}; SSE fallback failed: ${getMCPErrorMessage(
-							sseError,
-						)}`,
-					);
-				}
-			}
-		} else if (transportType === 'stdio') {
-			if (!server.command) {
-				throw new Error('No command specified');
-			}
-
-			transport = new StdioClientTransport({
-				command: server.command,
-				args: server.args || [],
-				env: getServerProcessEnv(server),
-				stderr: 'ignore', // 屏蔽第三方MCP服务的stderr输出,避免干扰CLI界面
-			});
-			await client.connect(transport);
-		} else {
-			throw new Error('No URL or command specified');
-		}
-
-		const toolsResult = await runWithTimeout(
-			client.listTools(),
-			'ListTools timeout',
-		);
-
-		return (
-			toolsResult.tools?.map(tool => ({
-				name: tool.name,
-				description: tool.description || '',
-				inputSchema: tool.inputSchema,
-			})) || []
-		);
-	} finally {
-		if (timeoutId) {
-			clearTimeout(timeoutId);
-		}
-
-		try {
-			await Promise.race([
-				client.close(),
-				new Promise(resolve => setTimeout(resolve, 1000)),
-			]);
-			resourceMonitor.trackMCPConnectionClosed(serviceName);
-		} catch (error) {
-			logger.warn(`Failed to close client for ${serviceName}:`, error);
-			resourceMonitor.trackMCPConnectionClosed(serviceName);
-		}
-	}
-}
-
-/**
- * Get or create a persistent MCP client for a service
- */
-async function getPersistentClient(
-	serviceName: string,
-	server: MCPServer,
-): Promise<Client> {
-	const existing = persistentClients.get(serviceName);
-	if (existing) {
-		existing.lastUsed = Date.now();
-		return existing.client;
-	}
-
-	let client = createMCPClient(serviceName);
-	resourceMonitor.trackMCPConnectionOpened(serviceName);
-
-	let transport: any;
-	const transportType = getMCPServerTransportType(server);
-
-	try {
-		if (transportType === 'http') {
-			const {url, requestInit} = getHttpTransportConfig(server);
-
-			try {
-				transport = new StreamableHTTPClientTransport(url, {
-					requestInit,
-				});
-				await client.connect(transport);
-			} catch (httpError) {
-				const streamableHttpErrorMessage = getMCPErrorMessage(httpError);
-
-				try {
-					await client.close();
-				} catch {}
-
-				if (!shouldFallbackToSSE(httpError)) {
-					throw httpError;
-				}
-
-				logger.debug(
-					`[MCP] StreamableHTTP is not supported for ${serviceName} (${streamableHttpErrorMessage}), falling back to SSE (deprecated)...`,
-				);
-
-				client = createMCPClient(serviceName);
-				transport = new SSEClientTransport(url, {
-					requestInit,
-				});
-
-				try {
-					await client.connect(transport);
-				} catch (sseError) {
-					throw new Error(
-						`StreamableHTTP failed for ${serviceName}: ${streamableHttpErrorMessage}; SSE fallback failed: ${getMCPErrorMessage(
-							sseError,
-						)}`,
-					);
-				}
-			}
-		} else if (transportType === 'stdio') {
-			if (!server.command) {
-				throw new Error('No command specified');
-			}
-
-			transport = new StdioClientTransport({
-				command: server.command,
-				args: server.args || [],
-				env: getServerProcessEnv(server),
-				stderr: 'pipe', // Persistent services need stderr for process communication
-			});
-			await client.connect(transport);
-		} else {
-			throw new Error('No URL or command specified');
-		}
-	} catch (error) {
-		try {
-			await client.close();
-		} catch {}
-
-		resourceMonitor.trackMCPConnectionClosed(serviceName);
-		throw error;
-	}
-
-	persistentClients.set(serviceName, {
-		client,
-		transport,
-		lastUsed: Date.now(),
-	});
-
-	logger.info(`Created persistent MCP connection for ${serviceName}`);
-
-	return client;
-}
-
-/**
  * Close idle persistent connections
  */
 export async function cleanupIdleMCPConnections(): Promise<void> {
-	const now = Date.now();
-	const toClose: string[] = [];
-
-	for (const [serviceName, clientInfo] of persistentClients.entries()) {
-		if (now - clientInfo.lastUsed > CLIENT_IDLE_TIMEOUT) {
-			toClose.push(serviceName);
-		}
-	}
-
-	for (const serviceName of toClose) {
-		const clientInfo = persistentClients.get(serviceName);
-		if (clientInfo) {
-			try {
-				await clientInfo.client.close();
-				resourceMonitor.trackMCPConnectionClosed(serviceName);
-				logger.info(`Closed idle MCP connection for ${serviceName}`);
-			} catch (error) {
-				logger.warn(`Failed to close idle client for ${serviceName}:`, error);
-			}
-			persistentClients.delete(serviceName);
-		}
-	}
-
-	await cleanupIdleVcpBridgeConnection(CLIENT_IDLE_TIMEOUT);
+	await cleanupIdleExternalMcpConnections();
+	await cleanupIdleVcpBridgeConnection(EXTERNAL_MCP_CLIENT_IDLE_TIMEOUT);
 }
 
 /**
  * Close all persistent MCP connections
  */
 export async function closeAllMCPConnections(): Promise<void> {
-	for (const [serviceName, clientInfo] of persistentClients.entries()) {
-		try {
-			await clientInfo.client.close();
-			resourceMonitor.trackMCPConnectionClosed(serviceName);
-			logger.info(`Closed MCP connection for ${serviceName}`);
-		} catch (error) {
-			logger.warn(`Failed to close client for ${serviceName}:`, error);
-		}
-	}
-	persistentClients.clear();
+	await closeAllExternalMcpConnections();
 	await closeVcpBridgeConnection();
 }
 
@@ -1157,12 +764,14 @@ export async function closeAllMCPConnections(): Promise<void> {
  * Execute an MCP tool by parsing the prefixed tool name
  * Only connects to the service when actually needed
  */
-export async function executeMCPTool(
-	toolName: string,
+export async function executeMCPToolCall(
+	toolCall: Pick<SnowToolCall, 'toolId' | 'publicName' | 'rawName'>,
 	args: any,
 	abortSignal?: AbortSignal,
 	onTokenUpdate?: (tokenCount: number) => void,
 ): Promise<any> {
+	const toolName = toolCall.publicName || toolCall.rawName || '';
+
 	// Normalize args: parse stringified JSON parameters for known parameters
 	// Some AI models (e.g., Anthropic) may serialize array/object parameters as JSON strings
 	// Only parse parameters that are EXPECTED to be arrays/objects (whitelist approach)
@@ -1214,93 +823,69 @@ export async function executeMCPTool(
 				args.query || '',
 				args.maxResults,
 			);
-			return textResult;
+			result = textResult;
+			return result;
 		}
 
 		const apiConfig = getOpenAiConfig();
-		if (
-			apiConfig.backendMode === 'vcp' &&
-			apiConfig.toolTransport === 'bridge' &&
-			isVcpBridgeToolCached(toolName)
-		) {
-			return await executeVcpBridgeTool(
-				apiConfig,
-				toolName,
-				args ?? {},
-				abortSignal,
-			);
-		}
+		const mcpConfig = getMCPConfig();
 
-		// Find the service name by checking against known services
-		let serviceName: string | null = null;
-		let actualToolName: string | null = null;
-
-		// Check built-in services first
-		if (toolName.startsWith('todo-')) {
-			serviceName = 'todo';
-			actualToolName = toolName.substring('todo-'.length);
-		} else if (toolName.startsWith('notebook-')) {
-			serviceName = 'notebook';
-			actualToolName = toolName.substring('notebook-'.length);
-		} else if (toolName.startsWith('filesystem-')) {
-			serviceName = 'filesystem';
-			actualToolName = toolName.substring('filesystem-'.length);
-		} else if (toolName.startsWith('terminal-')) {
-			serviceName = 'terminal';
-			actualToolName = toolName.substring('terminal-'.length);
-		} else if (toolName.startsWith('ace-')) {
-			serviceName = 'ace';
-			actualToolName = toolName.substring('ace-'.length);
-		} else if (toolName.startsWith('websearch-')) {
-			serviceName = 'websearch';
-			actualToolName = toolName.substring('websearch-'.length);
-		} else if (toolName.startsWith('ide-')) {
-			serviceName = 'ide';
-			actualToolName = toolName.substring('ide-'.length);
-		} else if (toolName.startsWith('codebase-')) {
-			serviceName = 'codebase';
-			actualToolName = toolName.substring('codebase-'.length);
-		} else if (toolName.startsWith('askuser-')) {
-			serviceName = 'askuser';
-			actualToolName = toolName.substring('askuser-'.length);
-		} else if (toolName.startsWith('scheduler-')) {
-			serviceName = 'scheduler';
-			actualToolName = toolName.substring('scheduler-'.length);
-		} else if (toolName.startsWith('skill-')) {
-			serviceName = 'skill';
-			actualToolName = toolName.substring('skill-'.length);
-		} else if (toolName.startsWith('subagent-')) {
-			serviceName = 'subagent';
-			actualToolName = toolName.substring('subagent-'.length);
-		} else if (toolName.startsWith('team-')) {
-			serviceName = 'team';
-			actualToolName = toolName.substring('team-'.length);
-		} else {
-			// Check configured MCP services
-			try {
-				const mcpConfig = getMCPConfig();
-				// Sort service names by length descending to match longest first
-				const serviceNames = Object.keys(mcpConfig.mcpServers).sort(
-					(a, b) => b.length - a.length,
-				);
-				for (const configuredServiceName of serviceNames) {
-					const prefix = `${configuredServiceName}-`;
-					if (toolName.startsWith(prefix)) {
-						serviceName = configuredServiceName;
-						actualToolName = toolName.substring(prefix.length);
-						break;
+		const registry = await getToolRegistrySnapshot();
+		const routedExecution = await tryRouteSnowToolCall(
+			registry,
+			{
+				id: 'runtime-tool-call',
+				toolId: toolCall.toolId,
+				publicName: toolName,
+				rawName: toolName,
+				argumentsText: JSON.stringify(args ?? {}),
+			},
+			args ?? {},
+			{
+				vcp_bridge: async spec =>
+					await executeBridgeToolCall(
+						apiConfig,
+						spec.toolId,
+						(args ?? {}) as Record<string, unknown>,
+						abortSignal,
+					),
+				snow_mcp: async spec => {
+					const server = mcpConfig.mcpServers[spec.serviceName];
+					if (!server) {
+						throw new Error(`MCP service not found: ${spec.serviceName}`);
 					}
-				}
-			} catch {
-				// Ignore config errors, will handle below
-			}
-		}
 
-		if (!serviceName || !actualToolName) {
+					return executeExternalMcpToolCall(
+						spec.serviceName,
+						server,
+						spec.originName,
+						args ?? {},
+					);
+				},
+				snow_builtin: async spec => spec,
+				snow_subagent: async spec => spec,
+				snow_team: async spec => spec,
+				snow_skill: async spec => spec,
+			},
+			{abortSignal},
+		);
+
+		if (!routedExecution.matched) {
 			throw new Error(
-				`Invalid tool name format: ${toolName}. Expected format: serviceName-toolName`,
+				`Tool not found in registry: ${toolName}. The current execution path only supports tools registered by the canonical Snow registry.`,
 			);
 		}
+
+		if (
+			routedExecution.spec.owner === 'vcp_bridge' ||
+			routedExecution.spec.owner === 'snow_mcp'
+		) {
+			result = routedExecution.result;
+			return result;
+		}
+
+		const serviceName = routedExecution.spec.serviceName;
+		const actualToolName = routedExecution.spec.originName;
 
 		// Check if built-in service is disabled
 		const builtInServices = [
@@ -1316,6 +901,7 @@ export async function executeMCPTool(
 			'scheduler',
 			'skill',
 			'subagent',
+			'team',
 		];
 		if (
 			builtInServices.includes(serviceName) &&
@@ -1327,531 +913,18 @@ export async function executeMCPTool(
 			);
 		}
 
-		if (serviceName === 'todo') {
-			// Handle built-in TODO tools (no connection needed)
-			result = await getTodoService().executeTool(actualToolName, args);
-		} else if (serviceName === 'notebook') {
-			// Handle built-in Notebook tools (no connection needed)
-			result = await executeNotebookTool(toolName, args);
-		} else if (serviceName === 'filesystem') {
-			// Handle built-in filesystem tools (no connection needed)
-			const {filesystemService} = await import('../../mcp/filesystem.js');
-
-			switch (actualToolName) {
-				case 'read':
-					// Validate required parameters
-					if (!args.filePath) {
-						throw new Error(
-							`Missing required parameter 'filePath' for filesystem-read tool.
-` +
-								`Received args: ${JSON.stringify(args, null, 2)}
-` +
-								`AI Tip: Make sure to provide the 'filePath' parameter as a string.`,
-						);
-					}
-					result = await filesystemService.getFileContent(
-						args.filePath,
-						args.startLine,
-						args.endLine,
-					);
-					break;
-				case 'create':
-					// Validate required parameters
-					if (!args.filePath) {
-						throw new Error(
-							`Missing required parameter 'filePath' for filesystem-create tool.
-` +
-								`Received args: ${JSON.stringify(args, null, 2)}
-` +
-								`AI Tip: Make sure to provide the 'filePath' parameter as a string.`,
-						);
-					}
-					if (args.content === undefined || args.content === null) {
-						throw new Error(
-							`Missing required parameter 'content' for filesystem-create tool.
-` +
-								`Received args: ${JSON.stringify(args, null, 2)}
-` +
-								`AI Tip: Make sure to provide the 'content' parameter as a string (can be empty string "").`,
-						);
-					}
-					result = await filesystemService.createFile(
-						args.filePath,
-						args.content,
-						args.createDirectories,
-					);
-					break;
-				case 'edit':
-					// Validate required parameters
-					if (!args.filePath) {
-						throw new Error(
-							`Missing required parameter 'filePath' for filesystem-edit tool.
-` +
-								`Received args: ${JSON.stringify(args, null, 2)}
-` +
-								`AI Tip: Make sure to provide the 'filePath' parameter as a string or array.`,
-						);
-					}
-					if (
-						!Array.isArray(args.filePath) &&
-						(args.startLine === undefined ||
-							args.endLine === undefined ||
-							args.newContent === undefined)
-					) {
-						throw new Error(
-							`Missing required parameters for filesystem-edit tool.
-` +
-								`For single file mode, 'startLine', 'endLine', and 'newContent' are required.
-` +
-								`Received args: ${JSON.stringify(args, null, 2)}
-` +
-								`AI Tip: Provide startLine (number), endLine (number), and newContent (string).`,
-						);
-					}
-					result = await filesystemService.editFile(
-						args.filePath,
-						args.startLine,
-						args.endLine,
-						args.newContent,
-						args.contextLines,
-					);
-					break;
-				case 'edit_search':
-					// Validate required parameters
-					if (!args.filePath) {
-						throw new Error(
-							`Missing required parameter 'filePath' for filesystem-edit_search tool.
-` +
-								`Received args: ${JSON.stringify(args, null, 2)}
-` +
-								`AI Tip: Make sure to provide the 'filePath' parameter as a string or array.`,
-						);
-					}
-					if (
-						!Array.isArray(args.filePath) &&
-						(args.searchContent === undefined ||
-							args.replaceContent === undefined)
-					) {
-						throw new Error(
-							`Missing required parameters for filesystem-edit_search tool.
-` +
-								`For single file mode, 'searchContent' and 'replaceContent' are required.
-` +
-								`Received args: ${JSON.stringify(args, null, 2)}
-` +
-								`AI Tip: Provide searchContent (string) and replaceContent (string).`,
-						);
-					}
-					result = await filesystemService.editFileBySearch(
-						args.filePath,
-						args.searchContent,
-						args.replaceContent,
-						args.occurrence,
-						args.contextLines,
-					);
-					break;
-
-				default:
-					throw new Error(`Unknown filesystem tool: ${actualToolName}`);
-			}
-		} else if (serviceName === 'terminal') {
-			// Handle built-in terminal tools (no connection needed)
-			const {terminalService} = await import('../../mcp/bash.js');
-			const {setTerminalExecutionState} = await import(
-				'../../hooks/execution/useTerminalExecutionState.js'
-			);
-
-			switch (actualToolName) {
-				case 'execute':
-					// Validate required workingDirectory parameter
-					if (!args.workingDirectory) {
-						throw new Error(
-							`Missing required parameter 'workingDirectory' for terminal-execute tool.\n` +
-								`Received args: ${JSON.stringify(args, null, 2)}\n` +
-								`AI Tip: You MUST specify the workingDirectory where the command should run. ` +
-								`Use the project root path or a specific directory path.`,
-						);
-					}
-
-					// Set working directory from AI-provided parameter
-					terminalService.setWorkingDirectory(args.workingDirectory);
-
-					// Set execution state to show UI
-					setTerminalExecutionState({
-						isExecuting: true,
-						command: args.command,
-						timeout: args.timeout || 30000,
-						isBackgrounded: false,
-						output: [],
-						needsInput: false,
-						inputPrompt: null,
-					});
-
-					try {
-						result = await terminalService.executeCommand(
-							args.command,
-							args.timeout,
-							abortSignal, // Pass abort signal to support ESC key interruption
-							args.isInteractive ?? false, // Pass isInteractive flag for AI-determined interactive commands
-						);
-					} finally {
-						// Clear execution state
-						setTerminalExecutionState({
-							isExecuting: false,
-							command: null,
-							timeout: null,
-							isBackgrounded: false,
-							output: [],
-							needsInput: false,
-							inputPrompt: null,
-						});
-					}
-					break;
-				default:
-					throw new Error(`Unknown terminal tool: ${actualToolName}`);
-			}
-		} else if (serviceName === 'ace') {
-			// Handle built-in ACE Code Search tools with LSP hybrid support
-			const {hybridCodeSearchService} = await import(
-				'../../mcp/lsp/HybridCodeSearchService.js'
-			);
-
-			switch (actualToolName) {
-				case 'search_symbols':
-					result = await hybridCodeSearchService.semanticSearch(
-						args.query,
-						'all',
-						args.language,
-						args.symbolType,
-						args.maxResults,
-					);
-					break;
-				case 'find_definition':
-					result = await hybridCodeSearchService.findDefinition(
-						args.symbolName,
-						args.contextFile,
-						args.line,
-						args.column,
-					);
-					break;
-				case 'find_references':
-					result = await hybridCodeSearchService.findReferences(
-						args.symbolName,
-						args.maxResults,
-					);
-					break;
-				case 'semantic_search':
-					result = await hybridCodeSearchService.semanticSearch(
-						args.query,
-						args.searchType,
-						args.language,
-						args.symbolType,
-						args.maxResults,
-					);
-					break;
-				case 'file_outline':
-					result = await hybridCodeSearchService.getFileOutline(args.filePath, {
-						maxResults: args.maxResults,
-						includeContext: args.includeContext,
-						symbolTypes: args.symbolTypes,
-					});
-					break;
-				case 'text_search':
-					result = await hybridCodeSearchService.textSearch(
-						args.pattern,
-						args.fileGlob,
-						args.isRegex,
-						args.maxResults,
-					);
-					break;
-				default:
-					throw new Error(`Unknown ACE tool: ${actualToolName}`);
-			}
-		} else if (serviceName === 'websearch') {
-			// Handle built-in Web Search tools (no connection needed)
-			const {webSearchService} = await import('../../mcp/websearch.js');
-
-			switch (actualToolName) {
-				case 'search':
-					const searchResponse = await webSearchService.search(
-						args.query,
-						args.maxResults,
-					);
-					// Return object directly, will be JSON.stringify in API layer
-					result = searchResponse;
-					break;
-				case 'fetch':
-					const pageContent = await webSearchService.fetchPage(
-						args.url,
-						args.maxLength,
-						args.isUserProvided, // Pass isUserProvided parameter
-						args.userQuery, // Pass optional userQuery parameter
-						abortSignal, // Pass abort signal
-						onTokenUpdate, // Pass token update callback
-					);
-					// Return object directly, will be JSON.stringify in API layer
-					result = pageContent;
-					break;
-				default:
-					throw new Error(`Unknown websearch tool: ${actualToolName}`);
-			}
-		} else if (serviceName === 'ide') {
-			// Handle built-in IDE Diagnostics tools (no connection needed)
-			const {ideDiagnosticsService} = await import(
-				'../../mcp/ideDiagnostics.js'
-			);
-
-			switch (actualToolName) {
-				case 'get_diagnostics':
-					const diagnostics = await ideDiagnosticsService.getDiagnostics(
-						args.filePath,
-					);
-					// Format diagnostics for better readability
-					const formatted = ideDiagnosticsService.formatDiagnostics(
-						diagnostics,
-						args.filePath,
-					);
-					result = {
-						diagnostics,
-						formatted,
-						summary: `Found ${diagnostics.length} diagnostic(s) in ${args.filePath}`,
-					};
-					break;
-				default:
-					throw new Error(`Unknown IDE tool: ${actualToolName}`);
-			}
-		} else if (serviceName === 'codebase') {
-			// Handle built-in Codebase Search tools (no connection needed)
-			const {codebaseSearchService} = await import(
-				'../../mcp/codebaseSearch.js'
-			);
-
-			switch (actualToolName) {
-				case 'search':
-					result = await codebaseSearchService.search(
-						args.query,
-						args.topN,
-						abortSignal,
-					);
-					break;
-				default:
-					throw new Error(`Unknown codebase tool: ${actualToolName}`);
-			}
-		} else if (serviceName === 'askuser') {
-			// Handle Ask User Question tool - validate parameters and trigger user interaction
-			switch (actualToolName) {
-				case 'ask_question':
-					// 参数验证：确保 options 是有效数组
-					if (!args.question || typeof args.question !== 'string') {
-						return {
-							content: [
-								{
-									type: 'text',
-									text: `Error: "question" parameter must be a non-empty string.\n\nReceived: ${JSON.stringify(
-										args,
-										null,
-										2,
-									)}\n\nPlease retry with correct parameters.`,
-								},
-							],
-							isError: true,
-						};
-					}
-
-					if (!Array.isArray(args.options)) {
-						return {
-							content: [
-								{
-									type: 'text',
-									text: `Error: "options" parameter must be an array of strings.\n\nReceived options: ${JSON.stringify(
-										args.options,
-									)}\nType: ${typeof args.options}\n\nPlease retry with correct parameters. Example:\n{\n  "question": "Your question here",\n  "options": ["Option 1", "Option 2", "Option 3"]\n}`,
-								},
-							],
-							isError: true,
-						};
-					}
-
-					if (args.options.length < 2) {
-						return {
-							content: [
-								{
-									type: 'text',
-									text: `Error: "options" array must contain at least 2 options.\n\nReceived: ${JSON.stringify(
-										args.options,
-									)}\n\nPlease provide at least 2 options for the user to choose from.`,
-								},
-							],
-							isError: true,
-						};
-					}
-
-					// 验证 options 数组中的每个元素都是字符串
-					const invalidOptions = args.options.filter(
-						(opt: any) => typeof opt !== 'string',
-					);
-					if (invalidOptions.length > 0) {
-						return {
-							content: [
-								{
-									type: 'text',
-									text: `Error: All options must be strings.\n\nInvalid options: ${JSON.stringify(
-										invalidOptions,
-									)}\n\nPlease ensure all options are strings.`,
-								},
-							],
-							isError: true,
-						};
-					}
-
-					// 参数验证通过，抛出 UserInteractionNeededError 触发 UI 组件
-					const {UserInteractionNeededError} = await import(
-						'../ui/userInteractionError.js'
-					);
-					throw new UserInteractionNeededError(
-						args.question,
-						args.options,
-						'', //toolCallId will be set by executeToolCall
-						false, // multiSelect 已移除，默认支持单选和多选
-					);
-				default:
-					throw new Error(`Unknown askuser tool: ${actualToolName}`);
-			}
-		} else if (serviceName === 'scheduler') {
-			// Handle Scheduler tools - block and wait for countdown
-			switch (actualToolName) {
-				case 'schedule_task': {
-					// Validate parameters
-					if (
-						typeof args.duration !== 'number' ||
-						args.duration < 1 ||
-						args.duration > 3600
-					) {
-						return {
-							content: [
-								{
-									type: 'text',
-									text: `Error: "duration" must be a number between 1 and 3600 seconds.\n\nReceived: ${JSON.stringify(
-										args.duration,
-									)}`,
-								},
-							],
-							isError: true,
-						};
-					}
-
-					if (!args.description || typeof args.description !== 'string') {
-						return {
-							content: [
-								{
-									type: 'text',
-									text: `Error: "description" must be a non-empty string.\n\nReceived: ${JSON.stringify(
-										args.description,
-									)}`,
-								},
-							],
-							isError: true,
-						};
-					}
-
-					const duration = args.duration;
-					const description = args.description;
-					const startedAt = new Date().toISOString();
-
-					// Set up UI state for countdown
-					const {
-						startSchedulerTask,
-						updateSchedulerRemainingTime,
-						completeSchedulerTask,
-						resetSchedulerState,
-					} = await import(
-						'../../hooks/execution/useSchedulerExecutionState.js'
-					);
-
-					// Start the task and show UI
-					startSchedulerTask(description, duration);
-
-					// Wait for the specified duration
-					let wasAborted = false;
-					await new Promise<void>(resolve => {
-						const startTime = Date.now();
-						const targetTime = startTime + duration * 1000;
-
-						const updateInterval = setInterval(() => {
-							const remaining = Math.ceil((targetTime - Date.now()) / 1000);
-							if (remaining > 0) {
-								updateSchedulerRemainingTime(remaining);
-							}
-						}, 1000);
-
-						const timeout = setTimeout(() => {
-							clearInterval(updateInterval);
-							completeSchedulerTask();
-							resolve();
-						}, duration * 1000);
-
-						// Handle abort signal
-						if (abortSignal) {
-							const abortHandler = () => {
-								wasAborted = true;
-								clearInterval(updateInterval);
-								clearTimeout(timeout);
-								resetSchedulerState();
-								resolve();
-							};
-							abortSignal.addEventListener('abort', abortHandler, {once: true});
-						}
-					});
-
-					// Return task result
-					if (wasAborted) {
-						return {
-							content: [
-								{
-									type: 'text',
-									text: 'Scheduled task was interrupted by user',
-								},
-							],
-							isError: true,
-						};
-					}
-
-					const completedAt = new Date().toISOString();
-
-					return {
-						success: true,
-						description,
-						actualDuration: duration,
-						startedAt,
-						completedAt,
-						message: `Scheduled task completed: ${description}`,
-					};
-				}
-				default:
-					throw new Error(`Unknown scheduler tool: ${actualToolName}`);
-			}
-		} else if (serviceName === 'skill') {
-			// Handle skill tools (no connection needed)
-			const projectRoot = process.cwd();
-			result = await executeSkillTool(toolName, args, projectRoot);
-		} else if (serviceName === 'subagent') {
-			// Handle sub-agent tools
-			// actualToolName is the agent ID
-			result = await subAgentService.execute({
-				agentId: actualToolName,
-				prompt: args.prompt,
-				abortSignal,
-			});
-		} else if (serviceName === 'team') {
-			// Handle team tools
-			result = await teamService.execute({
-				toolName: actualToolName,
+		if (isLocalToolService(serviceName)) {
+			result = await executeLocalToolCall({
+				serviceName,
+				actualToolName,
+				toolName,
 				args,
+				getTodoService,
 				abortSignal,
+				onTokenUpdate,
 			});
 		} else {
 			// Handle user-configured MCP service tools - connect only when needed
-			const mcpConfig = getMCPConfig();
 			const server = mcpConfig.mcpServers[serviceName];
 
 			if (!server) {
@@ -1863,7 +936,7 @@ export async function executeMCPTool(
 					args ? JSON.stringify(args) : 'none'
 				}`,
 			);
-			result = await executeOnExternalMCPService(
+			result = await executeExternalMcpToolCall(
 				serviceName,
 				server,
 				actualToolName,
@@ -1961,91 +1034,19 @@ export async function executeMCPTool(
 	return result;
 }
 
-/**
- * Check if an error is a connection/transport error that warrants a retry
- */
-function isConnectionError(error: unknown): boolean {
-	if (error instanceof Error) {
-		const msg = error.message.toLowerCase();
-		return (
-			msg.includes('stream') ||
-			msg.includes('destroyed') ||
-			msg.includes('closed') ||
-			msg.includes('ended') ||
-			msg.includes('econnreset') ||
-			msg.includes('econnrefused') ||
-			msg.includes('epipe') ||
-			msg.includes('not connected') ||
-			msg.includes('transport') ||
-			(error as any).code === 'ERR_STREAM_DESTROYED'
-		);
-	}
-	return false;
-}
-
-/**
- * Execute a tool on an external MCP service
- * Uses persistent connections to avoid reconnecting on every call
- * Automatically retries with a fresh connection on transport errors
- */
-async function executeOnExternalMCPService(
-	serviceName: string,
-	server: MCPServer,
+export async function executeMCPTool(
 	toolName: string,
 	args: any,
+	abortSignal?: AbortSignal,
+	onTokenUpdate?: (tokenCount: number) => void,
 ): Promise<any> {
-	// 🔥 FIX: Always use persistent connection for external MCP services
-	// MCP protocol supports multiple calls - no need to reconnect each time
-	let retried = false;
-
-	const attemptCall = async (): Promise<any> => {
-		const client = await getPersistentClient(serviceName, server);
-
-		logger.debug(
-			`Using persistent MCP client for ${serviceName} tool ${toolName}`,
-		);
-
-		// 获取 timeout 配置，默认 5 分钟
-		const timeout = server.timeout ?? 300000;
-
-		// Execute the tool with the original tool name (not prefixed)
-		const result = await client.callTool(
-			{
-				name: toolName,
-				arguments: args,
-			},
-			undefined,
-			{
-				timeout,
-				resetTimeoutOnProgress: true,
-			},
-		);
-		logger.debug(`result from ${serviceName} tool ${toolName}:`, result);
-
-		return result.content;
-	};
-
-	try {
-		return await attemptCall();
-	} catch (error) {
-		// If it's a connection error, remove stale client and retry once
-		if (!retried && isConnectionError(error)) {
-			retried = true;
-			logger.info(
-				`Connection error for ${serviceName}, reconnecting and retrying...`,
-			);
-			const clientInfo = persistentClients.get(serviceName);
-			if (clientInfo) {
-				try {
-					await clientInfo.client.close();
-				} catch {
-					// Ignore close errors on stale client
-				}
-				resourceMonitor.trackMCPConnectionClosed(serviceName);
-				persistentClients.delete(serviceName);
-			}
-			return await attemptCall();
-		}
-		throw error;
-	}
+	return await executeMCPToolCall(
+		{
+			publicName: toolName,
+			rawName: toolName,
+		},
+		args,
+		abortSignal,
+		onTokenUpdate,
+	);
 }

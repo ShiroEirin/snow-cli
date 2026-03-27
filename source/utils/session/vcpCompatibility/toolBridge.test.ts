@@ -43,6 +43,37 @@ test('map bridge plugins into Snow tool schemas', t => {
 	t.is(schema['properties']?.target?.type, 'string');
 });
 
+test('preserve stable bridge tool identity and capability tags', t => {
+	const mapped = mapBridgePluginsToTools(
+		[
+			{
+				name: 'DailyNote',
+				originName: 'DailyNoteManager',
+				toolId: 'vcp_bridge:snowbridge:dailynotemanager',
+				displayName: '日记系统',
+				description: '创建和更新日记。',
+				capabilityTags: ['custom_tag'],
+				bridgeCommands: [{commandName: 'create'}],
+			},
+		],
+		{
+			cancelVcpTool: true,
+			asyncCallbacks: true,
+			statusEvents: true,
+		},
+	);
+
+	const definition = mapped.definitions.get('DailyNote');
+	t.truthy(definition);
+	t.is(definition?.toolId, 'vcp_bridge:snowbridge:dailynotemanager');
+	t.is(definition?.originName, 'DailyNoteManager');
+	t.true(definition?.capabilityTags.includes('custom_tag') || false);
+	t.true(definition?.capabilityTags.includes('single_command') || false);
+	t.true(definition?.capabilityTags.includes('cancellable') || false);
+	t.true(definition?.capabilityTags.includes('async_callback') || false);
+	t.true(definition?.capabilityTags.includes('status_events') || false);
+});
+
 test('deduplicate duplicate bridge plugin names', t => {
 	const mapped = mapBridgePluginsToTools([
 		{
