@@ -7,14 +7,12 @@ import {createStreamingChatCompletion, type ChatMessage} from '../api/chat.js';
 import {createStreamingResponse} from '../api/responses.js';
 import {createStreamingGeminiCompletion} from '../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../api/anthropic.js';
-import type {RequestMethod} from '../utils/config/apiConfig.js';
 import {execSync, spawnSync} from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 
 export class ReviewAgent {
 	private modelName: string = '';
-	private requestMethod: RequestMethod = 'chat';
 	private initialized: boolean = false;
 
 	/**
@@ -30,7 +28,6 @@ export class ReviewAgent {
 			}
 
 			this.modelName = config.advancedModel;
-			this.requestMethod = config.requestMethod;
 			this.initialized = true;
 
 			return true;
@@ -46,7 +43,6 @@ export class ReviewAgent {
 	clearCache(): void {
 		this.initialized = false;
 		this.modelName = '';
-		this.requestMethod = 'chat';
 	}
 
 	/**
@@ -446,9 +442,8 @@ Please provide your review in a clear, structured format.`;
 				...messages,
 			];
 		}
-
 		// Route to appropriate streaming API based on request method
-		switch (this.requestMethod) {
+		switch (config.requestMethod) {
 			case 'anthropic':
 				yield* createStreamingAnthropicCompletion(
 					{

@@ -2,7 +2,11 @@ import React from 'react';
 import {Box, Text} from 'ink';
 import {Alert} from '@inkjs/ui';
 import ScrollableSelectInput from '../../components/common/ScrollableSelectInput.js';
-import type {RequestMethod} from '../../../utils/config/apiConfig.js';
+import type {
+	BackendMode,
+	RequestMethod,
+	ToolTransport,
+} from '../../../utils/config/apiConfig.js';
 import {switchProfile} from '../../../utils/config/configManager.js';
 import type {ConfigStateReturn} from './useConfigState.js';
 
@@ -18,6 +22,12 @@ export default function ConfigSelectPanel({state}: Props) {
 		setIsEditing,
 		requestMethod,
 		setRequestMethod,
+		enableVcpTimeBridge,
+		setEnableVcpTimeBridge,
+		backendMode,
+		setBackendMode,
+		toolTransport,
+		setToolTransport,
 		requestMethodOptions,
 		searchTerm,
 		thinkingMode,
@@ -42,6 +52,12 @@ export default function ConfigSelectPanel({state}: Props) {
 				return t.configScreen.profile.replace(':', '');
 			case 'requestMethod':
 				return t.configScreen.requestMethod.replace(':', '');
+			case 'enableVcpTimeBridge':
+				return t.configScreen.vcpTimeBridge.replace(':', '');
+			case 'backendMode':
+				return t.configScreen.vcpMode.replace(':', '');
+			case 'toolTransport':
+				return t.configScreen.toolTransport.replace(':', '');
 			case 'advancedModel':
 				return t.configScreen.advancedModel.replace(':', '');
 			case 'basicModel':
@@ -79,6 +95,92 @@ export default function ConfigSelectPanel({state}: Props) {
 						isFocused={true}
 						onSelect={item => {
 							setRequestMethod(item.value as RequestMethod);
+							setIsEditing(false);
+						}}
+					/>
+				)}
+				{currentField === 'enableVcpTimeBridge' && (
+					<ScrollableSelectInput
+						items={[
+							{
+								label: t.configScreen.vcpTimeBridgeAuto,
+								value: 'auto',
+							},
+							{
+								label: t.configScreen.vcpTimeBridgeEnabled,
+								value: 'enabled',
+							},
+							{
+								label: t.configScreen.vcpTimeBridgeDisabled,
+								value: 'disabled',
+							},
+						]}
+						initialIndex={
+							enableVcpTimeBridge === true
+								? 1
+								: enableVcpTimeBridge === false
+								? 2
+								: 0
+						}
+						isFocused={true}
+						onSelect={item => {
+							if (item.value === 'enabled') {
+								setEnableVcpTimeBridge(true);
+							} else if (item.value === 'disabled') {
+								setEnableVcpTimeBridge(false);
+							} else {
+								setEnableVcpTimeBridge(undefined);
+							}
+							setIsEditing(false);
+						}}
+					/>
+				)}
+				{currentField === 'backendMode' && (
+					<ScrollableSelectInput
+						items={[
+							{
+								label: t.configScreen.vcpModeNative,
+								value: 'native',
+							},
+							{
+								label: t.configScreen.vcpModeVcp,
+								value: 'vcp',
+							},
+						]}
+						initialIndex={backendMode === 'vcp' ? 1 : 0}
+						isFocused={true}
+						onSelect={item => {
+							setBackendMode(item.value as BackendMode);
+							setIsEditing(false);
+						}}
+					/>
+				)}
+				{currentField === 'toolTransport' && (
+					<ScrollableSelectInput
+						items={[
+							{
+								label: t.configScreen.toolTransportLocal,
+								value: 'local',
+							},
+							{
+								label: t.configScreen.toolTransportBridge,
+								value: 'bridge',
+							},
+							{
+								label: t.configScreen.toolTransportHybrid,
+								value: 'hybrid',
+							},
+						]}
+						initialIndex={
+							toolTransport === 'bridge'
+								? 1
+								: toolTransport === 'hybrid'
+								? 2
+								: 0
+						}
+						isFocused={true}
+						onSelect={item => {
+							setToolTransport(item.value as ToolTransport);
 							setIsEditing(false);
 						}}
 					/>

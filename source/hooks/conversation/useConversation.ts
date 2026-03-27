@@ -55,6 +55,7 @@ export async function handleConversationWithTools(
 		activeTools,
 		discoveredToolNames,
 		useToolSearch,
+		toolSnapshotKey,
 	} = await prepareConversationSetup({
 		planMode: options.planMode,
 		vulnerabilityHuntingMode: options.vulnerabilityHuntingMode,
@@ -86,6 +87,7 @@ export async function handleConversationWithTools(
 
 	let accumulatedUsage: ConversationUsage | null = null;
 	const sessionApprovedTools = new Set<string>();
+	let allowVcpTimeBridge = true;
 
 	try {
 		while (true) {
@@ -98,6 +100,7 @@ export async function handleConversationWithTools(
 				config,
 				model,
 				conversationMessages,
+				allowVcpTimeBridge,
 				activeTools,
 				controller,
 				encoder: encoderManager,
@@ -108,6 +111,7 @@ export async function handleConversationWithTools(
 				setContextUsage,
 				options,
 			});
+			allowVcpTimeBridge = false;
 
 			setStreamTokenCount(0);
 			accumulatedUsage = mergeUsage(accumulatedUsage, streamResult.roundUsage);
@@ -122,6 +126,7 @@ export async function handleConversationWithTools(
 					activeTools,
 					discoveredToolNames,
 					useToolSearch,
+					toolSnapshotKey,
 					controller,
 					encoder: encoderManager,
 					accumulatedUsage,

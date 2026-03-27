@@ -4,7 +4,7 @@ import {createStreamingChatCompletion, type ChatMessage} from '../api/chat.js';
 import {createStreamingResponse} from '../api/responses.js';
 import {createStreamingGeminiCompletion} from '../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../api/anthropic.js';
-import type {RequestMethod} from '../utils/config/apiConfig.js';
+import {extractStreamTextContent} from '../api/streamingUtils.js';
 
 /**
  * Compact Agent Service
@@ -28,7 +28,6 @@ import type {RequestMethod} from '../utils/config/apiConfig.js';
  */
 export class CompactAgent {
 	private modelName: string = '';
-	private requestMethod: RequestMethod = 'chat';
 	private initialized: boolean = false;
 
 	/**
@@ -45,7 +44,6 @@ export class CompactAgent {
 			}
 
 			this.modelName = config.basicModel;
-			this.requestMethod = config.requestMethod; // Follow main flow's request method
 			this.initialized = true;
 
 			return true;
@@ -61,7 +59,6 @@ export class CompactAgent {
 	clearCache(): void {
 		this.initialized = false;
 		this.modelName = '';
-		this.requestMethod = 'chat';
 	}
 
 	/**
@@ -103,7 +100,7 @@ export class CompactAgent {
 			let streamGenerator: AsyncGenerator<any, void, unknown>;
 
 			// Route to appropriate streaming API based on request method (follows main flow exactly)
-			switch (this.requestMethod) {
+			switch (config.requestMethod) {
 				case 'anthropic':
 					streamGenerator = createStreamingAnthropicCompletion(
 						{
@@ -162,17 +159,17 @@ export class CompactAgent {
 			let chunkCount = 0;
 
 			// Initialize token encoder for token counting
-		let encoder;
-		try {
-			const {encoding_for_model} = await import('tiktoken');
+			let encoder;
 			try {
-				encoder = encoding_for_model('gpt-5');
+				const {encoding_for_model} = await import('tiktoken');
+				try {
+					encoder = encoding_for_model('gpt-5');
+				} catch {
+					encoder = encoding_for_model('gpt-3.5-turbo');
+				}
 			} catch {
-				encoder = encoding_for_model('gpt-3.5-turbo');
+				// tiktoken unavailable, token counting will be skipped
 			}
-		} catch (e) {
-			// tiktoken unavailable, token counting will be skipped
-		}
 
 			try {
 				for await (const chunk of streamGenerator) {
@@ -183,35 +180,16 @@ export class CompactAgent {
 						throw new Error('Request aborted');
 					}
 
-					// Handle different chunk formats based on request method
-					if (this.requestMethod === 'chat') {
-						// Chat API uses standard OpenAI format: {choices: [{delta: {content}}]}
-						if (chunk.choices && chunk.choices[0]?.delta?.content) {
-							completeContent += chunk.choices[0].delta.content;
+					const content = extractStreamTextContent(chunk);
+					if (content) {
+						completeContent += content;
 
-							// Update token count if callback provided
-							if (onTokenUpdate && encoder) {
-								try {
-									const tokens = encoder.encode(completeContent);
-									onTokenUpdate(tokens.length);
-								} catch (e) {
-									// Ignore encoding errors
-								}
-							}
-						}
-					} else {
-						// Responses, Gemini, and Anthropic APIs all use: {type: 'content', content: string}
-						if (chunk.type === 'content' && chunk.content) {
-							completeContent += chunk.content;
-
-							// Update token count if callback provided
-							if (onTokenUpdate && encoder) {
-								try {
-									const tokens = encoder.encode(completeContent);
-									onTokenUpdate(tokens.length);
-								} catch (e) {
-									// Ignore encoding errors
-								}
+						if (onTokenUpdate && encoder) {
+							try {
+								const tokens = encoder.encode(completeContent);
+								onTokenUpdate(tokens.length);
+							} catch {
+								// Ignore encoding errors
 							}
 						}
 					}
@@ -249,13 +227,13 @@ export class CompactAgent {
 					error: error.message,
 					stack: error.stack,
 					name: error.name,
-					requestMethod: this.requestMethod,
+					requestMethod: config.requestMethod,
 					modelName: this.modelName,
 				});
 			} else {
 				logger.error('Compact agent: Unknown API error:', {
 					error,
-					requestMethod: this.requestMethod,
+					requestMethod: config.requestMethod,
 					modelName: this.modelName,
 				});
 			}

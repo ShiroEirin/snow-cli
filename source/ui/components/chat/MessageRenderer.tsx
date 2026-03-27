@@ -9,6 +9,15 @@ import ToolResultPreview from '../tools/ToolResultPreview.js';
 import {HookErrorDisplay} from '../special/HookErrorDisplay.js';
 import {maskSkillInjectedText} from '../../../utils/ui/skillMask.js';
 import {toCodePoints, visualWidth} from '../../../utils/core/textUtils.js';
+import {
+	containsVcpDisplayBlocks,
+	formatVcpDailyNoteLabel,
+	formatVcpThoughtChainHeading,
+	formatVcpThoughtChainSummaryLabel,
+	formatVcpToolRequestLabel,
+	formatVcpToolResultLabel,
+	parseVcpDisplayBlocks,
+} from '../../../utils/session/vcpCompatibility/display.js';
 
 /**
  * Clean thinking content by removing XML-like tags
@@ -84,6 +93,138 @@ export default function MessageRenderer({
 	const getDisplayContent = (content: string): string => {
 		// 只做视觉隐藏：保留原始 message.content 用于请求体/持久化。
 		return maskSkillInjectedText(removeAnsiCodes(content || '')).displayText;
+	};
+
+	const renderAssistantContent = (content: string): React.ReactNode => {
+		const displayText = getDisplayContent(content);
+		if (!containsVcpDisplayBlocks(displayText)) {
+			return <MarkdownRenderer content={displayText} />;
+		}
+
+		const parsed = parseVcpDisplayBlocks(displayText);
+		return (
+			<Box flexDirection="column">
+				{parsed.parts.map((part, partIndex) => {
+					if (part.type === 'text') {
+						if (!part.content.trim()) {
+							return null;
+						}
+
+						return (
+							<MarkdownRenderer
+								key={`thought-part-${partIndex}`}
+								content={part.content}
+							/>
+						);
+					}
+
+					if (part.block.type === 'roleDivider') {
+						return null;
+					}
+
+					if (part.block.type === 'thoughtChain') {
+						return (
+							<Box
+								key={`thought-part-${partIndex}`}
+								flexDirection="column"
+								marginTop={partIndex > 0 ? 1 : 0}
+							>
+								<Text color={theme.colors.menuSecondary} dimColor italic>
+									{showThinking
+										? formatVcpThoughtChainHeading(part.block)
+										: formatVcpThoughtChainSummaryLabel(part.block)}
+								</Text>
+								{showThinking && part.block.content ? (
+									<MarkdownRenderer content={part.block.content} />
+								) : null}
+							</Box>
+						);
+					}
+
+					if (part.block.type === 'toolRequest') {
+						return (
+							<Box
+								key={`vcp-tool-request-${partIndex}`}
+								flexDirection="column"
+								marginTop={partIndex > 0 ? 1 : 0}
+							>
+								<Text color="cyan" bold>
+									{formatVcpToolRequestLabel(part.block)}
+								</Text>
+								{part.block.fields.length > 0 ? (
+									part.block.fields.map(field => (
+										<Box
+											key={`vcp-tool-request-${partIndex}-${field.key}`}
+											flexDirection="column"
+											marginTop={1}
+										>
+											<Text color={theme.colors.menuSecondary} dimColor>
+												{field.key}
+											</Text>
+											{field.value ? (
+												<Box paddingLeft={2}>
+													<MarkdownRenderer content={field.value} />
+												</Box>
+											) : null}
+										</Box>
+									))
+								) : part.block.content ? (
+									<MarkdownRenderer content={part.block.content} />
+								) : null}
+							</Box>
+						);
+					}
+
+					if (part.block.type === 'toolResult') {
+						const toolResultColor =
+							part.block.status === 'error'
+								? 'red'
+								: part.block.status === 'success'
+								? 'green'
+								: theme.colors.menuSecondary;
+
+						return (
+							<Box
+								key={`vcp-tool-result-${partIndex}`}
+								flexDirection="column"
+								marginTop={partIndex > 0 ? 1 : 0}
+							>
+								<Text color={toolResultColor} bold>
+									{formatVcpToolResultLabel(part.block)}
+								</Text>
+								{part.block.statusText ? (
+									<Text color={theme.colors.menuSecondary} dimColor>
+										{part.block.statusText}
+									</Text>
+								) : null}
+								{part.block.content ? (
+									<MarkdownRenderer content={part.block.content} />
+								) : null}
+							</Box>
+						);
+					}
+
+					if (part.block.type === 'dailyNote') {
+						return (
+							<Box
+								key={`vcp-daily-note-${partIndex}`}
+								flexDirection="column"
+								marginTop={partIndex > 0 ? 1 : 0}
+							>
+								<Text color="yellow" bold>
+									{formatVcpDailyNoteLabel(part.block)}
+								</Text>
+								{part.block.content ? (
+									<MarkdownRenderer content={part.block.content} />
+								) : null}
+							</Box>
+						);
+					}
+
+					return null;
+				})}
+			</Box>
+		);
 	};
 
 	const wrapTextToVisualWidth = (text: string, maxWidth: number): string[] => {
@@ -355,7 +496,9 @@ export default function MessageRenderer({
 												(message.role === 'assistant' ||
 													message.role === 'subagent')
 											) {
-												const content = message.content || ' ';
+												const content = getDisplayContent(
+													message.content || ' ',
+												);
 												const lines = content.split('\n');
 												const titleLine = lines[0] || '';
 												const treeLines = lines.slice(1);
@@ -445,9 +588,7 @@ export default function MessageRenderer({
 															))}
 														</Box>
 													) : message.content ? (
-														<MarkdownRenderer
-															content={getDisplayContent(message.content)}
-														/>
+														renderAssistantContent(message.content)
 													) : null}
 												</>
 											);

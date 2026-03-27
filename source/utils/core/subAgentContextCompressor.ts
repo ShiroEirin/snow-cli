@@ -15,8 +15,9 @@ import {createStreamingChatCompletion} from '../../api/chat.js';
 import {createStreamingResponse} from '../../api/responses.js';
 import {createStreamingGeminiCompletion} from '../../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../../api/anthropic.js';
+import {extractStreamTextContent} from '../../api/streamingUtils.js';
 import type {ChatMessage} from '../../api/types.js';
-import type {RequestMethod} from '../config/apiConfig.js';
+import type {BackendMode, RequestMethod} from '../config/apiConfig.js';
 
 /** Threshold percentage to trigger compression */
 const COMPRESS_THRESHOLD = 80;
@@ -288,7 +289,14 @@ function prepareMessagesForAICompression(
 async function aiSummaryCompress(
 	messages: ChatMessage[],
 	keepRounds: number,
-	config: {model: string; requestMethod: RequestMethod; maxTokens?: number; configProfile?: string},
+	config: {
+		model: string;
+		requestMethod: RequestMethod;
+		maxTokens?: number;
+		configProfile?: string;
+		baseUrl?: string;
+		backendMode?: BackendMode;
+	},
 ): Promise<ChatMessage[]> {
 	const preserveStartIndex = findRecentRoundsStartIndex(messages, keepRounds);
 
@@ -312,9 +320,7 @@ async function aiSummaryCompress(
 					messages: compressionMessages,
 					configProfile: config.configProfile,
 				})) {
-					if (chunk.type === 'content' && chunk.content) {
-						summary += chunk.content;
-					}
+					summary += extractStreamTextContent(chunk);
 				}
 				break;
 			}
@@ -326,9 +332,7 @@ async function aiSummaryCompress(
 					disableThinking: true,
 					configProfile: config.configProfile,
 				})) {
-					if (chunk.type === 'content' && chunk.content) {
-						summary += chunk.content;
-					}
+					summary += extractStreamTextContent(chunk);
 				}
 				break;
 			}
@@ -338,9 +342,7 @@ async function aiSummaryCompress(
 					messages: compressionMessages,
 					configProfile: config.configProfile,
 				})) {
-					if (chunk.type === 'content' && chunk.content) {
-						summary += chunk.content;
-					}
+					summary += extractStreamTextContent(chunk);
 				}
 				break;
 			}
@@ -352,9 +354,7 @@ async function aiSummaryCompress(
 					stream: true,
 					configProfile: config.configProfile,
 				})) {
-					if (chunk.type === 'content' && chunk.content) {
-						summary += chunk.content;
-					}
+					summary += extractStreamTextContent(chunk);
 				}
 				break;
 			}
@@ -491,7 +491,14 @@ export async function compressSubAgentContext(
 	messages: ChatMessage[],
 	totalTokens: number,
 	maxContextTokens: number,
-	config: {model: string; requestMethod: RequestMethod; maxTokens?: number; configProfile?: string},
+	config: {
+		model: string;
+		requestMethod: RequestMethod;
+		maxTokens?: number;
+		configProfile?: string;
+		baseUrl?: string;
+		backendMode?: BackendMode;
+	},
 ): Promise<SubAgentCompressionResult> {
 	const percentage = getContextPercentage(totalTokens, maxContextTokens);
 

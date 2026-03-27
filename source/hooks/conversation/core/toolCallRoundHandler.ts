@@ -29,6 +29,7 @@ export async function handleToolCallRound(ctx: {
 	activeTools: MCPTool[];
 	discoveredToolNames: Set<string>;
 	useToolSearch: boolean;
+	toolSnapshotKey?: string;
 	controller: AbortController;
 	encoder: TokenEncoder;
 	accumulatedUsage: ConversationUsage | null;
@@ -62,6 +63,7 @@ export async function handleToolCallRound(ctx: {
 		activeTools,
 		discoveredToolNames,
 		useToolSearch,
+		toolSnapshotKey,
 		controller,
 		encoder,
 		sessionApprovedTools,
@@ -192,6 +194,7 @@ export async function handleToolCallRound(ctx: {
 				multiSelect,
 			);
 		},
+		toolSnapshotKey,
 	);
 
 	if (controller.signal.aborted) {

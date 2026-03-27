@@ -4,7 +4,7 @@ import {createStreamingChatCompletion, type ChatMessage} from '../api/chat.js';
 import {createStreamingResponse} from '../api/responses.js';
 import {createStreamingGeminiCompletion} from '../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../api/anthropic.js';
-import type {RequestMethod} from '../utils/config/apiConfig.js';
+import {extractStreamTextContent} from '../api/streamingUtils.js';
 
 /**
  * Summary Agent Service
@@ -21,7 +21,6 @@ import type {RequestMethod} from '../utils/config/apiConfig.js';
  */
 export class SummaryAgent {
 	private modelName: string = '';
-	private requestMethod: RequestMethod = 'chat';
 	private initialized: boolean = false;
 
 	/**
@@ -45,7 +44,6 @@ export class SummaryAgent {
 				return false;
 			}
 
-			this.requestMethod = config.requestMethod;
 			this.initialized = true;
 
 			return true;
@@ -61,7 +59,6 @@ export class SummaryAgent {
 	clearCache(): void {
 		this.initialized = false;
 		this.modelName = '';
-		this.requestMethod = 'chat';
 	}
 
 	/**
@@ -85,10 +82,11 @@ export class SummaryAgent {
 		messages: ChatMessage[],
 		abortSignal?: AbortSignal,
 	): Promise<string> {
+		const config = getOpenAiConfig();
 		let streamGenerator: AsyncGenerator<any, void, unknown>;
 
 		// Route to appropriate streaming API based on request method
-		switch (this.requestMethod) {
+		switch (config.requestMethod) {
 			case 'anthropic':
 				streamGenerator = createStreamingAnthropicCompletion(
 					{
@@ -152,17 +150,9 @@ export class SummaryAgent {
 					throw new Error('Request aborted');
 				}
 
-				// Handle different chunk formats based on request method
-				if (this.requestMethod === 'chat') {
-					// Chat API uses standard OpenAI format
-					if (chunk.choices && chunk.choices[0]?.delta?.content) {
-						completeContent += chunk.choices[0].delta.content;
-					}
-				} else {
-					// Responses, Gemini, and Anthropic APIs use unified format
-					if (chunk.type === 'content' && chunk.content) {
-						completeContent += chunk.content;
-					}
+				const content = extractStreamTextContent(chunk);
+				if (content) {
+					completeContent += content;
 				}
 			}
 		} catch (streamError) {

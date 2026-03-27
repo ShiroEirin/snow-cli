@@ -5,6 +5,11 @@ export type ConfigField =
 	| 'baseUrl'
 	| 'apiKey'
 	| 'requestMethod'
+	| 'enableVcpTimeBridge'
+	| 'backendMode'
+	| 'toolTransport'
+	| 'bridgeVcpKey'
+	| 'bridgeAccessToken'
 	| 'systemPromptId'
 	| 'customHeadersSchemeId'
 	| 'anthropicBeta'
@@ -87,6 +92,9 @@ export const stripFocusArtifacts = (value: string) => {
 export const SELECT_FIELDS: ConfigField[] = [
 	'profile',
 	'requestMethod',
+	'enableVcpTimeBridge',
+	'backendMode',
+	'toolTransport',
 	'systemPromptId',
 	'customHeadersSchemeId',
 	'advancedModel',

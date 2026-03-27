@@ -2,6 +2,10 @@ import type {Message} from '../../../ui/components/chat/MessageList.js';
 import type {SubAgentMessage} from '../../../utils/execution/subAgentExecutor.js';
 import {formatToolCallMessage} from '../../../utils/ui/messageFormatter.js';
 import {isToolNeedTwoStepDisplay} from '../../../utils/config/toolDisplayConfig.js';
+import {
+	getVcpStreamingSuppressionDecision,
+	type VcpStreamingSuppressionState,
+} from '../../../utils/session/vcpCompatibility/display.js';
 
 // ── Module-level store: per-teammate streaming data (useSyncExternalStore compatible) ──
 
@@ -82,6 +86,7 @@ type StreamState = {
 	codeBlockBuffer: string;
 	tableBuffer: string;
 	listBuffer: string;
+	vcpStreamingSuppressionState: VcpStreamingSuppressionState;
 };
 
 /**
@@ -188,6 +193,7 @@ export class SubAgentUIHandler {
 			codeBlockBuffer: '',
 			tableBuffer: '',
 			listBuffer: '',
+			vcpStreamingSuppressionState: null,
 		};
 	}
 
@@ -420,6 +426,37 @@ export class SubAgentUIHandler {
 			return;
 		}
 
+		const suppressionDecision = getVcpStreamingSuppressionDecision(
+			line,
+			state.vcpStreamingSuppressionState,
+		);
+		if (suppressionDecision.suppress) {
+			if (state.tableBuffer) {
+				this.emitStreamLine(
+					lines,
+					state,
+					subAgentMessage,
+					state.tableBuffer.trimEnd(),
+					false,
+				);
+				state.tableBuffer = '';
+			}
+
+			if (state.listBuffer) {
+				this.emitStreamLine(
+					lines,
+					state,
+					subAgentMessage,
+					state.listBuffer.trimEnd(),
+					false,
+				);
+				state.listBuffer = '';
+			}
+
+			state.vcpStreamingSuppressionState = suppressionDecision.nextState;
+			return;
+		}
+
 		if (line.trimStart().startsWith('```')) {
 			if (state.tableBuffer) {
 				this.emitStreamLine(
@@ -590,6 +627,7 @@ export class SubAgentUIHandler {
 		state.codeBlockBuffer = '';
 		state.tableBuffer = '';
 		state.listBuffer = '';
+		state.vcpStreamingSuppressionState = null;
 		this.updateGlobalTokenCount();
 	}
 

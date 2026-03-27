@@ -80,6 +80,10 @@ export type ConversationHandlerOptions = {
 	setIsAutoCompressing?: (value: boolean) => void;
 };
 
+export type ConversationToolContext = {
+	toolSnapshotKey?: string;
+};
+
 export type TokenEncoder = {
 	encode: (text: string) => number[];
 };

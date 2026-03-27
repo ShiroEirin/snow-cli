@@ -9,6 +9,8 @@ import {
 } from 'fs';
 
 export type RequestMethod = 'chat' | 'responses' | 'gemini' | 'anthropic';
+export type BackendMode = 'native' | 'vcp';
+export type ToolTransport = 'local' | 'bridge' | 'hybrid';
 export interface ThinkingConfig {
 	type: 'enabled' | 'adaptive';
 	budget_tokens?: number; // For 'enabled' type
@@ -29,6 +31,10 @@ export interface ApiConfig {
 	baseUrl: string;
 	apiKey: string;
 	requestMethod: RequestMethod;
+	backendMode?: BackendMode;
+	toolTransport?: ToolTransport;
+	bridgeVcpKey?: string;
+	bridgeAccessToken?: string;
 	advancedModel?: string;
 	basicModel?: string;
 	maxContextTokens?: number;
@@ -47,6 +53,8 @@ export interface ApiConfig {
 	showThinking?: boolean; // Show AI thinking process in UI (default: true)
 	// 流式长时无返回超时(单位: 秒,默认: 180)
 	streamIdleTimeoutSec?: number;
+	// 显式启用 Snow 侧的 VCP ::Time 兼容桥接。未设置时仅对 localhost 链路做保守判断。
+	enableVcpTimeBridge?: boolean;
 	// 选填：覆盖 system-prompt.json 的 active（undefined=跟随全局；''=不使用；string=按ID选择；string[]=多选）
 	systemPromptId?: string | string[];
 	// 选填：覆盖 custom-headers.json 的 active（undefined=跟随全局；''=不使用；其它=按ID选择）
@@ -79,6 +87,11 @@ export interface AppConfig {
 	snowcfg: ApiConfig;
 	openai?: ApiConfig; // 向下兼容旧版本
 }
+
+export type BackendModeResolution = {
+	backendMode: BackendMode;
+	migrated: boolean;
+};
 
 /**
  * 系统提示词配置项
@@ -132,6 +145,8 @@ export const DEFAULT_CONFIG: AppConfig = {
 		baseUrl: 'https://api.openai.com/v1',
 		apiKey: '',
 		requestMethod: 'chat',
+		backendMode: 'native',
+		toolTransport: 'local',
 		advancedModel: '',
 		basicModel: '',
 		maxContextTokens: 120000,
@@ -195,6 +210,45 @@ function normalizeRequestMethod(method: unknown): RequestMethod {
 	return DEFAULT_CONFIG.snowcfg.requestMethod;
 }
 
+function normalizeBackendMode(mode: unknown): BackendMode | undefined {
+	if (mode === 'native' || mode === 'vcp') {
+		return mode;
+	}
+
+	return undefined;
+}
+
+function normalizeToolTransport(mode: unknown): ToolTransport | undefined {
+	if (mode === 'local' || mode === 'bridge' || mode === 'hybrid') {
+		return mode;
+	}
+
+	return undefined;
+}
+
+export function resolveBackendMode(options: {
+	backendMode?: unknown;
+}): BackendMode {
+	return resolveBackendModeWithMigration(options).backendMode;
+}
+
+export function resolveBackendModeWithMigration(options: {
+	backendMode?: unknown;
+}): BackendModeResolution {
+	const normalizedMode = normalizeBackendMode(options.backendMode);
+	if (normalizedMode) {
+		return {
+			backendMode: normalizedMode,
+			migrated: false,
+		};
+	}
+
+	return {
+		backendMode: DEFAULT_CONFIG.snowcfg.backendMode ?? 'native',
+		migrated: true,
+	};
+}
+
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 const MCP_CONFIG_FILE = join(CONFIG_DIR, 'mcp-config.json');
 
@@ -237,34 +291,57 @@ export function loadConfig(): AppConfig {
 		const configWithoutMcp = restConfig as Partial<AppConfig>;
 
 		// 向下兼容：如果存在 openai 配置但没有 snowcfg，则使用 openai 配置
+		type LegacyApiConfig = Partial<ApiConfig>;
+
 		let apiConfig: ApiConfig;
+		let shouldPersistResolvedApiConfig = false;
 		if (configWithoutMcp.snowcfg) {
+			const snowConfig = configWithoutMcp.snowcfg as LegacyApiConfig;
+			const backendModeResolution = resolveBackendModeWithMigration({
+				backendMode: snowConfig.backendMode,
+			});
 			apiConfig = {
 				...DEFAULT_CONFIG.snowcfg,
-				...configWithoutMcp.snowcfg,
+				...snowConfig,
 				requestMethod: normalizeRequestMethod(
-					configWithoutMcp.snowcfg.requestMethod,
+					snowConfig.requestMethod,
 				),
+				backendMode: backendModeResolution.backendMode,
+				toolTransport:
+					normalizeToolTransport(snowConfig.toolTransport) ||
+					DEFAULT_CONFIG.snowcfg.toolTransport,
 				streamIdleTimeoutSec: normalizeStreamIdleTimeoutSec(
-					configWithoutMcp.snowcfg.streamIdleTimeoutSec,
+					snowConfig.streamIdleTimeoutSec,
 				),
 			};
+			shouldPersistResolvedApiConfig = backendModeResolution.migrated;
 		} else if (configWithoutMcp.openai) {
 			// 向下兼容旧版本
+			const legacyOpenAiConfig = configWithoutMcp.openai as LegacyApiConfig;
+			const backendModeResolution = resolveBackendModeWithMigration({
+				backendMode: legacyOpenAiConfig.backendMode,
+			});
 			apiConfig = {
 				...DEFAULT_CONFIG.snowcfg,
-				...configWithoutMcp.openai,
+				...legacyOpenAiConfig,
 				requestMethod: normalizeRequestMethod(
-					configWithoutMcp.openai.requestMethod,
+					legacyOpenAiConfig.requestMethod,
 				),
+				backendMode: backendModeResolution.backendMode,
+				toolTransport:
+					normalizeToolTransport(legacyOpenAiConfig.toolTransport) ||
+					DEFAULT_CONFIG.snowcfg.toolTransport,
 				streamIdleTimeoutSec: normalizeStreamIdleTimeoutSec(
-					configWithoutMcp.openai.streamIdleTimeoutSec,
+					legacyOpenAiConfig.streamIdleTimeoutSec,
 				),
 			};
+			shouldPersistResolvedApiConfig = backendModeResolution.migrated;
 		} else {
 			apiConfig = {
 				...DEFAULT_CONFIG.snowcfg,
 				requestMethod: DEFAULT_CONFIG.snowcfg.requestMethod,
+				backendMode: DEFAULT_CONFIG.snowcfg.backendMode,
+				toolTransport: DEFAULT_CONFIG.snowcfg.toolTransport,
 				streamIdleTimeoutSec: DEFAULT_STREAM_IDLE_TIMEOUT_SEC,
 			};
 		}
@@ -285,7 +362,8 @@ export function loadConfig(): AppConfig {
 		if (
 			legacyMcp !== undefined ||
 			legacyProxy !== undefined ||
-			(configWithoutMcp.openai && !configWithoutMcp.snowcfg)
+			(configWithoutMcp.openai && !configWithoutMcp.snowcfg) ||
+			shouldPersistResolvedApiConfig
 		) {
 			saveConfig(mergedConfig);
 		}
@@ -377,6 +455,17 @@ export function validateApiConfig(config: Partial<ApiConfig>): string[] {
 
 	if (config.apiKey && config.apiKey.trim().length === 0) {
 		errors.push('API key cannot be empty');
+	}
+
+	if (
+		config.toolTransport === 'bridge' ||
+		config.toolTransport === 'hybrid'
+	) {
+		if (!config.bridgeVcpKey || config.bridgeVcpKey.trim().length === 0) {
+			errors.push(
+				'bridgeVcpKey is required when toolTransport is set to bridge or hybrid',
+			);
+		}
 	}
 
 	return errors;

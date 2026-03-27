@@ -2,6 +2,11 @@ import {executeMCPTool} from './mcpToolsManager.js';
 import {subAgentService} from '../../mcp/subagent.js';
 import {teamService} from '../../mcp/team.js';
 import {runningSubAgentTracker} from './runningSubAgentTracker.js';
+import {getOpenAiConfig} from '../config/apiConfig.js';
+import {sessionManager} from '../session/sessionManager.js';
+import {snowBridgeClient} from '../session/vcpCompatibility/bridgeClient.js';
+import {getBridgeToolByName} from '../session/vcpCompatibility/toolSnapshot.js';
+import {resolveToolExecutionRoute} from '../session/vcpCompatibility/toolRouteArbiter.js';
 
 import type {SubAgentMessage} from './subAgentExecutor.js';
 import type {ConfirmationResult} from '../../ui/components/tools/ToolConfirmation.js';
@@ -122,6 +127,31 @@ export interface UserInteractionCallback {
 	}>;
 }
 
+async function executeBridgeToolCall(options: {
+	toolName: string;
+	args: Record<string, any>;
+	sessionId?: string;
+	abortSignal?: AbortSignal;
+}) {
+	const config = getOpenAiConfig();
+	const bridgeTool = getBridgeToolByName(options.toolName, options.sessionId);
+	if (!bridgeTool) {
+		throw new Error(
+			`Bridge tool binding not found for ${options.toolName}`,
+		);
+	}
+
+	return snowBridgeClient.executeTool({
+		config,
+		toolName: bridgeTool.pluginName,
+		toolArgs: {
+			...options.args,
+			command: bridgeTool.commandName,
+		},
+		abortSignal: options.abortSignal,
+	});
+}
+
 /**
  * Check if a value is a multimodal content array
  */
@@ -219,6 +249,7 @@ export async function executeToolCall(
 	yoloMode?: boolean,
 	addToAlwaysApproved?: AddToAlwaysApprovedCallback,
 	onUserInteractionNeeded?: UserInteractionCallback,
+	toolSnapshotKey?: string,
 ): Promise<ToolResult> {
 	let result: ToolResult | undefined;
 	let executionError: Error | null = null;
@@ -469,12 +500,26 @@ export async function executeToolCall(
 			}
 		} else {
 			// Regular tool execution
-			const toolResult = await executeMCPTool(
-				toolCall.function.name,
-				args,
-				abortSignal,
-				onTokenUpdate,
-			);
+			const currentSessionId = sessionManager.getCurrentSession()?.id;
+			const executionRoute = resolveToolExecutionRoute({
+				config: getOpenAiConfig(),
+				toolName: toolCall.function.name,
+				snapshotKey: toolSnapshotKey || currentSessionId,
+			});
+			const toolResult =
+				executionRoute === 'bridge'
+					? await executeBridgeToolCall({
+							toolName: toolCall.function.name,
+							args,
+							sessionId: toolSnapshotKey || currentSessionId,
+							abortSignal,
+					  })
+					: await executeMCPTool(
+						toolCall.function.name,
+						args,
+						abortSignal,
+						onTokenUpdate,
+					  );
 
 			// Extract multimodal content (text + images)
 			const {textContent, images} = extractMultimodalContent(toolResult);
@@ -743,6 +788,7 @@ export async function executeToolCalls(
 	yoloMode?: boolean,
 	addToAlwaysApproved?: AddToAlwaysApprovedCallback,
 	onUserInteractionNeeded?: UserInteractionCallback,
+	toolSnapshotKey?: string,
 ): Promise<ToolResult[]> {
 	// Group tool calls by their resource identifier
 	const resourceGroups = new Map<string, ToolCall[]>();
@@ -782,6 +828,7 @@ export async function executeToolCalls(
 					yoloMode,
 					addToAlwaysApproved,
 					onUserInteractionNeeded,
+					toolSnapshotKey,
 				);
 				groupResults.push(result);
 

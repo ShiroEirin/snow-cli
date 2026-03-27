@@ -26,6 +26,13 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 		apiKey,
 		setApiKey,
 		requestMethod,
+		enableVcpTimeBridge,
+		backendMode,
+		toolTransport,
+		bridgeVcpKey,
+		setBridgeVcpKey,
+		bridgeAccessToken,
+		setBridgeAccessToken,
 		requestMethodOptions,
 		systemPromptId,
 		activeSystemPromptIds,
@@ -161,6 +168,129 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 							<Text color={theme.colors.menuSecondary}>
 								{requestMethodOptions.find(opt => opt.value === requestMethod)
 									?.label || t.configScreen.notSet}
+							</Text>
+						</Box>
+					)}
+				</Box>
+			);
+
+		case 'enableVcpTimeBridge': {
+			const display =
+				enableVcpTimeBridge === true
+					? t.configScreen.vcpTimeBridgeEnabled
+					: enableVcpTimeBridge === false
+					? t.configScreen.vcpTimeBridgeDisabled
+					: t.configScreen.vcpTimeBridgeAuto;
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.vcpTimeBridge}
+					</Text>
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>{display}</Text>
+						</Box>
+					)}
+				</Box>
+			);
+		}
+
+		case 'backendMode': {
+			const display =
+				backendMode === 'vcp'
+					? t.configScreen.vcpModeVcp
+					: t.configScreen.vcpModeNative;
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.vcpMode}
+					</Text>
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>{display}</Text>
+						</Box>
+					)}
+				</Box>
+			);
+		}
+
+		case 'toolTransport': {
+			const display =
+				toolTransport === 'bridge'
+					? t.configScreen.toolTransportBridge
+					: toolTransport === 'hybrid'
+					? t.configScreen.toolTransportHybrid
+					: t.configScreen.toolTransportLocal;
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.toolTransport}
+					</Text>
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>{display}</Text>
+						</Box>
+					)}
+				</Box>
+			);
+		}
+
+		case 'bridgeVcpKey':
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.bridgeVcpKey}
+					</Text>
+					{isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<TextInput
+								value={bridgeVcpKey}
+								onChange={value =>
+									setBridgeVcpKey(stripFocusArtifacts(value))
+								}
+								placeholder="Snow"
+							/>
+						</Box>
+					)}
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>
+								{bridgeVcpKey || t.configScreen.notSet}
+							</Text>
+						</Box>
+					)}
+				</Box>
+			);
+
+		case 'bridgeAccessToken':
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.bridgeAccessToken}
+					</Text>
+					{isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<TextInput
+								value={bridgeAccessToken}
+								onChange={value =>
+									setBridgeAccessToken(stripFocusArtifacts(value))
+								}
+								placeholder="optional"
+								mask="*"
+							/>
+						</Box>
+					)}
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>
+								{bridgeAccessToken
+									? '*'.repeat(Math.min(bridgeAccessToken.length, 20))
+									: t.configScreen.notSet}
 							</Text>
 						</Box>
 					)}

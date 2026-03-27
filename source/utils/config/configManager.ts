@@ -13,6 +13,7 @@ import {
 	saveConfig,
 	DEFAULT_CONFIG,
 	DEFAULT_STREAM_IDLE_TIMEOUT_SEC,
+	resolveBackendModeWithMigration,
 	type AppConfig,
 } from './apiConfig.js';
 import {codebaseReviewAgent} from '../../agents/codebaseReviewAgent.js';
@@ -159,6 +160,16 @@ function normalizeStreamIdleTimeoutSec(value: unknown): number {
 	return value;
 }
 
+function normalizeToolTransport(
+	value: unknown,
+): 'local' | 'bridge' | 'hybrid' | undefined {
+	if (value === 'local' || value === 'bridge' || value === 'hybrid') {
+		return value;
+	}
+
+	return undefined;
+}
+
 /**
  * Load a specific profile with deep merge of default config
  * This ensures new config fields (like browserPath) are preserved
@@ -176,18 +187,32 @@ export function loadProfile(profileName: string): AppConfig | undefined {
 	try {
 		const configData = readFileSync(profilePath, 'utf8');
 		const parsedConfig = JSON.parse(configData) as Partial<AppConfig>;
+		const profileSnowConfig = (parsedConfig.snowcfg || {}) as Partial<
+			AppConfig['snowcfg']
+		>;
+		const backendModeResolution = resolveBackendModeWithMigration({
+			backendMode: profileSnowConfig.backendMode,
+		});
 
 		const mergedConfig: AppConfig = {
 			...DEFAULT_CONFIG,
 			...parsedConfig,
 			snowcfg: {
 				...DEFAULT_CONFIG.snowcfg,
-				...(parsedConfig.snowcfg || {}),
+				...profileSnowConfig,
+				backendMode: backendModeResolution.backendMode,
+				toolTransport:
+					normalizeToolTransport(profileSnowConfig.toolTransport) ||
+					DEFAULT_CONFIG.snowcfg.toolTransport,
 				streamIdleTimeoutSec: normalizeStreamIdleTimeoutSec(
-					parsedConfig.snowcfg?.streamIdleTimeoutSec,
+					profileSnowConfig.streamIdleTimeoutSec,
 				),
 			},
 		};
+
+		if (backendModeResolution.migrated) {
+			saveProfile(profileName, mergedConfig);
+		}
 
 		return mergedConfig;
 	} catch {

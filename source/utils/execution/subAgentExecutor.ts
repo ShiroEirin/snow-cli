@@ -1791,6 +1791,8 @@ You have access to these collaboration tools:
 								requestMethod: config.requestMethod,
 								maxTokens: config.maxTokens,
 								configProfile: agent.configProfile,
+								baseUrl: config.baseUrl,
+								backendMode: config.backendMode,
 							},
 						);
 

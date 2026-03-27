@@ -5,6 +5,8 @@ import {
 	validateApiConfig,
 	getSystemPromptConfig,
 	getCustomHeadersConfig,
+	type BackendMode,
+	type ToolTransport,
 	type RequestMethod,
 	type ApiConfig,
 } from '../../../utils/config/apiConfig.js';
@@ -32,6 +34,8 @@ import {
 	MAX_VISIBLE_FIELDS,
 	stripFocusArtifacts,
 } from './types.js';
+import {isVcpModeEnabled} from '../../../utils/session/vcpCompatibility/mode.js';
+import {buildSnowConfigDraft} from './configDraft.js';
 
 export function useConfigState() {
 	const {t} = useI18n();
@@ -49,6 +53,13 @@ export function useConfigState() {
 	const [baseUrl, setBaseUrl] = useState('');
 	const [apiKey, setApiKey] = useState('');
 	const [requestMethod, setRequestMethod] = useState<RequestMethod>('chat');
+	const [enableVcpTimeBridge, setEnableVcpTimeBridge] = useState<
+		boolean | undefined
+	>(undefined);
+	const [backendMode, setBackendMode] = useState<BackendMode>('native');
+	const [toolTransport, setToolTransport] = useState<ToolTransport>('local');
+	const [bridgeVcpKey, setBridgeVcpKey] = useState('');
+	const [bridgeAccessToken, setBridgeAccessToken] = useState('');
 	const [systemPromptId, setSystemPromptId] = useState<
 		string | string[] | undefined
 	>(undefined);
@@ -147,6 +158,12 @@ export function useConfigState() {
 			'baseUrl',
 			'apiKey',
 			'requestMethod',
+			'enableVcpTimeBridge',
+			'backendMode',
+			'toolTransport',
+			...((toolTransport === 'bridge' || toolTransport === 'hybrid')
+				? (['bridgeVcpKey', 'bridgeAccessToken'] as ConfigField[])
+				: []),
 			'systemPromptId',
 			'customHeadersSchemeId',
 			'enableAutoCompress',
@@ -266,6 +283,17 @@ export function useConfigState() {
 	}, [enableAutoCompress, currentField]);
 
 	useEffect(() => {
+		const bridgeFieldsVisible =
+			toolTransport === 'bridge' || toolTransport === 'hybrid';
+		if (
+			!bridgeFieldsVisible &&
+			(currentField === 'bridgeVcpKey' || currentField === 'bridgeAccessToken')
+		) {
+			setCurrentField('systemPromptId');
+		}
+	}, [toolTransport, currentField]);
+
+	useEffect(() => {
 		if (responsesReasoningEffort === 'xhigh' && !supportsXHigh) {
 			setResponsesReasoningEffort('high');
 		}
@@ -287,6 +315,11 @@ export function useConfigState() {
 		setBaseUrl(config.baseUrl);
 		setApiKey(config.apiKey);
 		setRequestMethod(config.requestMethod || 'chat');
+		setEnableVcpTimeBridge(config.enableVcpTimeBridge);
+		setBackendMode(config.backendMode || 'native');
+		setToolTransport(config.toolTransport || 'local');
+		setBridgeVcpKey(config.bridgeVcpKey || '');
+		setBridgeAccessToken(config.bridgeAccessToken || '');
 		setSystemPromptId(config.systemPromptId);
 		setCustomHeadersSchemeId(config.customHeadersSchemeId);
 		setAnthropicBeta(config.anthropicBeta || false);
@@ -343,6 +376,10 @@ export function useConfigState() {
 			baseUrl,
 			apiKey,
 			requestMethod,
+			backendMode,
+			toolTransport,
+			bridgeVcpKey,
+			bridgeAccessToken,
 		};
 		await updateOpenAiConfig(tempConfig);
 
@@ -436,6 +473,11 @@ export function useConfigState() {
 
 	const getRequestUrl = () => {
 		const resolvedBaseUrl = getResolvedBaseUrl(requestMethod);
+		const vcpModeEnabled = isVcpModeEnabled({backendMode});
+
+		if (vcpModeEnabled) {
+			return `${resolvedBaseUrl}/chat/completions`;
+		}
 
 		if (requestMethod === 'responses') {
 			return `${resolvedBaseUrl}/responses`;
@@ -542,34 +584,47 @@ export function useConfigState() {
 		}
 
 		try {
-			const currentConfig = {
-				snowcfg: {
-					baseUrl,
-					apiKey,
-					requestMethod,
-					systemPromptId,
-					customHeadersSchemeId,
-					anthropicBeta,
-					anthropicCacheTTL,
-					enableAutoCompress,
-					autoCompressThreshold,
-					showThinking,
-					streamingDisplay,
-					thinking: thinkingEnabled
-						? thinkingMode === 'adaptive'
-							? {type: 'adaptive' as const, effort: thinkingEffort}
-							: {type: 'enabled' as const, budget_tokens: thinkingBudgetTokens}
-						: undefined,
-					anthropicSpeed,
-					advancedModel,
-					basicModel,
-					maxContextTokens,
-					maxTokens,
-					streamIdleTimeoutSec,
-					toolResultTokenLimit,
+			const currentConfig = buildSnowConfigDraft({
+				baseUrl,
+				apiKey,
+				requestMethod,
+				enableVcpTimeBridge,
+				backendMode,
+				toolTransport,
+				bridgeVcpKey,
+				bridgeAccessToken,
+				systemPromptId,
+				customHeadersSchemeId,
+				anthropicBeta,
+				anthropicCacheTTL,
+				enableAutoCompress,
+				autoCompressThreshold,
+				showThinking,
+				streamingDisplay,
+				thinking: thinkingEnabled
+					? thinkingMode === 'adaptive'
+						? {type: 'adaptive' as const, effort: thinkingEffort}
+						: {type: 'enabled' as const, budget_tokens: thinkingBudgetTokens}
+					: undefined,
+				geminiThinking: geminiThinkingEnabled
+					? {enabled: true, budget: geminiThinkingBudget}
+					: undefined,
+				responsesReasoning: {
+					enabled: responsesReasoningEnabled,
+					effort: responsesReasoningEffort,
 				},
-			};
-			createProfile(cleaned, currentConfig as any);
+				responsesVerbosity,
+				responsesFastMode,
+				anthropicSpeed,
+				advancedModel,
+				basicModel,
+				maxContextTokens,
+				maxTokens,
+				streamIdleTimeoutSec,
+				toolResultTokenLimit,
+				editSimilarityThreshold,
+			});
+			createProfile(cleaned, currentConfig);
 			switchProfile(cleaned);
 			loadProfilesAndConfig();
 			setProfileMode('normal');
@@ -669,12 +724,21 @@ export function useConfigState() {
 			baseUrl,
 			apiKey,
 			requestMethod,
+			backendMode,
+			toolTransport,
+			bridgeVcpKey,
+			bridgeAccessToken,
 		});
 		if (validationErrors.length === 0) {
 			const config: Partial<ApiConfig> = {
 				baseUrl,
 				apiKey,
 				requestMethod,
+				enableVcpTimeBridge,
+				backendMode,
+				toolTransport,
+				bridgeVcpKey,
+				bridgeAccessToken,
 				systemPromptId,
 				customHeadersSchemeId,
 				anthropicBeta,
@@ -728,47 +792,50 @@ export function useConfigState() {
 			await updateOpenAiConfig(config);
 
 			try {
-				const fullConfig = {
-					snowcfg: {
-						baseUrl,
-						apiKey,
-						requestMethod,
-						systemPromptId,
-						customHeadersSchemeId,
-						anthropicBeta,
-						anthropicCacheTTL,
-						enableAutoCompress,
-						autoCompressThreshold,
-						showThinking,
-						streamingDisplay,
-						thinking: thinkingEnabled
-							? thinkingMode === 'adaptive'
-								? {type: 'adaptive' as const, effort: thinkingEffort}
-								: {
-										type: 'enabled' as const,
-										budget_tokens: thinkingBudgetTokens,
-								  }
-							: undefined,
-						geminiThinking: geminiThinkingEnabled
-							? {enabled: true, budget: geminiThinkingBudget}
-							: undefined,
-						responsesReasoning: {
-							enabled: responsesReasoningEnabled,
-							effort: responsesReasoningEffort,
-						},
-						responsesVerbosity,
-						responsesFastMode,
-						anthropicSpeed,
-						advancedModel,
-						basicModel,
-						maxContextTokens,
-						maxTokens,
-						streamIdleTimeoutSec,
-						toolResultTokenLimit,
-						editSimilarityThreshold,
+				const fullConfig = buildSnowConfigDraft({
+					baseUrl,
+					apiKey,
+					requestMethod,
+					enableVcpTimeBridge,
+					backendMode,
+					toolTransport,
+					bridgeVcpKey,
+					bridgeAccessToken,
+					systemPromptId,
+					customHeadersSchemeId,
+					anthropicBeta,
+					anthropicCacheTTL,
+					enableAutoCompress,
+					autoCompressThreshold,
+					showThinking,
+					streamingDisplay,
+					thinking: thinkingEnabled
+						? thinkingMode === 'adaptive'
+							? {type: 'adaptive' as const, effort: thinkingEffort}
+							: {
+									type: 'enabled' as const,
+									budget_tokens: thinkingBudgetTokens,
+							  }
+						: undefined,
+					geminiThinking: geminiThinkingEnabled
+						? {enabled: true, budget: geminiThinkingBudget}
+						: undefined,
+					responsesReasoning: {
+						enabled: responsesReasoningEnabled,
+						effort: responsesReasoningEffort,
 					},
-				};
-				saveProfile(activeProfile, fullConfig as any);
+					responsesVerbosity,
+					responsesFastMode,
+					anthropicSpeed,
+					advancedModel,
+					basicModel,
+					maxContextTokens,
+					maxTokens,
+					streamIdleTimeoutSec,
+					toolResultTokenLimit,
+					editSimilarityThreshold,
+				});
+				saveProfile(activeProfile, fullConfig);
 			} catch (err) {
 				console.error('Failed to save profile:', err);
 			}
@@ -804,6 +871,16 @@ export function useConfigState() {
 		setApiKey,
 		requestMethod,
 		setRequestMethod,
+		enableVcpTimeBridge,
+		setEnableVcpTimeBridge,
+		backendMode,
+		setBackendMode,
+		toolTransport,
+		setToolTransport,
+		bridgeVcpKey,
+		setBridgeVcpKey,
+		bridgeAccessToken,
+		setBridgeAccessToken,
 		systemPromptId,
 		setSystemPromptId,
 		customHeadersSchemeId,

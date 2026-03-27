@@ -22,6 +22,7 @@ import type {
 import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {getVersionHeader} from '../utils/core/version.js';
+import {resolveVcpRequestHeaders} from '../utils/session/vcpCompatibility/mode.js';
 
 export type {
 	ChatMessage,
@@ -517,6 +518,7 @@ export async function* createStreamingChatCompletion(
 			// Use custom headers from options if provided, otherwise get from current config (supports profile override)
 			const customHeaders =
 				options.customHeaders || getCustomHeadersForConfig(config);
+			const vcpRequestHeaders = resolveVcpRequestHeaders(config);
 
 			const fetchOptions = addProxyToFetchOptions(url, {
 				method: 'POST',
@@ -525,6 +527,7 @@ export async function* createStreamingChatCompletion(
 					Authorization: `Bearer ${config.apiKey}`,
 					'x-snow': getVersionHeader(),
 					...customHeaders,
+					...vcpRequestHeaders,
 				},
 				body: JSON.stringify(requestBody),
 				signal: abortSignal,

@@ -14,6 +14,7 @@ import {
 import {createStreamingResponse} from '../../api/responses.js';
 import {createStreamingGeminiCompletion} from '../../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../../api/anthropic.js';
+import {extractStreamTextContent} from '../../api/streamingUtils.js';
 import {parseJsonWithFix} from '../core/retryUtils.js';
 
 // Skill template metadata
@@ -277,18 +278,9 @@ async function callModelForText(
 			throw new Error('Request aborted');
 		}
 
-		if (chunk && typeof chunk === 'object') {
-			if (chunk.type === 'content' && typeof chunk.content === 'string') {
-				text += chunk.content;
-				continue;
-			}
-
-			// Backward compatibility: some callers expect raw OpenAI delta chunks
-			const maybeChoices = (chunk as any).choices;
-			const deltaContent = maybeChoices?.[0]?.delta?.content;
-			if (typeof deltaContent === 'string') {
-				text += deltaContent;
-			}
+		const content = extractStreamTextContent(chunk);
+		if (content) {
+			text += content;
 		}
 	}
 
