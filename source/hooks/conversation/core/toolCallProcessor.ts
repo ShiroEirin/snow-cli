@@ -4,6 +4,7 @@ import type {ToolCall} from '../../../utils/execution/toolExecutor.js';
 import {formatToolCallMessage} from '../../../utils/ui/messageFormatter.js';
 import {isToolNeedTwoStepDisplay} from '../../../utils/config/toolDisplayConfig.js';
 import {extractThinkingContent} from '../utils/thinkingExtractor.js';
+import {sanitizeAssistantContent} from '../utils/assistantContentSanitizer.js';
 
 export type ProcessToolCallsOptions = {
 	receivedToolCalls: ToolCall[];
@@ -33,6 +34,7 @@ export async function processToolCallsAfterStream(
 		saveMessage,
 		setMessages,
 	} = options;
+	const sanitizedStreamedContent = sanitizeAssistantContent(streamedContent || '');
 
 	const sharedThoughtSignature = (
 		receivedToolCalls.find(tc => (tc as any).thoughtSignature) as any
@@ -40,7 +42,7 @@ export async function processToolCallsAfterStream(
 
 	const assistantMessage: ChatMessage = {
 		role: 'assistant',
-		content: streamedContent || '',
+		content: sanitizedStreamedContent,
 		tool_calls: receivedToolCalls.map(tc => ({
 			id: tc.id,
 			type: 'function' as const,
@@ -73,12 +75,12 @@ export async function processToolCallsAfterStream(
 	);
 
 	if (!options.hasStreamedLines) {
-		if ((streamedContent && streamedContent.trim()) || thinkingContent) {
+		if (sanitizedStreamedContent || thinkingContent) {
 			setMessages(prev => [
 				...prev,
 				{
 					role: 'assistant',
-					content: streamedContent?.trim() || '',
+					content: sanitizedStreamedContent,
 					streaming: false,
 					thinking: thinkingContent,
 				},

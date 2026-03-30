@@ -11,6 +11,7 @@ import {
 import {processStreamRound} from './core/streamProcessor.js';
 import {handleToolCallRound} from './core/toolCallRoundHandler.js';
 import {handleOnStopHooks} from './core/onStopHookHandler.js';
+import {sanitizeAssistantContent} from './utils/assistantContentSanitizer.js';
 import type {
 	ConversationHandlerOptions,
 	ConversationUsage,
@@ -164,11 +165,15 @@ export async function handleConversationWithTools(
 				continue;
 			}
 
-			if (streamResult.streamedContent.trim()) {
+			const sanitizedAssistantContent = sanitizeAssistantContent(
+				streamResult.streamedContent,
+			);
+
+			if (sanitizedAssistantContent) {
 				if (!streamResult.hasStreamedLines) {
 					const finalAssistantMessage: Message = {
 						role: 'assistant',
-						content: streamResult.streamedContent.trim(),
+						content: sanitizedAssistantContent,
 						streaming: false,
 						discontinued: controller.signal.aborted,
 						thinking: extractThinkingContent(
@@ -182,7 +187,7 @@ export async function handleConversationWithTools(
 
 				const assistantMessage: ChatMessage = {
 					role: 'assistant',
-					content: streamResult.streamedContent.trim(),
+					content: sanitizedAssistantContent,
 					reasoning: streamResult.receivedReasoning,
 					thinking: streamResult.receivedThinking,
 					reasoning_content: streamResult.receivedReasoningContent,
