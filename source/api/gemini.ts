@@ -163,11 +163,11 @@ function convertToolsToGemini(tools?: ChatCompletionTool[]): any[] | undefined {
 function convertToGeminiMessages(
 	messages: ChatMessage[],
 	includeBuiltinSystemPrompt: boolean = true,
-	customSystemPromptOverride?: string[], // Allow override for sub-agents
-	planMode: boolean = false, // When true, use Plan mode system prompt
-	vulnerabilityHuntingMode: boolean = false, // When true, use Vulnerability Hunting mode system prompt
-	teamMode: boolean = false,
+	customSystemPromptOverride?: string[],
+	planMode: boolean = false,
+	vulnerabilityHuntingMode: boolean = false,
 	toolSearchDisabled: boolean = false,
+	teamMode: boolean = false,
 ): {
 	systemInstruction?: string[];
 	contents: any[];
@@ -479,11 +479,11 @@ export async function* createStreamingGeminiCompletion(
 			const {systemInstruction, contents} = convertToGeminiMessages(
 				options.messages,
 				options.includeBuiltinSystemPrompt !== false, // 默认为 true
-				customSystemPromptContent, // 传递自定义系统提示词
-				options.planMode || false, // Pass planMode to use correct system prompt
+				customSystemPromptContent,
+				options.planMode || false,
 				options.vulnerabilityHuntingMode || false,
-				options.teamMode || false,
 				options.toolSearchDisabled || false,
+				options.teamMode || false,
 			);
 
 			// Build request payload

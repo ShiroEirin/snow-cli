@@ -195,10 +195,10 @@ function convertToResponseInput(
 	messages: ChatMessage[],
 	includeBuiltinSystemPrompt: boolean = true,
 	customSystemPromptOverride?: string[],
-	planMode: boolean = false, // When true, use Plan mode system prompt
-	vulnerabilityHuntingMode: boolean = false, // When true, use Vulnerability Hunting mode system prompt
-	teamMode: boolean = false,
+	planMode: boolean = false,
+	vulnerabilityHuntingMode: boolean = false,
 	toolSearchDisabled: boolean = false,
+	teamMode: boolean = false,
 ): {
 	input: any[];
 	systemInstructions: string;
@@ -554,12 +554,12 @@ export async function* createStreamingResponse(
 	// 提取系统提示词和转换后的消息
 	const {input: requestInput, systemInstructions} = convertToResponseInput(
 		options.messages,
-		options.includeBuiltinSystemPrompt !== false, // 默认为 true
+		options.includeBuiltinSystemPrompt !== false,
 		customSystemPromptContent,
-		options.planMode || false, // Pass planMode to use correct system prompt
+		options.planMode || false,
 		options.vulnerabilityHuntingMode || false,
-		options.teamMode || false,
 		options.toolSearchDisabled || false,
+		options.teamMode || false,
 	);
 
 	// 获取配置的 reasoning 设置

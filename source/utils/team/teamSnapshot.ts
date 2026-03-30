@@ -146,7 +146,7 @@ export async function rollbackTeamState(
 
 	const {teamTracker} = await import('../execution/teamTracker.js');
 	const {cleanupTeamWorktrees} = await import('./teamWorktree.js');
-	const {disbandTeam, getActiveTeam} = await import('./teamConfig.js');
+	const {disbandTeam} = await import('./teamConfig.js');
 
 	// Abort all running teammates
 	teamTracker.abortAllTeammates();
@@ -157,10 +157,10 @@ export async function rollbackTeamState(
 		teamNames.add(event.teamName);
 	}
 
-	// Also include the currently active team (may not be in snapshots if created in same turn)
-	const activeTeam = getActiveTeam();
-	if (activeTeam) {
-		teamNames.add(activeTeam.name);
+	// Also include this session's own active team (may not be in snapshots if created in same turn)
+	const ownTeamName = teamTracker.getActiveTeamName();
+	if (ownTeamName) {
+		teamNames.add(ownTeamName);
 	}
 
 	let cleanedCount = 0;
@@ -180,6 +180,11 @@ export async function rollbackTeamState(
 	}
 
 	teamTracker.clearActiveTeam();
+
+	const {clearAllTeammateStreamEntries} = await import(
+		'../../hooks/conversation/core/subAgentMessageHandler.js'
+	);
+	clearAllTeammateStreamEntries();
 
 	// Delete snapshot records from target index onward
 	deleteTeamSnapshotsFromIndex(sessionId, targetMessageIndex);
@@ -202,6 +207,34 @@ export function deleteTeamSnapshotsFromIndex(
 		if (!isNaN(msgIndex) && msgIndex >= targetMessageIndex) {
 			delete data[key];
 			changed = true;
+		}
+	}
+	if (changed) saveSnapshotData(data);
+}
+
+/**
+ * Delete all team snapshot events for a specific team name within a session.
+ * Called when the main flow terminates a team via cleanup_team,
+ * so the rollback prompt no longer shows already-cleaned-up teams.
+ */
+export function deleteTeamSnapshotsByTeamName(
+	sessionId: string,
+	teamName: string,
+): void {
+	const data = readSnapshotData();
+	let changed = false;
+	for (const key of Object.keys(data)) {
+		if (!key.startsWith(`${sessionId}:`)) continue;
+		const events = data[key];
+		if (!events) continue;
+		const filtered = events.filter(e => e.teamName !== teamName);
+		if (filtered.length !== events.length) {
+			changed = true;
+			if (filtered.length === 0) {
+				delete data[key];
+			} else {
+				data[key] = filtered;
+			}
 		}
 	}
 	if (changed) saveSnapshotData(data);

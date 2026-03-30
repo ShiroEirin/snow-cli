@@ -56,11 +56,7 @@ jobs:
 
             ### What's New
 
-            - Added new Team mode, supporting team collaboration
-            - Main process supports mixed compression mode
-            - Optimized the experience of the Plan mode
-            - Optimized MCP panel display, supporting retrieval of service tool list
-            - Streamlined overall internal system prompts
+            - Fix the issue where the Team mode startup status does not take effect
 
             ### Installation
             ```bash

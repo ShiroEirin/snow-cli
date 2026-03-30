@@ -197,12 +197,12 @@ async function generateConfigHash(): Promise<string> {
 
 		return JSON.stringify({
 			mcpServers: mcpConfig.mcpServers,
-			subAgents: subAgents.map(t => t.name), // Only track agent names for hash
-			skills: skillTools.map(t => t.name), // Include skill names in hash
-			codebaseEnabled: codebaseConfig.enabled, // 🔥 Must include to invalidate cache on enable/disable
+			subAgents: subAgents.map(t => t.name),
+			skills: skillTools.map(t => t.name),
+			codebaseEnabled: codebaseConfig.enabled,
+			disabledBuiltInServices: getDisabledBuiltInServices(),
+			disabledSkills: getDisabledSkills(),
 			teamMode: getTeamMode(),
-			disabledBuiltInServices: getDisabledBuiltInServices(), // Include disabled built-in services in hash
-			disabledSkills: getDisabledSkills(), // Include disabled skills in hash
 		});
 	} catch {
 		return '';

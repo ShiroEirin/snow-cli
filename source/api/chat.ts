@@ -107,10 +107,10 @@ function convertToOpenAIMessages(
 	messages: ChatMessage[],
 	includeBuiltinSystemPrompt: boolean = true,
 	customSystemPromptOverride?: string[],
-	planMode: boolean = false, // When true, use Plan mode system prompt
-	vulnerabilityHuntingMode: boolean = false, // When true, use Vulnerability Hunting mode system prompt
-	teamMode: boolean = false,
+	planMode: boolean = false,
+	vulnerabilityHuntingMode: boolean = false,
 	toolSearchDisabled: boolean = false,
+	teamMode: boolean = false,
 ): ChatCompletionMessageParam[] {
 	const customSystemPrompts = customSystemPromptOverride;
 
@@ -513,10 +513,10 @@ export async function* createStreamingChatCompletion(
 					options.messages,
 					options.includeBuiltinSystemPrompt !== false, // 默认为 true
 					customSystemPromptContent,
-					options.planMode || false, // Pass planMode to use correct system prompt
-					options.vulnerabilityHuntingMode || false, // Pass vulnerabilityHuntingMode to use correct system prompt
-					options.teamMode || false,
+					options.planMode || false,
+					options.vulnerabilityHuntingMode || false,
 					options.toolSearchDisabled || false,
+					options.teamMode || false,
 				),
 				stream: true,
 				stream_options: {include_usage: true},
