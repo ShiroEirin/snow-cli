@@ -1,4 +1,11 @@
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	writeFileSync,
+} from 'fs';
 import {join} from 'path';
 import {homedir} from 'os';
 import {randomUUID} from 'crypto';
@@ -81,22 +88,26 @@ export function getTeam(teamName: string): TeamConfig | null {
 }
 
 export function getActiveTeam(): TeamConfig | null {
+	return listActiveTeams()[0] || null;
+}
+
+export function listActiveTeams(): TeamConfig[] {
 	ensureDir(TEAMS_DIR);
+	const teams: TeamConfig[] = [];
 	try {
-		const {readdirSync} = require('fs');
 		const entries = readdirSync(TEAMS_DIR, {withFileTypes: true});
 		for (const entry of entries) {
 			if (entry.isDirectory()) {
 				const team = getTeam(entry.name);
 				if (team && team.status === 'active') {
-					return team;
+					teams.push(team);
 				}
 			}
 		}
 	} catch {
 		// ignore
 	}
-	return null;
+	return teams;
 }
 
 export function updateTeam(teamName: string, updates: Partial<TeamConfig>): TeamConfig | null {
@@ -198,7 +209,6 @@ export function deleteTeamData(teamName: string): boolean {
 	const teamDir = getTeamDir(teamName);
 	if (!existsSync(teamDir)) return false;
 	try {
-		const {rmSync} = require('fs');
 		rmSync(teamDir, {recursive: true, force: true});
 		return true;
 	} catch {

@@ -62,6 +62,7 @@ _在终端中进行 Agentic 编程_
 - [LSP 配置与用法](docs/usage/zh/19.LSP配置.md) - LSP 配置文件、语言服务器安装、ACE 工具用法(跳转/大纲)
 - [SSE 服务模式](docs/usage/zh/20.SSE服务模式.md) - SSE 服务器启动、API 端点说明、工具确认流程、权限配置、YOLO 模式、客户端集成示例
 - [自定义 StatusLine 指南](docs/usage/zh/21.自定义StatusLine指南.md) - 用户级状态栏插件、hook 结构、覆盖机制、中英文示例
+- [VCP 五层边界与 Seam 说明](docs/usage/zh/22.VCP五层边界与Seam说明.md) - Snow Core seam 级改动边界、五层职责划分与防回退测试
 
 ### 推荐使用的 ROLE.md
 

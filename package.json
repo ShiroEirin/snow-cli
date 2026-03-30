@@ -39,6 +39,9 @@
 		"prepublishOnly": "npm run build",
 		"postinstall": "node scripts/postinstall.cjs",
 		"test": "prettier --check . && xo && ava",
+		"test:vcp:blackbox": "node scripts/vcp-blackbox.mjs",
+		"test:vcp:toolplane": "node --loader=ts-node/esm/transpile-only scripts/vcp-toolplane-probe.mjs",
+		"test:vcp:toolplane:perf": "node --loader=ts-node/esm/transpile-only scripts/vcp-toolplane-probe.mjs --perf",
 		"lint": "xo",
 		"format": "prettier --write ."
 	},

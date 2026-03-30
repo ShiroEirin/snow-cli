@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {WebSocket} from 'ws';
 import type {ApiConfig} from '../../config/apiConfig.js';
-import type {BridgeManifestResponse} from './toolSnapshot.js';
+import type {BridgeManifestResponse} from './bridgeManifestTranslator.js';
 
 type BridgeEnvelope<T = unknown> = {
 	type: string;
@@ -24,13 +24,21 @@ type BridgeStatusListener = (event: unknown) => void;
 
 const BRIDGE_EXECUTE_TIMEOUT_MS = 120_000;
 const BRIDGE_ASYNC_EXECUTE_TIMEOUT_MS = 10 * 60 * 1000;
+const BRIDGE_MANIFEST_CACHE_MS = 30_000;
 
-class SnowBridgeClient {
+type BridgeManifestCacheEntry = {
+	manifest: BridgeManifestResponse;
+	expiresAt: number;
+};
+
+export class SnowBridgeClient {
 	private readonly debugFrames = process.env['SNOW_DEBUG_BRIDGE'] === '1';
 	private socket: WebSocket | null = null;
 	private connectPromise: Promise<void> | null = null;
 	private pendingRequests = new Map<string, BridgePendingRequest>();
 	private pendingStatusListeners = new Map<string, BridgeStatusListener>();
+	private manifestCache = new Map<string, BridgeManifestCacheEntry>();
+	private pendingManifestRequests = new Map<string, Promise<BridgeManifestResponse>>();
 	private activeConnectionKey = '';
 
 	private buildConnectionKey(config: Pick<
@@ -71,6 +79,27 @@ class SnowBridgeClient {
 		this.socket = null;
 		this.connectPromise = null;
 		this.activeConnectionKey = '';
+	}
+
+	disconnect(): void {
+		this.rejectAllPending(
+			new Error('SnowBridge connection closed by client reset.'),
+		);
+		this.cleanupSocket();
+	}
+
+	clearManifestCache(
+		config?: Pick<ApiConfig, 'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken'>,
+	): void {
+		if (!config) {
+			this.manifestCache.clear();
+			this.pendingManifestRequests.clear();
+			return;
+		}
+
+		const connectionKey = this.buildConnectionKey(config);
+		this.manifestCache.delete(connectionKey);
+		this.pendingManifestRequests.delete(connectionKey);
 	}
 
 	private rejectAllPending(error: Error): void {
@@ -230,60 +259,85 @@ class SnowBridgeClient {
 			data: Record<string, unknown>,
 		) => 'continue_waiting' | void;
 	}): Promise<TResponse> {
-		return this.ensureConnected(options.config).then(
-			() =>
-				new Promise<TResponse>((resolve, reject) => {
-					const requestId = String(
-						options.payload['requestId'] || randomUUID(),
-					);
-					const timeoutMs = options.timeoutMs ?? 20_000;
-					const payload = {
-						type: options.type,
-						data: {
-							...options.payload,
-							requestId,
-							accessToken: options.config.bridgeAccessToken || undefined,
-							clientInfo: {
-								clientId: 'snow-cli',
-								clientName: 'snow-cli',
-							},
-						},
-					};
-
-					this.pendingRequests.set(requestId, {
-						resolve,
-						reject,
-						timer: null,
-						type: options.expectedType,
-						timeoutMessage:
-							options.timeoutMessage ||
-							`SnowBridge request timed out: ${options.type} (${requestId})`,
-						onEnvelope: options.onEnvelope,
-					});
-					this.armPendingTimer(requestId, timeoutMs);
-
-					try {
-						this.socket?.send(JSON.stringify(payload));
-					} catch (error) {
-						const pending = this.pendingRequests.get(requestId);
-						if (pending?.timer) {
-							clearTimeout(pending.timer);
-						}
-						this.pendingRequests.delete(requestId);
-						reject(
-							error instanceof Error
-								? error
-								: new Error('Failed to send SnowBridge request.'),
-						);
-					}
-				}),
+		return this.ensureConnected(options.config).then(() =>
+			this.sendConnectedRequest(options),
 		);
+	}
+
+	private sendConnectedRequest<TResponse>(options: {
+		config: Pick<ApiConfig, 'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken'>;
+		type: string;
+		expectedType: string;
+		payload: Record<string, unknown>;
+		timeoutMs?: number;
+		timeoutMessage?: string;
+		onEnvelope?: (
+			envelopeType: string,
+			data: Record<string, unknown>,
+		) => 'continue_waiting' | void;
+	}): Promise<TResponse> {
+		return new Promise<TResponse>((resolve, reject) => {
+			const requestId = String(
+				options.payload['requestId'] || randomUUID(),
+			);
+			const timeoutMs = options.timeoutMs ?? 20_000;
+			const payload = {
+				type: options.type,
+				data: {
+					...options.payload,
+					requestId,
+					accessToken: options.config.bridgeAccessToken || undefined,
+					clientInfo: {
+						clientId: 'snow-cli',
+						clientName: 'snow-cli',
+					},
+				},
+			};
+
+			this.pendingRequests.set(requestId, {
+				resolve,
+				reject,
+				timer: null,
+				type: options.expectedType,
+				timeoutMessage:
+					options.timeoutMessage ||
+					`SnowBridge request timed out: ${options.type} (${requestId})`,
+				onEnvelope: options.onEnvelope,
+			});
+			this.armPendingTimer(requestId, timeoutMs);
+
+			try {
+				this.socket?.send(JSON.stringify(payload));
+			} catch (error) {
+				const pending = this.pendingRequests.get(requestId);
+				if (pending?.timer) {
+					clearTimeout(pending.timer);
+				}
+				this.pendingRequests.delete(requestId);
+				reject(
+					error instanceof Error
+						? error
+						: new Error('Failed to send SnowBridge request.'),
+				);
+			}
+		});
 	}
 
 	async getManifest(
 		config: Pick<ApiConfig, 'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken'>,
 	): Promise<BridgeManifestResponse> {
-		const response = await this.sendRequest<{
+		const connectionKey = this.buildConnectionKey(config);
+		const cachedManifest = this.manifestCache.get(connectionKey);
+		if (cachedManifest && cachedManifest.expiresAt > Date.now()) {
+			return cachedManifest.manifest;
+		}
+
+		const pendingManifest = this.pendingManifestRequests.get(connectionKey);
+		if (pendingManifest) {
+			return pendingManifest;
+		}
+
+		const manifestPromise = this.sendRequest<{
 			status: string;
 			plugins?: BridgeManifestResponse['plugins'];
 			error?: {message?: string};
@@ -292,15 +346,29 @@ class SnowBridgeClient {
 			type: 'get_vcp_manifests',
 			expectedType: 'vcp_manifest_response',
 			payload: {},
-		});
+		})
+			.then(response => {
+				if (response.status !== 'success') {
+					throw new Error(
+						response.error?.message || 'Failed to load SnowBridge manifest.',
+					);
+				}
 
-		if (response.status !== 'success') {
-			throw new Error(response.error?.message || 'Failed to load SnowBridge manifest.');
-		}
+				const manifest = {
+					plugins: response.plugins || [],
+				};
+				this.manifestCache.set(connectionKey, {
+					manifest,
+					expiresAt: Date.now() + BRIDGE_MANIFEST_CACHE_MS,
+				});
+				return manifest;
+			})
+			.finally(() => {
+				this.pendingManifestRequests.delete(connectionKey);
+			});
 
-		return {
-			plugins: response.plugins || [],
-		};
+		this.pendingManifestRequests.set(connectionKey, manifestPromise);
+		return manifestPromise;
 	}
 
 	async executeTool(options: {
@@ -313,6 +381,7 @@ class SnowBridgeClient {
 		const requestId = randomUUID();
 		const invocationId = requestId;
 		const abortMessage = `SnowBridge tool execution aborted: ${options.toolName}`;
+		let aborted = false;
 
 		if (options.abortSignal?.aborted) {
 			throw new Error(abortMessage);
@@ -323,6 +392,11 @@ class SnowBridgeClient {
 		}
 
 		const abortHandler = () => {
+			if (aborted) {
+				return;
+			}
+
+			aborted = true;
 			this.rejectPendingRequest(
 				requestId,
 				new Error(abortMessage),
@@ -331,6 +405,12 @@ class SnowBridgeClient {
 				config: options.config,
 				requestId,
 				invocationId,
+			}).catch(error => {
+				console.warn(
+					`[SnowBridge] Failed to cancel tool "${options.toolName}" (${requestId}): ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				);
 			}).finally(() => {
 				this.pendingStatusListeners.delete(invocationId);
 			});
@@ -345,7 +425,12 @@ class SnowBridgeClient {
 		}
 
 		try {
-			const response = await this.sendRequest<{
+			await this.ensureConnected(options.config);
+			if (aborted || options.abortSignal?.aborted) {
+				throw new Error(abortMessage);
+			}
+
+			const response = await this.sendConnectedRequest<{
 				status: string;
 				result?: unknown;
 				error?: {message?: string};
@@ -406,7 +491,7 @@ class SnowBridgeClient {
 				invocationId: options.invocationId,
 			},
 			timeoutMs: 5_000,
-		}).catch(() => {});
+		});
 	}
 }
 

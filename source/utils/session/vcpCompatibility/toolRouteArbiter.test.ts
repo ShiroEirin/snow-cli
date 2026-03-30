@@ -4,20 +4,11 @@ const test = anyTest as any;
 
 import {validateApiConfig} from '../../config/apiConfig.js';
 import {
-	resolveToolExecutionRoute,
 	resolveToolRegistry,
 	resolveToolTransport,
 	shouldIncludeBridgeTools,
 	shouldIncludeLocalTools,
 } from './toolRouteArbiter.js';
-import {
-	buildBridgeToolSnapshot,
-	clearBridgeToolSnapshot,
-} from './toolSnapshot.js';
-
-test.afterEach(() => {
-	clearBridgeToolSnapshot('hybrid-session');
-});
 
 test('resolve transport flags for local bridge and hybrid', (t: any) => {
 	t.is(resolveToolTransport({toolTransport: 'local'}), 'local');
@@ -29,51 +20,6 @@ test('resolve transport flags for local bridge and hybrid', (t: any) => {
 	t.true(shouldIncludeBridgeTools({toolTransport: 'bridge'}));
 	t.true(shouldIncludeLocalTools({toolTransport: 'hybrid'}));
 	t.true(shouldIncludeBridgeTools({toolTransport: 'hybrid'}));
-});
-
-test('resolve execution route by transport mode and session snapshot', (t: any) => {
-	buildBridgeToolSnapshot('hybrid-session', {
-		plugins: [
-			{
-				name: 'FileOperator',
-				displayName: 'FileOperator',
-				description: 'File operations',
-				bridgeCommands: [
-					{
-						commandName: 'ReadFile',
-						description: 'Read a file.',
-						parameters: [],
-						example: '',
-					},
-				],
-			},
-		],
-	});
-
-	t.is(
-		resolveToolExecutionRoute({
-			config: {toolTransport: 'bridge'},
-			toolName: 'vcp-fileoperator-readfile',
-			snapshotKey: 'hybrid-session',
-		}),
-		'bridge',
-	);
-	t.is(
-		resolveToolExecutionRoute({
-			config: {toolTransport: 'hybrid'},
-			toolName: 'filesystem-read',
-			snapshotKey: 'hybrid-session',
-		}),
-		'local',
-	);
-	t.is(
-		resolveToolExecutionRoute({
-			config: {toolTransport: 'local'},
-			toolName: 'vcp-fileoperator-readfile',
-			snapshotKey: 'hybrid-session',
-		}),
-		'local',
-	);
 });
 
 test('validate hybrid transport requires bridge key like bridge mode', (t: any) => {
@@ -139,6 +85,15 @@ test('resolve tool registry keeps local and bridge planes isolated by transport'
 				connected: true,
 			},
 		],
+		bindings: [
+			{
+				kind: 'bridge' as const,
+				toolName: 'vcp-fileoperator-readfile',
+				pluginName: 'FileOperator',
+				displayName: 'FileOperator',
+				commandName: 'ReadFile',
+			},
+		],
 	};
 
 	const localOnly = resolveToolRegistry({
@@ -151,6 +106,12 @@ test('resolve tool registry keeps local and bridge planes isolated by transport'
 		localOnly.tools.map(tool => tool.function.name),
 		['filesystem-read'],
 	);
+	t.deepEqual(localOnly.executionBindings, [
+		{
+			kind: 'local',
+			toolName: 'filesystem-read',
+		},
+	]);
 
 	const bridgeOnly = resolveToolRegistry({
 		config: {toolTransport: 'bridge'},
@@ -162,6 +123,15 @@ test('resolve tool registry keeps local and bridge planes isolated by transport'
 		bridgeOnly.tools.map(tool => tool.function.name),
 		['vcp-fileoperator-readfile'],
 	);
+	t.deepEqual(bridgeOnly.executionBindings, [
+		{
+			kind: 'bridge',
+			toolName: 'vcp-fileoperator-readfile',
+			pluginName: 'FileOperator',
+			displayName: 'FileOperator',
+			commandName: 'ReadFile',
+		},
+	]);
 });
 
 test('resolve tool registry prefers local tools when hybrid sees duplicates', (t: any) => {
@@ -172,6 +142,18 @@ test('resolve tool registry prefers local tools when hybrid sees duplicates', (t
 			description: 'Local tool description.',
 			parameters: {type: 'object', properties: {}},
 		},
+	};
+	const localService = {
+		serviceName: 'shared',
+		tools: [
+			{
+				name: 'read',
+				description: 'Local shared tool description.',
+				inputSchema: {type: 'object', properties: {}},
+			},
+		],
+		isBuiltIn: false,
+		connected: true,
 	};
 	const bridgeSnapshot = {
 		modelTools: [
@@ -198,12 +180,21 @@ test('resolve tool registry prefers local tools when hybrid sees duplicates', (t
 				connected: true,
 			},
 		],
+		bindings: [
+			{
+				kind: 'bridge' as const,
+				toolName: 'shared-read',
+				pluginName: 'Shared',
+				displayName: 'Shared',
+				commandName: 'Read',
+			},
+		],
 	};
 
 	const registry = resolveToolRegistry({
 		config: {toolTransport: 'hybrid'},
 		localTools: [localTool],
-		localServicesInfo: [],
+		localServicesInfo: [localService],
 		bridgeSnapshot,
 	});
 
@@ -213,4 +204,11 @@ test('resolve tool registry prefers local tools when hybrid sees duplicates', (t
 	);
 	t.is(registry.tools[0]?.function.description, 'Local tool description.');
 	t.deepEqual(registry.duplicateToolNames, ['shared-read']);
+	t.deepEqual(registry.executionBindings, [
+		{
+			kind: 'local',
+			toolName: 'shared-read',
+		},
+	]);
+	t.deepEqual(registry.servicesInfo, [localService]);
 });

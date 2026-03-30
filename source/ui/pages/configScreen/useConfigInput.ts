@@ -2,7 +2,10 @@ import {useInput} from 'ink';
 import {
 	stripFocusArtifacts,
 	isFocusEventInput,
-	isSelectField,
+	isDirectTextInputField,
+	isEscapeClosableEditingField,
+	isNumericField,
+	isToggleField,
 } from './types.js';
 import type {ConfigStateReturn} from './useConfigState.js';
 
@@ -208,8 +211,8 @@ export function useConfigInput(
 			return;
 		}
 
-		// Allow Escape key to exit Select component
-		if (isEditing && isSelectField(currentField) && key.escape) {
+		// Allow Escape key to exit editing for select and direct text fields
+		if (isEditing && isEscapeClosableEditingField(currentField) && key.escape) {
 			setIsEditing(false);
 			setSearchTerm('');
 			if (currentField === 'systemPromptId') {
@@ -221,7 +224,7 @@ export function useConfigInput(
 
 		// Handle editing mode
 		if (isEditing) {
-			if (currentField === 'baseUrl' || currentField === 'apiKey') {
+			if (isDirectTextInputField(currentField)) {
 				if (key.return) {
 					setIsEditing(false);
 				}
@@ -229,16 +232,7 @@ export function useConfigInput(
 			}
 
 			// Handle numeric / decimal input
-			if (
-				currentField === 'maxContextTokens' ||
-				currentField === 'maxTokens' ||
-				currentField === 'streamIdleTimeoutSec' ||
-				currentField === 'toolResultTokenLimit' ||
-				currentField === 'thinkingBudgetTokens' ||
-				currentField === 'geminiThinkingBudget' ||
-				currentField === 'autoCompressThreshold' ||
-				currentField === 'editSimilarityThreshold'
-			) {
+			if (isNumericField(currentField)) {
 				if (currentField === 'editSimilarityThreshold') {
 					handleThresholdInput(input, key);
 					return;
@@ -415,22 +409,24 @@ export function useConfigInput(
 		}
 
 		// Toggle fields
-		if (currentField === 'anthropicBeta') {
-			setAnthropicBeta(!anthropicBeta);
-		} else if (currentField === 'enableAutoCompress') {
-			setEnableAutoCompress(!enableAutoCompress);
-		} else if (currentField === 'showThinking') {
-			setShowThinking(!showThinking);
-		} else if (currentField === 'streamingDisplay') {
-			setStreamingDisplay(!streamingDisplay);
-		} else if (currentField === 'thinkingEnabled') {
-			setThinkingEnabled(!thinkingEnabled);
-		} else if (currentField === 'geminiThinkingEnabled') {
-			setGeminiThinkingEnabled(!geminiThinkingEnabled);
-		} else if (currentField === 'responsesReasoningEnabled') {
-			setResponsesReasoningEnabled(!responsesReasoningEnabled);
-		} else if (currentField === 'responsesFastMode') {
-			setResponsesFastMode(!responsesFastMode);
+		if (isToggleField(currentField)) {
+			if (currentField === 'anthropicBeta') {
+				setAnthropicBeta(!anthropicBeta);
+			} else if (currentField === 'enableAutoCompress') {
+				setEnableAutoCompress(!enableAutoCompress);
+			} else if (currentField === 'showThinking') {
+				setShowThinking(!showThinking);
+			} else if (currentField === 'streamingDisplay') {
+				setStreamingDisplay(!streamingDisplay);
+			} else if (currentField === 'thinkingEnabled') {
+				setThinkingEnabled(!thinkingEnabled);
+			} else if (currentField === 'geminiThinkingEnabled') {
+				setGeminiThinkingEnabled(!geminiThinkingEnabled);
+			} else if (currentField === 'responsesReasoningEnabled') {
+				setResponsesReasoningEnabled(!responsesReasoningEnabled);
+			} else if (currentField === 'responsesFastMode') {
+				setResponsesFastMode(!responsesFastMode);
+			}
 		} else if (
 			currentField === 'anthropicCacheTTL' ||
 			currentField === 'anthropicSpeed' ||
@@ -440,15 +436,7 @@ export function useConfigInput(
 			currentField === 'responsesVerbosity'
 		) {
 			setIsEditing(true);
-		} else if (
-			currentField === 'maxContextTokens' ||
-			currentField === 'maxTokens' ||
-			currentField === 'streamIdleTimeoutSec' ||
-			currentField === 'toolResultTokenLimit' ||
-			currentField === 'thinkingBudgetTokens' ||
-			currentField === 'geminiThinkingBudget' ||
-			currentField === 'autoCompressThreshold'
-		) {
+		} else if (isNumericField(currentField)) {
 			setIsEditing(true);
 		} else if (currentField === 'editSimilarityThreshold') {
 			setEditingThresholdValue('');

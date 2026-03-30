@@ -5,19 +5,14 @@ const test = anyTest as any;
 import {
 	buildBridgeToolSnapshot,
 	buildSessionBridgeToolSnapshot,
-	clearBridgeToolSnapshot,
 	clearBridgeToolSnapshotSession,
-	getBridgeToolByName,
 } from './toolSnapshot.js';
 
 test.afterEach(() => {
-	clearBridgeToolSnapshot();
-	clearBridgeToolSnapshot('session-a');
-	clearBridgeToolSnapshot('session-b');
 	clearBridgeToolSnapshotSession('chat-session');
 });
 
-test('build bridge tool snapshot from manifest commands', (t: any) => {
+test('build bridge tool snapshot from manifest structured parameters', (t: any) => {
 	const snapshot = buildBridgeToolSnapshot(undefined, {
 		plugins: [
 			{
@@ -27,9 +22,15 @@ test('build bridge tool snapshot from manifest commands', (t: any) => {
 				bridgeCommands: [
 					{
 						commandName: 'ReadFile',
-						description:
-							'Read a file.\n- filePath (string, required): target file path.',
-						parameters: [],
+						description: 'Read a file from the workspace.',
+						parameters: [
+							{
+								name: 'filePath',
+								type: 'string',
+								required: true,
+								description: 'Absolute file path.',
+							},
+						],
 						example: '',
 					},
 				],
@@ -42,19 +43,57 @@ test('build bridge tool snapshot from manifest commands', (t: any) => {
 		| undefined;
 	t.is(snapshot.modelTools.length, 1);
 	t.is(snapshot.servicesInfo.length, 1);
+	t.is(snapshot.bindings.length, 1);
 	t.is(snapshot.modelTools[0]?.function.name, 'vcp-fileoperator-readfile');
-	t.truthy(getBridgeToolByName('vcp-fileoperator-readfile'));
+	t.is(snapshot.bindings[0]?.toolName, 'vcp-fileoperator-readfile');
 	t.true(
 		Object.prototype.hasOwnProperty.call(
 			parameters?.['properties'] || {},
 			'filePath',
 		),
 	);
-	t.deepEqual(parameters?.['required'], [
-		'command',
-		'filePath',
-	]);
+	t.false(
+		Object.prototype.hasOwnProperty.call(
+			parameters?.['properties'] || {},
+			'command',
+		),
+	);
+	t.deepEqual(parameters?.['required'], ['filePath']);
 	t.is(parameters?.['properties']?.['filePath']?.type, 'string');
+});
+
+test('ignore legacy protocol hints embedded in bridge descriptions', (t: any) => {
+	const snapshot = buildBridgeToolSnapshot(undefined, {
+		plugins: [
+			{
+				name: 'CodeSearcher',
+				displayName: 'CodeSearcher',
+				description: 'Search project code.',
+				bridgeCommands: [
+					{
+						commandName: 'SearchCode',
+						description: `Search source tree.
+TOOL_REQUEST
+tool_name:「始」
+Example: <<<[TOOL_REQUEST]>>>`,
+						parameters: [],
+						example: 'tool_name:「始」',
+					},
+				],
+			},
+		],
+	});
+
+	const functionDescription = snapshot.modelTools[0]?.function.description || '';
+	const parameters = snapshot.modelTools[0]?.function.parameters as
+		| Record<string, any>
+		| undefined;
+	t.false(functionDescription.includes('TOOL_REQUEST'));
+	t.false(functionDescription.includes('tool_name'));
+	t.false(functionDescription.includes('Example:'));
+	t.deepEqual(Object.keys(parameters?.['properties'] || {}), []);
+	t.deepEqual(parameters?.['required'], []);
+	t.true(parameters?.['additionalProperties']);
 });
 
 test('preserve typed and required parameter metadata when manifest provides schema', (t: any) => {
@@ -83,14 +122,64 @@ test('preserve typed and required parameter metadata when manifest provides sche
 	const parameters = snapshot.modelTools[0]?.function.parameters as
 		| Record<string, any>
 		| undefined;
-	t.deepEqual(parameters?.['required'], ['command', 'query']);
+	t.deepEqual(parameters?.['required'], ['query']);
 	t.is(parameters?.['properties']?.['query']?.type, 'string');
 	t.is(parameters?.['properties']?.['context_lines']?.type, 'number');
 	t.is(parameters?.['properties']?.['case_sensitive']?.type, 'boolean');
+	t.false(parameters?.['additionalProperties']);
+	t.deepEqual(snapshot.bindings[0]?.stringifyArgumentNames || [], []);
 });
 
-test('keep bridge snapshots isolated by session key', (t: any) => {
-	buildBridgeToolSnapshot('session-a', {
+test('recover parameter schema from description bullets when structured parameters are absent', (t: any) => {
+	const snapshot = buildBridgeToolSnapshot(undefined, {
+		plugins: [
+			{
+				name: 'CodeSearcher',
+				displayName: 'CodeSearcher',
+				description: 'Code search',
+				bridgeCommands: [
+					{
+						commandName: 'SearchCode',
+						description: `Search source tree.
+参数:
+- command (字符串, 必需): 'search_code'
+- query (字符串, 必需): Search query text.
+- context_lines (数字, 可选): Number of context lines to include.
+- case_sensitive (布尔值, 可选): Whether matching is case sensitive.
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」CodeSearcher「末」
+<<<[END_TOOL_REQUEST]>>>`,
+						parameters: [],
+						example: 'tool_name:「始」CodeSearcher「末」',
+					},
+				],
+			},
+		],
+	});
+
+	const parameters = snapshot.modelTools[0]?.function.parameters as
+		| Record<string, any>
+		| undefined;
+	t.deepEqual(parameters?.['required'], ['query']);
+	t.false(
+		Object.prototype.hasOwnProperty.call(
+			parameters?.['properties'] || {},
+			'command',
+		),
+	);
+	t.is(parameters?.['properties']?.['query']?.type, 'string');
+	t.is(parameters?.['properties']?.['context_lines']?.type, 'number');
+	t.is(parameters?.['properties']?.['case_sensitive']?.type, 'boolean');
+	t.true(parameters?.['additionalProperties']);
+	t.deepEqual(
+		snapshot.bindings[0]?.stringifyArgumentNames,
+		['query', 'context_lines', 'case_sensitive'],
+	);
+});
+
+test('bridge snapshots stay isolated per translation result', (t: any) => {
+	const firstSnapshot = buildBridgeToolSnapshot('session-a', {
 		plugins: [
 			{
 				name: 'FileOperator',
@@ -108,7 +197,7 @@ test('keep bridge snapshots isolated by session key', (t: any) => {
 		],
 	});
 
-	buildBridgeToolSnapshot('session-b', {
+	const secondSnapshot = buildBridgeToolSnapshot('session-b', {
 		plugins: [
 			{
 				name: 'CodeSearcher',
@@ -126,13 +215,17 @@ test('keep bridge snapshots isolated by session key', (t: any) => {
 		],
 	});
 
-	t.truthy(getBridgeToolByName('vcp-fileoperator-readfile', 'session-a'));
-	t.falsy(getBridgeToolByName('vcp-codesearcher-searchcode', 'session-a'));
-	t.truthy(getBridgeToolByName('vcp-codesearcher-searchcode', 'session-b'));
-	t.falsy(getBridgeToolByName('vcp-fileoperator-readfile', 'session-b'));
+	t.deepEqual(
+		firstSnapshot.bindings.map(binding => binding.toolName),
+		['vcp-fileoperator-readfile'],
+	);
+	t.deepEqual(
+		secondSnapshot.bindings.map(binding => binding.toolName),
+		['vcp-codesearcher-searchcode'],
+	);
 });
 
-test('rotate bridge snapshots per session turn and evict stale turn binding', (t: any) => {
+test('rotate bridge snapshots per session turn with fresh translated output', (t: any) => {
 	const firstTurn = buildSessionBridgeToolSnapshot('chat-session', {
 		plugins: [
 			{
@@ -170,16 +263,12 @@ test('rotate bridge snapshots per session turn and evict stale turn binding', (t
 	});
 
 	t.not(firstTurn.snapshotKey, secondTurn.snapshotKey);
-	t.falsy(
-		getBridgeToolByName(
-			'vcp-fileoperator-readfile',
-			firstTurn.snapshotKey,
-		),
+	t.deepEqual(
+		firstTurn.bindings.map(binding => binding.toolName),
+		['vcp-fileoperator-readfile'],
 	);
-	t.truthy(
-		getBridgeToolByName(
-			'vcp-codesearcher-searchcode',
-			secondTurn.snapshotKey,
-		),
+	t.deepEqual(
+		secondTurn.bindings.map(binding => binding.toolName),
+		['vcp-codesearcher-searchcode'],
 	);
 });

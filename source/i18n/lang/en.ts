@@ -182,8 +182,8 @@ export const en: TranslationKeys = {
 		toolTransportLocal: 'Local tools (Snow local/MCP)',
 		toolTransportBridge: 'SnowBridge (VCP tool bridge)',
 		toolTransportHybrid: 'Hybrid (local tools + SnowBridge)',
-		bridgeVcpKey: 'SnowBridge VCP_Key:',
-		bridgeAccessToken: 'SnowBridge Access Token:',
+		bridgeVcpKey: 'SnowBridge VCP_Key (paired with Base URL):',
+		bridgeAccessToken: 'SnowBridge Access Token (optional):',
 		anthropicBeta: 'Anthropic Beta:',
 		anthropicCacheTTL: 'Anthropic Cache TTL:',
 		anthropicCacheTTL5m: '5 minutes (default)',
@@ -258,6 +258,7 @@ export const en: TranslationKeys = {
 		editingHintGeneral: 'Press Enter to save and exit editing',
 		modelFilterHint:
 			'Type to filter, ↑↓ to select, Enter to confirm, Esc to cancel',
+		modelFilterLabel: 'Filter: {term}',
 		effortSelectHint: '↑↓ to select, Enter to confirm, Esc to cancel',
 		profileSelectHint:
 			'↑↓ to select profile, N to create new, R to rename, D to delete, Enter to confirm, Esc to cancel',
@@ -281,6 +282,12 @@ export const en: TranslationKeys = {
 		followGlobalNoneWithParentheses: 'Follow Global (None)',
 		notUse: 'Not Use',
 		systemPromptMultiSelectHint: 'Space: toggle | Enter: confirm | Esc: cancel',
+		optionNone: 'None',
+		optionLow: 'Low',
+		optionMedium: 'Medium',
+		optionHigh: 'High',
+		optionXHigh: 'XHigh',
+		optionMax: 'Max',
 	},
 	customHeaders: {
 		title: 'Custom Headers Management',

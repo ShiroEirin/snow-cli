@@ -23,7 +23,11 @@ export interface SubAgentToolExecutionOptions {
 		question: string,
 		options: string[],
 		multiSelect?: boolean,
-	) => Promise<{selected: string | string[]; customInput?: string}>;
+	) => Promise<{
+		selected: string | string[];
+		customInput?: string;
+		cancelled?: boolean;
+	}>;
 }
 
 /**

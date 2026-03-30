@@ -109,6 +109,19 @@ export const SELECT_FIELDS: ConfigField[] = [
 export const isSelectField = (field: ConfigField) =>
 	SELECT_FIELDS.includes(field);
 
+export const TEXT_INPUT_FIELDS: ConfigField[] = [
+	'baseUrl',
+	'apiKey',
+	'bridgeVcpKey',
+	'bridgeAccessToken',
+];
+
+export const isDirectTextInputField = (field: ConfigField) =>
+	TEXT_INPUT_FIELDS.includes(field);
+
+export const isEscapeClosableEditingField = (field: ConfigField) =>
+	isSelectField(field) || isDirectTextInputField(field);
+
 export const NUMERIC_FIELDS: ConfigField[] = [
 	'maxContextTokens',
 	'maxTokens',
@@ -120,6 +133,9 @@ export const NUMERIC_FIELDS: ConfigField[] = [
 	'editSimilarityThreshold',
 ];
 
+export const isNumericField = (field: ConfigField) =>
+	NUMERIC_FIELDS.includes(field);
+
 export const TOGGLE_FIELDS: ConfigField[] = [
 	'anthropicBeta',
 	'enableAutoCompress',
@@ -130,6 +146,9 @@ export const TOGGLE_FIELDS: ConfigField[] = [
 	'responsesReasoningEnabled',
 	'responsesFastMode',
 ];
+
+export const isToggleField = (field: ConfigField) =>
+	TOGGLE_FIELDS.includes(field);
 
 export type RequestMethodOption = {
 	label: string;

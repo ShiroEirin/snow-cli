@@ -14,6 +14,28 @@ type Props = {
 	state: ConfigStateReturn;
 };
 
+function getLocalizedLevelLabel(
+	value: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max',
+	t: ConfigStateReturn['t'],
+): string {
+	switch (value) {
+		case 'none':
+			return t.configScreen.optionNone;
+		case 'low':
+			return t.configScreen.optionLow;
+		case 'medium':
+			return t.configScreen.optionMedium;
+		case 'high':
+			return t.configScreen.optionHigh;
+		case 'xhigh':
+			return t.configScreen.optionXHigh;
+		case 'max':
+			return t.configScreen.optionMax;
+		default:
+			return value;
+	}
+}
+
 export default function ConfigSelectPanel({state}: Props) {
 	const {
 		t,
@@ -212,7 +234,9 @@ export default function ConfigSelectPanel({state}: Props) {
 					currentField === 'basicModel') && (
 					<Box flexDirection="column">
 						{searchTerm && (
-							<Text color={theme.colors.menuInfo}>Filter: {searchTerm}</Text>
+							<Text color={theme.colors.menuInfo}>
+								{t.configScreen.modelFilterLabel.replace('{term}', searchTerm)}
+							</Text>
 						)}
 						<ScrollableSelectInput
 							items={getCurrentOptions()}
@@ -251,10 +275,10 @@ export default function ConfigSelectPanel({state}: Props) {
 				{currentField === 'thinkingEffort' && (
 					<ScrollableSelectInput
 						items={[
-							{label: 'low', value: 'low'},
-							{label: 'medium', value: 'medium'},
-							{label: 'high', value: 'high'},
-							{label: 'max', value: 'max'},
+							{label: getLocalizedLevelLabel('low', t), value: 'low'},
+							{label: getLocalizedLevelLabel('medium', t), value: 'medium'},
+							{label: getLocalizedLevelLabel('high', t), value: 'high'},
+							{label: getLocalizedLevelLabel('max', t), value: 'max'},
 						]}
 						initialIndex={
 							thinkingEffort === 'low'
@@ -280,16 +304,16 @@ export default function ConfigSelectPanel({state}: Props) {
 				{currentField === 'responsesVerbosity' && (
 					<ScrollableSelectInput
 						items={[
-							{label: 'LOW', value: 'low'},
-							{label: 'MEDIUM', value: 'medium'},
-							{label: 'HIGH', value: 'high'},
+							{label: getLocalizedLevelLabel('low', t), value: 'low'},
+							{label: getLocalizedLevelLabel('medium', t), value: 'medium'},
+							{label: getLocalizedLevelLabel('high', t), value: 'high'},
 						]}
 						initialIndex={Math.max(
 							0,
 							[
-								{label: 'LOW', value: 'low'},
-								{label: 'MEDIUM', value: 'medium'},
-								{label: 'HIGH', value: 'high'},
+								{label: getLocalizedLevelLabel('low', t), value: 'low'},
+								{label: getLocalizedLevelLabel('medium', t), value: 'medium'},
+								{label: getLocalizedLevelLabel('high', t), value: 'high'},
 							].findIndex(opt => opt.value === responsesVerbosity),
 						)}
 						isFocused={true}
@@ -338,11 +362,6 @@ function ProfileSelect({state}: Props) {
 
 	return (
 		<Box flexDirection="column">
-			{profiles.length > 1 && (
-				<Text color={theme.colors.menuSecondary} dimColor>
-					Scroll to see more profiles (↑↓)
-				</Text>
-			)}
 			<ScrollableSelectInput
 				items={profiles.map(p => ({
 					label: p.displayName,
@@ -502,8 +521,7 @@ function SystemPromptSelect({state}: Props) {
 			/>
 			<Box marginTop={1}>
 				<Text color={theme.colors.menuSecondary} dimColor>
-					{t.configScreen.systemPromptMultiSelectHint ||
-						'Space: toggle | Enter: confirm | Esc: cancel'}
+					{t.configScreen.systemPromptMultiSelectHint}
 				</Text>
 			</Box>
 		</Box>
@@ -519,11 +537,13 @@ function ReasoningEffortSelect({state}: Props) {
 	} = state;
 
 	const effortOptions = [
-		{label: 'NONE', value: 'none'},
-		{label: 'LOW', value: 'low'},
-		{label: 'MEDIUM', value: 'medium'},
-		{label: 'HIGH', value: 'high'},
-		...(supportsXHigh ? [{label: 'XHIGH', value: 'xhigh'}] : []),
+		{label: getLocalizedLevelLabel('none', state.t), value: 'none'},
+		{label: getLocalizedLevelLabel('low', state.t), value: 'low'},
+		{label: getLocalizedLevelLabel('medium', state.t), value: 'medium'},
+		{label: getLocalizedLevelLabel('high', state.t), value: 'high'},
+		...(supportsXHigh
+			? [{label: getLocalizedLevelLabel('xhigh', state.t), value: 'xhigh'}]
+			: []),
 	];
 
 	return (

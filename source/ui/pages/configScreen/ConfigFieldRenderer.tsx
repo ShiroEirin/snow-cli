@@ -1,7 +1,6 @@
 import React from 'react';
 import {Box, Text} from 'ink';
 import TextInput from 'ink-text-input';
-import {Select} from '@inkjs/ui';
 import ScrollableSelectInput from '../../components/common/ScrollableSelectInput.js';
 import {stripFocusArtifacts, type ConfigField} from './types.js';
 import type {ConfigStateReturn} from './useConfigState.js';
@@ -10,6 +9,28 @@ type Props = {
 	field: ConfigField;
 	state: ConfigStateReturn;
 };
+
+function getLocalizedLevelLabel(
+	value: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max',
+	t: ConfigStateReturn['t'],
+): string {
+	switch (value) {
+		case 'none':
+			return t.configScreen.optionNone;
+		case 'low':
+			return t.configScreen.optionLow;
+		case 'medium':
+			return t.configScreen.optionMedium;
+		case 'high':
+			return t.configScreen.optionHigh;
+		case 'xhigh':
+			return t.configScreen.optionXHigh;
+		case 'max':
+			return t.configScreen.optionMax;
+		default:
+			return value;
+	}
+}
 
 export default function ConfigFieldRenderer({field, state}: Props) {
 	const {
@@ -55,11 +76,8 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 		geminiThinkingBudget,
 		responsesReasoningEnabled,
 		responsesReasoningEffort,
-		setResponsesReasoningEffort,
 		responsesVerbosity,
-		setResponsesVerbosity,
 		responsesFastMode,
-		supportsXHigh,
 		// Model settings
 		advancedModel,
 		basicModel,
@@ -675,29 +693,8 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 					{!isCurrentlyEditing && (
 						<Box marginLeft={3}>
 							<Text color={theme.colors.menuSecondary}>
-								{responsesReasoningEffort.toUpperCase()}
+								{getLocalizedLevelLabel(responsesReasoningEffort, t)}
 							</Text>
-						</Box>
-					)}
-					{isCurrentlyEditing && (
-						<Box marginLeft={3}>
-							<Select
-								options={[
-									{label: 'NONE', value: 'none'},
-									{label: 'LOW', value: 'low'},
-									{label: 'MEDIUM', value: 'medium'},
-									{label: 'HIGH', value: 'high'},
-									...(supportsXHigh
-										? [{label: 'XHIGH', value: 'xhigh'}]
-										: []),
-								]}
-								onChange={value => {
-									setResponsesReasoningEffort(
-										value as 'none' | 'low' | 'medium' | 'high' | 'xhigh',
-									);
-									state.setIsEditing(false);
-								}}
-							/>
 						</Box>
 					)}
 				</Box>
@@ -713,25 +710,8 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 					{!isCurrentlyEditing && (
 						<Box marginLeft={3}>
 							<Text color={theme.colors.menuSecondary}>
-								{responsesVerbosity.toUpperCase()}
+								{getLocalizedLevelLabel(responsesVerbosity, t)}
 							</Text>
-						</Box>
-					)}
-					{isCurrentlyEditing && (
-						<Box marginLeft={3}>
-							<Select
-								options={[
-									{label: 'LOW', value: 'low'},
-									{label: 'MEDIUM', value: 'medium'},
-									{label: 'HIGH', value: 'high'},
-								]}
-								onChange={value => {
-									setResponsesVerbosity(
-										value as 'low' | 'medium' | 'high',
-									);
-									state.setIsEditing(false);
-								}}
-							/>
 						</Box>
 					)}
 				</Box>

@@ -239,6 +239,7 @@ export type TranslationKeys = {
 		editingHintNumeric: string;
 		editingHintGeneral: string;
 		modelFilterHint: string;
+		modelFilterLabel: string;
 		effortSelectHint: string;
 		profileSelectHint: string;
 		requestMethodSelectHint: string;
@@ -259,6 +260,12 @@ export type TranslationKeys = {
 		followGlobalNoneWithParentheses: string;
 		notUse: string;
 		systemPromptMultiSelectHint: string;
+		optionNone: string;
+		optionLow: string;
+		optionMedium: string;
+		optionHigh: string;
+		optionXHigh: string;
+		optionMax: string;
 	};
 	// Custom Headers Screen
 	customHeaders: {

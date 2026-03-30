@@ -6,6 +6,7 @@ import {
 	type ConfigScreenProps,
 	MAX_VISIBLE_FIELDS,
 	isSelectField,
+	isNumericField,
 } from './configScreen/types.js';
 import {useConfigState} from './configScreen/useConfigState.js';
 import {useConfigInput} from './configScreen/useConfigInput.js';
@@ -148,12 +149,9 @@ export default function ConfigScreen({
 				<Box flexDirection="column" marginTop={1}>
 					<Alert variant="info">
 						{isEditing
-							? `${
-									currentField === 'maxContextTokens' ||
-									currentField === 'maxTokens'
-										? t.configScreen.editingHintNumeric
-										: t.configScreen.editingHintGeneral
-							  }
+							? `${isNumericField(currentField)
+									? t.configScreen.editingHintNumeric
+									: t.configScreen.editingHintGeneral}
 ${t.configScreen.requestUrlLabel}${getRequestUrl()}`
 							: `${t.configScreen.navigationHint}
 ${t.configScreen.requestUrlLabel}${getRequestUrl()}`}

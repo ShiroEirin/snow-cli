@@ -12,6 +12,11 @@ import type {ChatMessage} from '../../api/chat.js';
 import type {MCPTool} from './mcpToolsManager.js';
 import {teamTracker} from './teamTracker.js';
 import type {SubAgentMessage, TokenUsage} from './subAgentExecutor.js';
+import {prepareToolPlane} from '../session/vcpCompatibility/toolPlaneFacade.js';
+import {
+	getToolExecutionBinding,
+	type ToolExecutionBinding,
+} from '../session/vcpCompatibility/toolExecutionBinding.js';
 
 export interface TeammateExecutionOptions {
 	onMessage?: (message: SubAgentMessage) => void;
@@ -27,7 +32,11 @@ export interface TeammateExecutionOptions {
 		question: string,
 		options: string[],
 		multiSelect?: boolean,
-	) => Promise<{selected: string | string[]; customInput?: string}>;
+	) => Promise<{
+		selected: string | string[];
+		customInput?: string;
+		cancelled?: boolean;
+	}>;
 	requirePlanApproval?: boolean;
 }
 
@@ -36,6 +45,53 @@ export interface TeammateExecutionResult {
 	result: string;
 	error?: string;
 	usage?: TokenUsage;
+}
+
+export function createTeammateUserQuestionAdapter(
+	requestUserQuestion?: TeammateExecutionOptions['requestUserQuestion'],
+) {
+	if (!requestUserQuestion) {
+		return undefined;
+	}
+
+	return async (question: string, options: string[], multiSelect?: boolean) => {
+		const response = await requestUserQuestion(
+			question,
+			options,
+			multiSelect,
+		);
+		return {
+			selected: response.selected,
+			customInput: response.customInput,
+			cancelled: response.cancelled,
+		};
+	};
+}
+
+const PLAN_APPROVAL_PROTECTED_LOCAL_TOOLS = new Set([
+	'filesystem-create',
+	'filesystem-edit',
+	'filesystem-edit_search',
+	'terminal-execute',
+	'todo-add',
+	'todo-update',
+	'todo-delete',
+	'notebook-add',
+	'notebook-update',
+	'notebook-delete',
+]);
+
+export function isPlanApprovalProtectedTool(
+	toolName: string,
+	binding?: ToolExecutionBinding,
+): boolean {
+	if (PLAN_APPROVAL_PROTECTED_LOCAL_TOOLS.has(toolName)) {
+		return true;
+	}
+
+	return binding?.kind === 'local'
+		? PLAN_APPROVAL_PROTECTED_LOCAL_TOOLS.has(binding.toolName)
+		: false;
 }
 
 export async function executeTeammate(
@@ -54,6 +110,7 @@ export async function executeTeammate(
 		isToolAutoApproved,
 		yoloMode,
 		addToAlwaysApproved,
+		requestUserQuestion,
 		requirePlanApproval,
 	} = options;
 
@@ -76,8 +133,6 @@ export async function executeTeammate(
 	updateMember(teamName, memberId, {instanceId, status: 'active'});
 
 	try {
-		const {collectAllMCPTools} = await import('./mcpToolsManager.js');
-		const {executeMCPTool} = await import('./mcpToolsManager.js');
 		const {getOpenAiConfig} = await import('../config/apiConfig.js');
 		const {sessionManager} = await import('../session/sessionManager.js');
 		const {createStreamingChatCompletion} = await import(
@@ -93,6 +148,9 @@ export async function executeTeammate(
 		const {createStreamingResponse} = await import(
 			'../../api/responses.js'
 		);
+		const {resolveVcpModeRequest} = await import(
+			'../session/vcpCompatibility/mode.js'
+		);
 		const {
 			shouldCompressSubAgentContext,
 			compressSubAgentContext,
@@ -102,10 +160,15 @@ export async function executeTeammate(
 		const {listTasks, claimTask, completeTask} = await import(
 			'../team/teamTaskList.js'
 		);
+		const {executeToolCall} = await import('./toolExecutor.js');
 
-		// Collect all MCP tools (full access for teammates)
-		const allMCPTools = await collectAllMCPTools();
-		const allowedTools: MCPTool[] = [...allMCPTools];
+		const config = getOpenAiConfig();
+		const currentSession = sessionManager.getCurrentSession();
+		const preparedToolPlane = await prepareToolPlane({
+			config,
+			sessionKey: instanceId,
+		});
+		const allowedTools: MCPTool[] = [...preparedToolPlane.tools];
 
 		// Build teammate-specific synthetic tools
 		const messageTeammateTool: MCPTool = {
@@ -230,6 +293,8 @@ export async function executeTeammate(
 		listTasksTool,
 		waitForMessagesTool,
 	);
+		const userQuestionAdapter =
+			createTeammateUserQuestionAdapter(requestUserQuestion);
 		if (requirePlanApproval) {
 			allowedTools.push(requestPlanApprovalTool);
 		}
@@ -332,28 +397,56 @@ ${role ? `Your role: ${role}` : ''}
 			}
 
 			// API call
-			const config = getOpenAiConfig();
 			const model = config.advancedModel || 'gpt-5';
-			const currentSession = sessionManager.getCurrentSession();
+			const resolvedRequest = resolveVcpModeRequest(config, {
+				model,
+				tools: allowedTools,
+				toolChoice: 'auto',
+			});
 
 			const stream =
-				config.requestMethod === 'anthropic'
+				resolvedRequest.requestMethod === 'anthropic'
 					? createStreamingAnthropicCompletion(
-							{model, messages, temperature: 0, max_tokens: config.maxTokens || 4096, tools: allowedTools, sessionId: currentSession?.id},
+							{
+								model,
+								messages,
+								temperature: 0,
+								max_tokens: config.maxTokens || 4096,
+								tools: resolvedRequest.tools,
+								sessionId: currentSession?.id,
+							},
 							abortSignal,
 					  )
-					: config.requestMethod === 'gemini'
+					: resolvedRequest.requestMethod === 'gemini'
 					? createStreamingGeminiCompletion(
-							{model, messages, temperature: 0, tools: allowedTools},
+							{
+								model,
+								messages,
+								temperature: 0,
+								tools: resolvedRequest.tools,
+							},
 							abortSignal,
 					  )
-					: config.requestMethod === 'responses'
+					: resolvedRequest.requestMethod === 'responses'
 					? createStreamingResponse(
-							{model, messages, temperature: 0, tools: allowedTools, prompt_cache_key: currentSession?.id},
+							{
+								model,
+								messages,
+								temperature: 0,
+								tools: resolvedRequest.tools,
+								tool_choice: resolvedRequest.toolChoice,
+								prompt_cache_key: currentSession?.id,
+							},
 							abortSignal,
 					  )
 					: createStreamingChatCompletion(
-							{model, messages, temperature: 0, tools: allowedTools},
+							{
+								model,
+								messages,
+								temperature: 0,
+								tools: resolvedRequest.tools,
+								tool_choice: resolvedRequest.toolChoice,
+							},
 							abortSignal,
 					  );
 
@@ -712,10 +805,11 @@ ${role ? `Your role: ${role}` : ''}
 				// Plan approval gate: block file-modifying tools until approved
 				if (!planApproved) {
 					const blockedTools = regularCalls.filter(tc => {
-						const name = tc.function.name;
-						return name.includes('write') || name.includes('create') ||
-							name.includes('delete') || name.includes('execute') ||
-							name.includes('bash') || name.includes('terminal');
+						const binding = getToolExecutionBinding(
+							tc.function.name,
+							instanceId,
+						);
+						return isPlanApprovalProtectedTool(tc.function.name, binding);
 					});
 
 					if (blockedTools.length > 0) {
@@ -734,12 +828,22 @@ ${role ? `Your role: ${role}` : ''}
 						// Fall through to execute non-blocked calls
 						for (const tc of nonBlockedCalls) {
 							try {
-								const toolArgs = JSON.parse(tc.function.arguments || '{}');
-								const result = await executeMCPTool(tc.function.name, toolArgs, abortSignal);
+								const result = await executeToolCall(
+									tc,
+									abortSignal,
+									undefined,
+									onMessage,
+									undefined,
+									undefined,
+									undefined,
+									undefined,
+									userQuestionAdapter,
+									instanceId,
+								);
 								messages.push({
 									role: 'tool' as const,
 									tool_call_id: tc.id,
-									content: typeof result === 'string' ? result : JSON.stringify(result),
+									content: result.content,
 								});
 							} catch (e: any) {
 								messages.push({
@@ -788,11 +892,22 @@ ${role ? `Your role: ${role}` : ''}
 
 					if (approved) {
 						try {
-							const result = await executeMCPTool(toolName, toolArgs, abortSignal);
+							const result = await executeToolCall(
+								tc,
+								abortSignal,
+								undefined,
+								onMessage,
+								undefined,
+								undefined,
+								undefined,
+								undefined,
+								userQuestionAdapter,
+								instanceId,
+							);
 							messages.push({
 								role: 'tool' as const,
 								tool_call_id: tc.id,
-								content: typeof result === 'string' ? result : JSON.stringify(result),
+								content: result.content,
 							});
 						} catch (e: any) {
 							messages.push({
@@ -854,6 +969,16 @@ ${role ? `Your role: ${role}` : ''}
 			error: error.message,
 		};
 	} finally {
+		try {
+			const [{clearToolExecutionBindingsSession}, {clearBridgeToolSnapshotSession}] =
+				await Promise.all([
+					import('../session/vcpCompatibility/toolExecutionBinding.js'),
+					import('../session/vcpCompatibility/toolSnapshot.js'),
+				]);
+			clearToolExecutionBindingsSession(instanceId);
+			clearBridgeToolSnapshotSession(instanceId);
+		} catch { /* best effort */ }
+
 		// Auto-commit any uncommitted work before unregistering
 		try {
 			const {autoCommitWorktreeChanges} = await import('../team/teamWorktree.js');

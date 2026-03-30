@@ -1,4 +1,9 @@
 import {getOpenAiConfig, getCustomSystemPrompt} from '../config/apiConfig.js';
+import {
+	getPlanMode,
+	getTeamMode,
+	getVulnerabilityHuntingMode,
+} from '../config/projectSettings.js';
 import {getSystemPromptForMode} from '../../prompt/systemPrompt.js';
 import type {ChatMessage} from '../../api/types.js';
 import {createStreamingChatCompletion} from '../../api/chat.js';
@@ -6,6 +11,7 @@ import {createStreamingResponse} from '../../api/responses.js';
 import {createStreamingGeminiCompletion} from '../../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../../api/anthropic.js';
 import {formatVcpContentForTranscript} from '../session/vcpCompatibility/display.js';
+import {resolveVcpModeRequest} from '../session/vcpCompatibility/mode.js';
 
 /**
  * Clean thinking content by removing XML-like tags
@@ -367,6 +373,19 @@ function formatMessageForTranscript(msg: ChatMessage): string | null {
 	return parts.length > 0 ? parts.join('\n') : null;
 }
 
+export function resolveCompressionSystemPrompt(options?: {
+	planMode?: boolean;
+	vulnerabilityHuntingMode?: boolean;
+	teamMode?: boolean;
+}): string {
+	return getSystemPromptForMode(
+		options?.planMode ?? getPlanMode(),
+		options?.vulnerabilityHuntingMode ?? getVulnerabilityHuntingMode(),
+		false,
+		options?.teamMode ?? getTeamMode(),
+	);
+}
+
 /**
  * Prepare messages for compression - simplified two-message approach
  *
@@ -387,14 +406,10 @@ function prepareMessagesForCompression(
 	if (customSystemPrompts && customSystemPrompts.length > 0) {
 		messages.push({role: 'system', content: customSystemPrompts.join('\n\n')});
 	} else {
-			messages.push({
-				role: 'system',
-				content: getSystemPromptForMode(
-					false,
-					false,
-					false,
-				),
-			});
+		messages.push({
+			role: 'system',
+			content: resolveCompressionSystemPrompt(),
+		});
 	}
 
 	// Build conversation transcript as a single string
@@ -714,7 +729,9 @@ export async function compressContext(
 	}
 
 	const modelName = config.advancedModel;
-	const requestMethod = config.requestMethod;
+	const requestMethod = resolveVcpModeRequest(config, {
+		model: modelName,
+	}).requestMethod;
 
 	// Get custom system prompt if configured
 	const customSystemPrompt = getCustomSystemPrompt();

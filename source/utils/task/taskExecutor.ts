@@ -139,9 +139,11 @@ export async function executeTask(
 		const [
 			{parseAndValidateFileReferences, createMessageWithFileInstructions},
 			{handleConversationWithTools},
+			{getTeamMode},
 		] = await Promise.all([
 			import('../core/fileUtils.js'),
 			import('../../hooks/conversation/useConversation.js'),
+			import('../config/projectSettings.js'),
 		]);
 		log('Dependencies loaded successfully');
 
@@ -327,6 +329,7 @@ export async function executeTask(
 				isToolAutoApproved: () => true,
 				addMultipleToAlwaysApproved: () => {},
 				yoloModeRef: {current: true},
+				teamMode: getTeamMode(),
 				setContextUsage: streamingState.setContextUsage,
 				useBasicModel: false,
 				getPendingMessages: () => [],

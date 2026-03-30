@@ -258,6 +258,7 @@ export async function processStreamRound(ctx: {
 		useBasicModel: options.useBasicModel,
 		planMode: options.planMode,
 		vulnerabilityHuntingMode: options.vulnerabilityHuntingMode,
+		teamMode: options.teamMode,
 		toolSearchDisabled: options.toolSearchDisabled,
 		signal: controller.signal,
 		onRetry,

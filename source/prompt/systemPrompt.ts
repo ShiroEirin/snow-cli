@@ -12,6 +12,9 @@ import {
 	getToolDiscoverySection as getToolDiscoverySectionHelper,
 } from './shared/promptHelpers.js';
 import os from 'os';
+import {getPlanModeSystemPrompt} from './planModeSystemPrompt.js';
+import {getTeamModeSystemPrompt} from './teamModeSystemPrompt.js';
+import {getVulnerabilityHuntingModeSystemPrompt} from './vulnerabilityHuntingModeSystemPrompt.js';
 
 /**
  * Get platform-specific command requirements based on detected OS and shell
@@ -424,20 +427,13 @@ export function getSystemPromptForMode(
 ): string {
 	// Team mode takes highest precedence
 	if (teamMode) {
-		const {getTeamModeSystemPrompt} = require('./teamModeSystemPrompt.js');
 		return getTeamModeSystemPrompt(toolSearchDisabled);
 	}
 	// Vulnerability Hunting mode takes precedence over Plan mode
 	if (vulnerabilityHuntingMode) {
-		// Import dynamically to avoid circular dependency
-		const {
-			getVulnerabilityHuntingModeSystemPrompt,
-		} = require('./vulnerabilityHuntingModeSystemPrompt.js');
 		return getVulnerabilityHuntingModeSystemPrompt(toolSearchDisabled);
 	}
 	if (planMode) {
-		// Import dynamically to avoid circular dependency
-		const {getPlanModeSystemPrompt} = require('./planModeSystemPrompt.js');
 		return getPlanModeSystemPrompt(toolSearchDisabled);
 	}
 	return getSystemPrompt(toolSearchDisabled);

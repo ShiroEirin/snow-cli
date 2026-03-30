@@ -3,7 +3,6 @@ import {createStreamingResponse} from '../../api/responses.js';
 import {createStreamingGeminiCompletion} from '../../api/gemini.js';
 import {createStreamingChatCompletion} from '../../api/chat.js';
 import {getSubAgent} from '../config/subAgentConfig.js';
-import {collectAllMCPTools, executeMCPTool} from './mcpToolsManager.js';
 import {getOpenAiConfig} from '../config/apiConfig.js';
 import {sessionManager} from '../session/sessionManager.js';
 import {unifiedHooksExecutor} from './unifiedHooksExecutor.js';
@@ -19,6 +18,8 @@ import {
 import type {ConfirmationResult} from '../../ui/components/tools/ToolConfirmation.js';
 import type {MCPTool} from './mcpToolsManager.js';
 import type {ChatMessage} from '../../api/chat.js';
+import {resolveVcpModeRequest} from '../session/vcpCompatibility/mode.js';
+import {prepareToolPlane} from '../session/vcpCompatibility/toolPlaneFacade.js';
 
 export interface SubAgentMessage {
 	type: 'sub_agent_message';
@@ -57,6 +58,52 @@ export interface AddToAlwaysApprovedCallback {
 	(toolName: string): void;
 }
 
+const SUB_AGENT_BUILTIN_TOOL_PREFIXES = new Set([
+	'todo-',
+	'notebook-',
+	'filesystem-',
+	'terminal-',
+	'ace-',
+	'websearch-',
+	'ide-',
+	'codebase-',
+	'askuser-',
+	'skill-',
+	'subagent-',
+]);
+
+export function isToolAllowedForSubAgent(
+	toolName: string,
+	allowedTools: string[],
+): boolean {
+	const normalizedToolName = toolName.replace(/_/g, '-');
+
+	return allowedTools.some((allowedTool: string) => {
+		const normalizedAllowedTool = allowedTool.replace(/_/g, '-');
+		const isQualifiedAllowed =
+			normalizedAllowedTool.includes('-') ||
+			Array.from(SUB_AGENT_BUILTIN_TOOL_PREFIXES).some(prefix =>
+				normalizedAllowedTool.startsWith(prefix),
+			);
+
+		if (
+			normalizedToolName === normalizedAllowedTool ||
+			normalizedToolName.startsWith(`${normalizedAllowedTool}-`)
+		) {
+			return true;
+		}
+
+		const isExternalTool = !Array.from(SUB_AGENT_BUILTIN_TOOL_PREFIXES).some(
+			prefix => normalizedToolName.startsWith(prefix),
+		);
+		return (
+			!isQualifiedAllowed &&
+			isExternalTool &&
+			normalizedToolName.endsWith(`-${normalizedAllowedTool}`)
+		);
+	});
+}
+
 /**
  * 用户问题回调接口
  * 用于子智能体调用 askuser 工具时，请求主会话显示蓝色边框的 AskUserQuestion 组件
@@ -69,7 +116,34 @@ export interface UserQuestionCallback {
 	(question: string, options: string[], multiSelect?: boolean): Promise<{
 		selected: string | string[];
 		customInput?: string;
+		cancelled?: boolean;
 	}>;
+}
+
+type UserQuestionResponse = Awaited<ReturnType<UserQuestionCallback>>;
+
+export function formatSubAgentUserQuestionResult(
+	response: UserQuestionResponse,
+): string {
+	if (response.cancelled) {
+		return 'Error: User cancelled the question interaction';
+	}
+
+	const answerText = response.customInput
+		? `${
+				Array.isArray(response.selected)
+					? response.selected.join(', ')
+					: response.selected
+		  }: ${response.customInput}`
+		: Array.isArray(response.selected)
+		? response.selected.join(', ')
+		: response.selected;
+
+	return JSON.stringify({
+		answer: answerText,
+		selected: response.selected,
+		customInput: response.customInput,
+	});
 }
 
 /**
@@ -103,6 +177,9 @@ export async function executeSubAgent(
 	instanceId?: string,
 	spawnDepth: number = 0,
 ): Promise<SubAgentResult> {
+	const toolPlaneSessionKey =
+		instanceId || `subagent-${agentId}-${Date.now()}`;
+
 	try {
 		// Handle built-in agents (hardcoded or user copy)
 		let agent: any;
@@ -1174,59 +1251,15 @@ Inserted log points:
 			}
 		}
 
-		// Get all available tools
-		const allTools = await collectAllMCPTools();
+		const preparedToolPlane = await prepareToolPlane({
+			config: getOpenAiConfig(),
+			sessionKey: toolPlaneSessionKey,
+		});
 
 		// Filter tools based on sub-agent's allowed tools
-		const allowedTools = allTools.filter((tool: MCPTool) => {
-			const toolName = tool.function.name;
-			const normalizedToolName = toolName.replace(/_/g, '-');
-			const builtInPrefixes = new Set([
-				'todo-',
-				'notebook-',
-				'filesystem-',
-				'terminal-',
-				'ace-',
-				'websearch-',
-				'ide-',
-				'codebase-',
-				'askuser-',
-				'skill-',
-				'subagent-',
-			]);
-
-			return agent.tools.some((allowedTool: string) => {
-				// Normalize both tool names: replace underscores with hyphens for comparison
-				const normalizedAllowedTool = allowedTool.replace(/_/g, '-');
-				const isQualifiedAllowed =
-					normalizedAllowedTool.includes('-') ||
-					Array.from(builtInPrefixes).some(prefix =>
-						normalizedAllowedTool.startsWith(prefix),
-					);
-
-				// Support both exact match and prefix match (e.g., "filesystem" matches "filesystem-read")
-				if (
-					normalizedToolName === normalizedAllowedTool ||
-					normalizedToolName.startsWith(`${normalizedAllowedTool}-`)
-				) {
-					return true;
-				}
-
-				// Backward compatibility: allow unqualified external tool names (missing service prefix)
-				const isExternalTool = !Array.from(builtInPrefixes).some(prefix =>
-					normalizedToolName.startsWith(prefix),
-				);
-				if (
-					!isQualifiedAllowed &&
-					isExternalTool &&
-					normalizedToolName.endsWith(`-${normalizedAllowedTool}`)
-				) {
-					return true;
-				}
-
-				return false;
-			});
-		});
+		const allowedTools = preparedToolPlane.tools.filter((tool: MCPTool) =>
+			isToolAllowedForSubAgent(tool.function.name, agent.tools),
+		);
 
 		if (allowedTools.length === 0) {
 			return {
@@ -1526,41 +1559,47 @@ You have access to these collaboration tools:
 				model = config.advancedModel || 'gpt-5';
 			}
 
-			// Call API with sub-agent's tools - choose API based on config
+			// Call API with sub-agent's tools - choose API based on resolved request
 			// Apply sub-agent configuration overrides (model already loaded from configProfile above)
+			const resolvedRequest = resolveVcpModeRequest(config, {
+				model,
+				tools: allowedTools,
+				toolChoice: 'auto',
+			});
 			const stream =
-				config.requestMethod === 'anthropic'
+				resolvedRequest.requestMethod === 'anthropic'
 					? createStreamingAnthropicCompletion(
 							{
 								model,
 								messages,
 								temperature: 0,
 								max_tokens: config.maxTokens || 4096,
-								tools: allowedTools,
+								tools: resolvedRequest.tools,
 								sessionId: currentSession?.id,
 								//disableThinking: true, // Sub-agents 不使用 Extended Thinking
 								configProfile: agent.configProfile,
 							},
 							abortSignal,
 					  )
-					: config.requestMethod === 'gemini'
+					: resolvedRequest.requestMethod === 'gemini'
 					? createStreamingGeminiCompletion(
 							{
 								model,
 								messages,
 								temperature: 0,
-								tools: allowedTools,
+								tools: resolvedRequest.tools,
 								configProfile: agent.configProfile,
 							},
 							abortSignal,
 					  )
-					: config.requestMethod === 'responses'
+					: resolvedRequest.requestMethod === 'responses'
 					? createStreamingResponse(
 							{
 								model,
 								messages,
 								temperature: 0,
-								tools: allowedTools,
+								tools: resolvedRequest.tools,
+								tool_choice: resolvedRequest.toolChoice,
 								prompt_cache_key: currentSession?.id,
 								configProfile: agent.configProfile,
 							},
@@ -1571,7 +1610,8 @@ You have access to these collaboration tools:
 								model,
 								messages,
 								temperature: 0,
-								tools: allowedTools,
+								tools: resolvedRequest.tools,
+								tool_choice: resolvedRequest.toolChoice,
 								configProfile: agent.configProfile,
 							},
 							abortSignal,
@@ -2469,25 +2509,13 @@ You have access to these collaboration tools:
 					options,
 					multiSelect,
 				);
-
-				const answerText = userAnswer.customInput
-					? `${
-							Array.isArray(userAnswer.selected)
-								? userAnswer.selected.join(', ')
-								: userAnswer.selected
-					  }: ${userAnswer.customInput}`
-					: Array.isArray(userAnswer.selected)
-					? userAnswer.selected.join(', ')
-					: userAnswer.selected;
+				const askUserResultContent =
+					formatSubAgentUserQuestionResult(userAnswer);
 
 				const toolResultMessage = {
 					role: 'tool' as const,
 					tool_call_id: askUserTool.id,
-					content: JSON.stringify({
-						answer: answerText,
-						selected: userAnswer.selected,
-						customInput: userAnswer.customInput,
-					}),
+					content: askUserResultContent,
 				};
 
 				messages.push(toolResultMessage);
@@ -2501,11 +2529,7 @@ You have access to these collaboration tools:
 							type: 'tool_result',
 							tool_call_id: askUserTool.id,
 							tool_name: askUserTool.function.name,
-							content: JSON.stringify({
-								answer: answerText,
-								selected: userAnswer.selected,
-								customInput: userAnswer.customInput,
-							}),
+							content: askUserResultContent,
 						} as any,
 					});
 				}
@@ -2720,108 +2744,20 @@ You have access to these collaboration tools:
 				}
 
 				try {
-					const args = JSON.parse(toolCall.function.arguments);
-
-					try {
-						const hookResult = await unifiedHooksExecutor.executeHooks(
-							'beforeToolCall',
-							{
-								toolName: toolCall.function.name,
-								args,
-							},
-						);
-
-						if (hookResult && !hookResult.success) {
-							const commandError = hookResult.results.find(
-								(r: any) => r.type === 'command' && !r.success,
-							);
-
-							if (commandError && commandError.type === 'command') {
-								const {exitCode, command, output, error} = commandError;
-
-								if (exitCode === 1) {
-									const blockedContent =
-										error ||
-										output ||
-										`[beforeToolCall Hook Warning] Command: ${command} exited with code 1`;
-									const blockedResult = {
-										role: 'tool' as const,
-										tool_call_id: toolCall.id,
-										content: blockedContent,
-									};
-									toolResults.push(blockedResult);
-
-									if (onMessage) {
-										onMessage({
-											type: 'sub_agent_message',
-											agentId: agent.id,
-											agentName: agent.name,
-											message: {
-												type: 'tool_result',
-												tool_call_id: toolCall.id,
-												tool_name: toolCall.function.name,
-												content: blockedContent,
-											} as any,
-										});
-									}
-									continue;
-								}
-
-								if (exitCode >= 2 || exitCode < 0) {
-									const hookErrorDetails = {
-										type: 'error' as const,
-										exitCode,
-										command,
-										output,
-										error,
-									};
-									const hookFailedResult = {
-										role: 'tool' as const,
-										tool_call_id: toolCall.id,
-										content: '',
-										hookFailed: true,
-										hookErrorDetails,
-									};
-									toolResults.push(hookFailedResult as ChatMessage);
-
-									if (onMessage) {
-										onMessage({
-											type: 'sub_agent_message',
-											agentId: agent.id,
-											agentName: agent.name,
-											message: {
-												type: 'tool_result',
-												tool_call_id: toolCall.id,
-												tool_name: toolCall.function.name,
-												content: '',
-												hookFailed: true,
-												hookErrorDetails,
-											} as any,
-										});
-									}
-									continue;
-								}
-							}
-						}
-					} catch (hookError) {
-						console.warn(
-							'Failed to execute beforeToolCall hook in sub-agent:',
-							hookError,
-						);
-					}
-
-					const result = await executeMCPTool(
-						toolCall.function.name,
-						args,
+					const {executeToolCall} = await import('./toolExecutor.js');
+					const toolResult = await executeToolCall(
+						toolCall,
 						abortSignal,
+						undefined,
+						onMessage,
+						undefined,
+						undefined,
+						undefined,
+						undefined,
+						undefined,
+						toolPlaneSessionKey,
 					);
-
-					const toolResult = {
-						role: 'tool' as const,
-						tool_call_id: toolCall.id,
-						content: JSON.stringify(result),
-					};
-					toolResults.push(toolResult);
+					toolResults.push(toolResult as ChatMessage);
 
 					// Send tool result to UI
 					if (onMessage) {
@@ -2833,7 +2769,10 @@ You have access to these collaboration tools:
 								type: 'tool_result',
 								tool_call_id: toolCall.id,
 								tool_name: toolCall.function.name,
-								content: JSON.stringify(result),
+								content: toolResult.content,
+								images: toolResult.images,
+								hookFailed: toolResult.hookFailed,
+								hookErrorDetails: toolResult.hookErrorDetails,
 							} as any,
 						});
 					}
@@ -2894,5 +2833,13 @@ You have access to these collaboration tools:
 			result: '',
 			error: error instanceof Error ? error.message : 'Unknown error',
 		};
+	} finally {
+		const [{clearToolExecutionBindingsSession}, {clearBridgeToolSnapshotSession}] =
+			await Promise.all([
+				import('../session/vcpCompatibility/toolExecutionBinding.js'),
+				import('../session/vcpCompatibility/toolSnapshot.js'),
+			]);
+		clearToolExecutionBindingsSession(toolPlaneSessionKey);
+		clearBridgeToolSnapshotSession(toolPlaneSessionKey);
 	}
 }

@@ -82,13 +82,17 @@ interface MCPToolsCache {
 	servicesInfo: MCPServiceTools[];
 	lastUpdate: number;
 	configHash: string;
+	lastConfigCheck: number;
 }
 
 let toolsCache: MCPToolsCache | null = null;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const CONFIG_HASH_CHECK_INTERVAL_MS = 10_000;
+let cacheRefreshPromise: Promise<void> | null = null;
 
 // Lazy initialization of TODO service to avoid circular dependencies
 let todoService: TodoService | null = null;
+let todoServiceInitialized = false;
 
 // 🔥 FIX: Persistent MCP client connections for all external services
 // MCP protocol supports multiple calls over same connection - no need to reconnect each time
@@ -119,6 +123,16 @@ export function getTodoService(): TodoService {
 	return todoService;
 }
 
+async function ensureTodoServiceInitialized(): Promise<TodoService> {
+	const service = getTodoService();
+	if (!todoServiceInitialized) {
+		await service.initialize();
+		todoServiceInitialized = true;
+	}
+
+	return service;
+}
+
 /**
  * Get all registered service prefixes (synchronous)
  * Used for detecting merged tool names
@@ -139,6 +153,7 @@ export function getRegisteredServicePrefixes(): string[] {
 		'scheduler-',
 		'skill-',
 		'subagent-',
+		'team-',
 	];
 
 	// 如果有缓存，从缓存中获取外部 MCP 服务名称
@@ -171,10 +186,13 @@ async function generateConfigHash(): Promise<string> {
 
 		// Include skills in hash (both project and global)
 		const projectRoot = process.cwd();
-		const skillTools = await getSkillTools(projectRoot);
+		const [{getTeamMode}, skillTools, {loadCodebaseConfig}] = await Promise.all([
+			import('../config/projectSettings.js'),
+			getSkillTools(projectRoot),
+			import('../config/codebaseConfig.js'),
+		]);
 
 		// 🔥 CRITICAL: Include codebase enabled status in hash
-		const {loadCodebaseConfig} = await import('../config/codebaseConfig.js');
 		const codebaseConfig = loadCodebaseConfig();
 
 		return JSON.stringify({
@@ -182,6 +200,7 @@ async function generateConfigHash(): Promise<string> {
 			subAgents: subAgents.map(t => t.name), // Only track agent names for hash
 			skills: skillTools.map(t => t.name), // Include skill names in hash
 			codebaseEnabled: codebaseConfig.enabled, // 🔥 Must include to invalidate cache on enable/disable
+			teamMode: getTeamMode(),
 			disabledBuiltInServices: getDisabledBuiltInServices(), // Include disabled built-in services in hash
 			disabledSkills: getDisabledSkills(), // Include disabled skills in hash
 		});
@@ -198,21 +217,48 @@ async function isCacheValid(): Promise<boolean> {
 
 	const now = Date.now();
 	const isExpired = now - toolsCache.lastUpdate > CACHE_DURATION;
-	const configHash = await generateConfigHash();
-	const configChanged = toolsCache.configHash !== configHash;
+	if (isExpired) {
+		return false;
+	}
 
-	return !isExpired && !configChanged;
+	if (now - toolsCache.lastConfigCheck <= CONFIG_HASH_CHECK_INTERVAL_MS) {
+		return true;
+	}
+
+	const configHash = await generateConfigHash();
+	if (!toolsCache) {
+		return false;
+	}
+
+	toolsCache.lastConfigCheck = now;
+	const configChanged = toolsCache.configHash !== configHash;
+	if (!configChanged) {
+		toolsCache.configHash = configHash;
+	}
+
+	return !configChanged;
+}
+
+async function ensureToolsCacheReady(): Promise<MCPToolsCache> {
+	if (await isCacheValid()) {
+		return toolsCache!;
+	}
+
+	if (!cacheRefreshPromise) {
+		cacheRefreshPromise = refreshToolsCache().finally(() => {
+			cacheRefreshPromise = null;
+		});
+	}
+
+	await cacheRefreshPromise;
+	return toolsCache!;
 }
 
 /**
  * Get cached tools or build cache if needed
  */
 async function getCachedTools(): Promise<MCPTool[]> {
-	if (await isCacheValid()) {
-		return toolsCache!.tools;
-	}
-	await refreshToolsCache();
-	return toolsCache!.tools;
+	return (await ensureToolsCacheReady()).tools;
 }
 
 /**
@@ -266,8 +312,7 @@ async function refreshToolsCache(): Promise<void> {
 	addBuiltInService('terminal', terminalTools, 'terminal');
 
 	// Add built-in TODO tools
-	const todoSvc = getTodoService();
-	await todoSvc.initialize();
+	const todoSvc = await ensureTodoServiceInitialized();
 	const todoTools = todoSvc.getTools();
 	addBuiltInService(
 		'todo',
@@ -462,45 +507,52 @@ async function refreshToolsCache(): Promise<void> {
 	// Add user-configured MCP server tools (probe for availability but don't maintain connections)
 	try {
 		const mcpConfig = getMCPConfig();
-		for (const [serviceName, server] of Object.entries(mcpConfig.mcpServers)) {
-			// Skip disabled services
-			if (server.enabled === false) {
-				servicesInfo.push({
-					serviceName,
-					tools: [],
-					isBuiltIn: false,
-					connected: false,
-					error: 'Disabled by user',
-				});
-				continue;
-			}
-
-			try {
-				const serviceTools = await probeServiceTools(serviceName, server);
-				servicesInfo.push({
-					serviceName,
-					tools: serviceTools,
-					isBuiltIn: false,
-					connected: true,
-				});
-
-				for (const tool of serviceTools) {
-					allTools.push({
-						type: 'function',
-						function: {
-							name: `${serviceName}-${tool.name}`,
-							description: tool.description,
-							parameters: tool.inputSchema,
-						},
-					});
+		const externalServiceResults = await Promise.all(
+			Object.entries(mcpConfig.mcpServers).map(async ([serviceName, server]) => {
+				if (server.enabled === false) {
+					return {
+						serviceName,
+						tools: [] as InternalMCPTool[],
+						connected: false,
+						error: 'Disabled by user',
+					};
 				}
-			} catch (error) {
-				servicesInfo.push({
-					serviceName,
-					tools: [],
-					isBuiltIn: false,
-					connected: false,
-					error: error instanceof Error ? error.message : 'Unknown error',
+
+				try {
+					return {
+						serviceName,
+						tools: await probeServiceTools(serviceName, server),
+						connected: true,
+					};
+				} catch (error) {
+					return {
+						serviceName,
+						tools: [] as InternalMCPTool[],
+						connected: false,
+						error:
+							error instanceof Error ? error.message : 'Unknown error',
+					};
+				}
+			}),
+		);
+
+		for (const serviceResult of externalServiceResults) {
+			servicesInfo.push({
+				serviceName: serviceResult.serviceName,
+				tools: serviceResult.tools,
+				isBuiltIn: false,
+				connected: serviceResult.connected,
+				error: serviceResult.error,
+			});
+
+			for (const tool of serviceResult.tools) {
+				allTools.push({
+					type: 'function',
+					function: {
+						name: `${serviceResult.serviceName}-${tool.name}`,
+						description: tool.description,
+						parameters: tool.inputSchema,
+					},
 				});
 			}
 		}
@@ -508,12 +560,15 @@ async function refreshToolsCache(): Promise<void> {
 		logger.warn('Failed to load MCP config:', error);
 	}
 
+	const generatedConfigHash = await generateConfigHash();
+
 	// Update cache
 	toolsCache = {
 		tools: allTools,
 		servicesInfo,
 		lastUpdate: Date.now(),
-		configHash: await generateConfigHash(),
+		configHash: generatedConfigHash,
+		lastConfigCheck: Date.now(),
 	};
 }
 
@@ -522,7 +577,12 @@ async function refreshToolsCache(): Promise<void> {
  */
 export async function refreshMCPToolsCache(): Promise<void> {
 	toolsCache = null;
-	await refreshToolsCache();
+	if (!cacheRefreshPromise) {
+		cacheRefreshPromise = refreshToolsCache().finally(() => {
+			cacheRefreshPromise = null;
+		});
+	}
+	await cacheRefreshPromise;
 }
 
 /**
@@ -636,11 +696,7 @@ export async function collectAllMCPTools(): Promise<MCPTool[]> {
  * Uses cached data when available
  */
 export async function getMCPServicesInfo(): Promise<MCPServiceTools[]> {
-	if (!(await isCacheValid())) {
-		await refreshToolsCache();
-	}
-	// Ensure toolsCache is not null before accessing
-	return toolsCache?.servicesInfo || [];
+	return (await ensureToolsCacheReady()).servicesInfo;
 }
 
 /**
@@ -676,6 +732,38 @@ function getMCPServerTransportType(server: MCPServer): 'http' | 'stdio' | null {
 	}
 
 	return null;
+}
+
+function resolveMCPConnectTimeoutMs(server: MCPServer): number {
+	const transportType = getMCPServerTransportType(server);
+	if (transportType === 'http') {
+		return 15_000;
+	}
+
+	return 5_000;
+}
+
+async function withMCPConnectTimeout<T>(
+	operation: Promise<T>,
+	timeoutMs: number,
+	timeoutMessage: string,
+): Promise<T> {
+	let timeoutId: NodeJS.Timeout | null = null;
+
+	try {
+		return await Promise.race([
+			operation,
+			new Promise<never>((_, reject) => {
+				timeoutId = setTimeout(() => {
+					reject(new Error(timeoutMessage));
+				}, timeoutMs);
+			}),
+		]);
+	} finally {
+		if (timeoutId) {
+			clearTimeout(timeoutId);
+		}
+	}
 }
 
 function getServerProcessEnv(server: MCPServer): Record<string, string> {
@@ -902,7 +990,7 @@ async function connectAndGetTools(
 				env: getServerProcessEnv(server),
 				stderr: 'ignore', // 屏蔽第三方MCP服务的stderr输出,避免干扰CLI界面
 			});
-			await client.connect(transport);
+			await runWithTimeout(client.connect(transport), 'stdio connection timeout');
 		} else {
 			throw new Error('No URL or command specified');
 		}
@@ -955,6 +1043,7 @@ async function getPersistentClient(
 
 	let transport: any;
 	const transportType = getMCPServerTransportType(server);
+	const connectTimeoutMs = resolveMCPConnectTimeoutMs(server);
 
 	try {
 		if (transportType === 'http') {
@@ -964,7 +1053,11 @@ async function getPersistentClient(
 				transport = new StreamableHTTPClientTransport(url, {
 					requestInit,
 				});
-				await client.connect(transport);
+				await withMCPConnectTimeout(
+					client.connect(transport),
+					connectTimeoutMs,
+					`Persistent StreamableHTTP connection timeout for ${serviceName}`,
+				);
 			} catch (httpError) {
 				const streamableHttpErrorMessage = getMCPErrorMessage(httpError);
 
@@ -986,7 +1079,11 @@ async function getPersistentClient(
 				});
 
 				try {
-					await client.connect(transport);
+					await withMCPConnectTimeout(
+						client.connect(transport),
+						connectTimeoutMs,
+						`Persistent SSE connection timeout for ${serviceName}`,
+					);
 				} catch (sseError) {
 					throw new Error(
 						`StreamableHTTP failed for ${serviceName}: ${streamableHttpErrorMessage}; SSE fallback failed: ${getMCPErrorMessage(
@@ -1006,7 +1103,11 @@ async function getPersistentClient(
 				env: getServerProcessEnv(server),
 				stderr: 'pipe', // Persistent services need stderr for process communication
 			});
-			await client.connect(transport);
+			await withMCPConnectTimeout(
+				client.connect(transport),
+				connectTimeoutMs,
+				`Persistent stdio connection timeout for ${serviceName}`,
+			);
 		} else {
 			throw new Error('No URL or command specified');
 		}

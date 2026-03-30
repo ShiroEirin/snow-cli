@@ -10,6 +10,7 @@ import {
 	addMultipleToolsToPermissions,
 } from '../config/permissionsConfig.js';
 import {isSensitiveCommand} from '../execution/sensitiveCommandManager.js';
+import {getTeamMode, getToolSearchEnabled} from '../config/projectSettings.js';
 import {randomUUID} from 'crypto';
 
 /**
@@ -625,6 +626,8 @@ class SSEManager {
 				isToolAutoApproved,
 				addMultipleToAlwaysApproved,
 				yoloModeRef: {current: message.yoloMode || false}, // 支持客户端传递 YOLO 模式
+				teamMode: getTeamMode(),
+				toolSearchDisabled: !getToolSearchEnabled(),
 				setContextUsage,
 			});
 

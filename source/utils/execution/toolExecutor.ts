@@ -5,8 +5,10 @@ import {runningSubAgentTracker} from './runningSubAgentTracker.js';
 import {getOpenAiConfig} from '../config/apiConfig.js';
 import {sessionManager} from '../session/sessionManager.js';
 import {snowBridgeClient} from '../session/vcpCompatibility/bridgeClient.js';
-import {getBridgeToolByName} from '../session/vcpCompatibility/toolSnapshot.js';
-import {resolveToolExecutionRoute} from '../session/vcpCompatibility/toolRouteArbiter.js';
+import {
+	coerceBridgeExecutionArguments,
+	getToolExecutionBinding,
+} from '../session/vcpCompatibility/toolExecutionBinding.js';
 
 import type {SubAgentMessage} from './subAgentExecutor.js';
 import type {ConfirmationResult} from '../../ui/components/tools/ToolConfirmation.js';
@@ -127,26 +129,55 @@ export interface UserInteractionCallback {
 	}>;
 }
 
+export function createTeamUserQuestionAdapter(
+	onUserInteractionNeeded?: UserInteractionCallback,
+) {
+	if (!onUserInteractionNeeded) {
+		return undefined;
+	}
+
+	return async (question: string, options: string[], multiSelect?: boolean) => {
+		const response = await onUserInteractionNeeded(
+			question,
+			options,
+			multiSelect,
+		);
+		return {
+			selected: response.selected,
+			customInput: response.customInput,
+			cancelled: response.cancelled,
+		};
+	};
+}
+
 async function executeBridgeToolCall(options: {
 	toolName: string;
 	args: Record<string, any>;
-	sessionId?: string;
+	toolPlaneKey?: string;
 	abortSignal?: AbortSignal;
 }) {
 	const config = getOpenAiConfig();
-	const bridgeTool = getBridgeToolByName(options.toolName, options.sessionId);
-	if (!bridgeTool) {
+	const executionBinding = getToolExecutionBinding(
+		options.toolName,
+		options.toolPlaneKey,
+	);
+	if (!executionBinding || executionBinding.kind !== 'bridge') {
 		throw new Error(
 			`Bridge tool binding not found for ${options.toolName}`,
 		);
 	}
 
+	const bridgeArgs = coerceBridgeExecutionArguments(
+		options.args,
+		executionBinding,
+	);
+
 	return snowBridgeClient.executeTool({
 		config,
-		toolName: bridgeTool.pluginName,
+		toolName: executionBinding.pluginName,
 		toolArgs: {
-			...options.args,
-			command: bridgeTool.commandName,
+			...bridgeArgs,
+			command: executionBinding.commandName,
 		},
 		abortSignal: options.abortSignal,
 	});
@@ -342,6 +373,8 @@ export async function executeToolCall(
 		if (toolCall.function.name.startsWith('team-')) {
 			const teamToolName = toolCall.function.name.substring('team-'.length);
 			const teamArgs = args as Record<string, any>;
+			const teamUserQuestionAdapter =
+				createTeamUserQuestionAdapter(onUserInteractionNeeded);
 
 			try {
 				const teamResult = await teamService.execute({
@@ -364,12 +397,7 @@ export async function executeToolCall(
 					addToAlwaysApproved: addToAlwaysApproved
 						? (name: string) => addToAlwaysApproved(name)
 						: undefined,
-					requestUserQuestion: onUserInteractionNeeded
-						? async (q: string, opts: string[], multi?: boolean) => {
-								const r = await onUserInteractionNeeded(q, opts, multi);
-								return {selected: r.selected, customInput: r.customInput};
-						  }
-						: undefined,
+					requestUserQuestion: teamUserQuestionAdapter,
 				});
 
 				result = {
@@ -501,17 +529,38 @@ export async function executeToolCall(
 		} else {
 			// Regular tool execution
 			const currentSessionId = sessionManager.getCurrentSession()?.id;
-			const executionRoute = resolveToolExecutionRoute({
-				config: getOpenAiConfig(),
-				toolName: toolCall.function.name,
-				snapshotKey: toolSnapshotKey || currentSessionId,
-			});
+			if (toolCall.function.name === 'tool_search') {
+				const toolResult = await executeMCPTool(
+					toolCall.function.name,
+					args,
+					abortSignal,
+					onTokenUpdate,
+				);
+				const {textContent, images} = extractMultimodalContent(toolResult);
+
+				result = {
+					tool_call_id: toolCall.id,
+					role: 'tool',
+					content: textContent,
+					images,
+				};
+				return result;
+			}
+			const executionBinding = getToolExecutionBinding(
+				toolCall.function.name,
+				toolSnapshotKey || currentSessionId,
+			);
+			if (!executionBinding) {
+				throw new Error(
+					`Tool execution binding not found for ${toolCall.function.name}`,
+				);
+			}
 			const toolResult =
-				executionRoute === 'bridge'
+				executionBinding.kind === 'bridge'
 					? await executeBridgeToolCall({
 							toolName: toolCall.function.name,
 							args,
-							sessionId: toolSnapshotKey || currentSessionId,
+							toolPlaneKey: toolSnapshotKey || currentSessionId,
 							abortSignal,
 					  })
 					: await executeMCPTool(

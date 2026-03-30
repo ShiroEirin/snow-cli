@@ -7,6 +7,8 @@
 import {
 	createTeam,
 	getActiveTeam,
+	getTeam,
+	listActiveTeams,
 	addMember,
 	disbandTeam,
 } from '../utils/team/teamConfig.js';
@@ -36,6 +38,46 @@ import type {SubAgentMessage} from '../utils/execution/subAgentExecutor.js';
 import type {ConfirmationResult} from '../ui/components/tools/ToolConfirmation.js';
 import {getConversationContext} from '../utils/codebase/conversationContext.js';
 import {recordTeamCreated, recordMemberSpawned} from '../utils/team/teamSnapshot.js';
+import type {TeamConfig} from '../utils/team/teamConfig.js';
+
+type CleanupTarget = {
+	teamName: string;
+	config: TeamConfig | null;
+};
+
+export function resolveTeamCleanupTargets(options: {
+	activeTeam: TeamConfig | null;
+	trackerActiveTeamName: string | null;
+	activeTeams: TeamConfig[];
+	getTeamByName: (teamName: string) => TeamConfig | null;
+}): CleanupTarget[] {
+	const targets = new Map<string, CleanupTarget>();
+	const addTarget = (teamName: string | undefined, config?: TeamConfig | null) => {
+		const resolvedTeamName = teamName?.trim();
+		if (!resolvedTeamName || targets.has(resolvedTeamName)) {
+			return;
+		}
+
+		targets.set(resolvedTeamName, {
+			teamName: resolvedTeamName,
+			config: config ?? options.getTeamByName(resolvedTeamName),
+		});
+	};
+
+	if (options.activeTeam) {
+		addTarget(options.activeTeam.name, options.activeTeam);
+	}
+
+	if (options.trackerActiveTeamName) {
+		addTarget(options.trackerActiveTeamName);
+	}
+
+	for (const team of options.activeTeams) {
+		addTarget(team.name, team);
+	}
+
+	return Array.from(targets.values());
+}
 
 export interface TeamToolExecutionOptions {
 	toolName: string;
@@ -53,7 +95,11 @@ export interface TeamToolExecutionOptions {
 		question: string,
 		options: string[],
 		multiSelect?: boolean,
-	) => Promise<{selected: string | string[]; customInput?: string}>;
+	) => Promise<{
+		selected: string | string[];
+		customInput?: string;
+		cancelled?: boolean;
+	}>;
 }
 
 export class TeamService {
@@ -612,8 +658,13 @@ export class TeamService {
 	}
 
 	private async cleanupTeam(): Promise<any> {
-		const team = getActiveTeam();
-		if (!team) {
+		const cleanupTargets = resolveTeamCleanupTargets({
+			activeTeam: getActiveTeam(),
+			trackerActiveTeamName: teamTracker.getActiveTeamName(),
+			activeTeams: listActiveTeams(),
+			getTeamByName: getTeam,
+		});
+		if (cleanupTargets.length === 0) {
 			return {success: false, error: 'No active team to clean up.'};
 		}
 
@@ -628,10 +679,14 @@ export class TeamService {
 
 		// Check for unmerged work
 		const unmergedMembers: string[] = [];
-		for (const member of team.members) {
-			const diff = getTeammateDiffSummary(team.name, member.name);
-			if (diff && diff.commitCount > 0) {
-				unmergedMembers.push(`${member.name} (${diff.commitCount} commits, ${diff.filesChanged} files)`);
+		for (const target of cleanupTargets) {
+			for (const member of target.config?.members || []) {
+				const diff = getTeammateDiffSummary(target.teamName, member.name);
+				if (diff && diff.commitCount > 0) {
+					unmergedMembers.push(
+						`${target.teamName}/${member.name} (${diff.commitCount} commits, ${diff.filesChanged} files)`,
+					);
+				}
 			}
 		}
 
@@ -644,19 +699,42 @@ export class TeamService {
 		}
 
 		// Clean up Git worktrees
-		try {
-			await cleanupTeamWorktrees(team.name);
-		} catch (e: any) {
-			console.error('Failed to cleanup worktrees:', e);
+		const cleanupErrors: string[] = [];
+		for (const target of cleanupTargets) {
+			try {
+				await cleanupTeamWorktrees(target.teamName);
+			} catch (e: any) {
+				console.error(`Failed to cleanup worktrees for ${target.teamName}:`, e);
+				cleanupErrors.push(
+					`${target.teamName}: ${e instanceof Error ? e.message : String(e)}`,
+				);
+			}
+
+			if (target.config) {
+				disbandTeam(target.teamName);
+			}
 		}
 
-		// Disband team and clear tracker
-		disbandTeam(team.name);
 		teamTracker.clearActiveTeam();
+
+		if (cleanupErrors.length > 0) {
+			return {
+				success: false,
+				error: `Failed to fully clean up ${cleanupErrors.length} team(s).`,
+				cleanupErrors,
+				cleanedTeams: cleanupTargets.map(target => target.teamName),
+			};
+		}
 
 		return {
 			success: true,
-			result: `Team "${team.name}" has been cleaned up. Worktrees removed, team disbanded.`,
+			result:
+				cleanupTargets.length === 1
+					? `Team "${cleanupTargets[0]!.teamName}" has been cleaned up. Worktrees removed, team disbanded.`
+					: `Cleaned up ${cleanupTargets.length} teams: ${cleanupTargets
+							.map(target => target.teamName)
+							.join(', ')}.`,
+			cleanedTeams: cleanupTargets.map(target => target.teamName),
 		};
 	}
 

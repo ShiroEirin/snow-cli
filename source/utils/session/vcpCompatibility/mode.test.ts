@@ -232,6 +232,24 @@ test('keep tools for gemini-like models in VCP mode', (t: any) => {
 	t.is(resolution.toolChoice, 'auto');
 });
 
+test('route tool-less auxiliary requests through chat in VCP mode', (t: any) => {
+	const resolution = resolveVcpModeRequest(
+		{
+			baseUrl: 'https://vcp.example.com/v1',
+			requestMethod: 'responses',
+			backendMode: 'vcp',
+		},
+		{
+			model: 'gpt-5',
+		},
+	);
+
+	t.true(resolution.enabled);
+	t.is(resolution.requestMethod, 'chat');
+	t.is(resolution.tools, undefined);
+	t.is(resolution.toolChoice, undefined);
+});
+
 test('only sanitize tool schemas for anthropic-compatible VCP mode requests', (t: any) => {
 	t.true(
 		shouldSanitizeVcpModeTools(

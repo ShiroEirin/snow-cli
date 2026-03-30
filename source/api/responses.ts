@@ -40,6 +40,7 @@ export interface ResponseOptions {
 	disableThinking?: boolean; // 禁用 Extended Thinking 功能（用于 agents 等场景，默认 false）
 	planMode?: boolean; // 启用 Plan 模式（使用 Plan 模式系统提示词）
 	vulnerabilityHuntingMode?: boolean; // 启用漏洞狩猎模式（使用漏洞狩猎模式系统提示词）
+	teamMode?: boolean; // 启用 Team 模式（使用 Team 模式系统提示词）
 	toolSearchDisabled?: boolean; // 工具搜索已关闭（全量加载工具）
 	// Sub-agent configuration overrides
 	configProfile?: string; // 子代理配置文件名（覆盖模型等设置）
@@ -196,6 +197,7 @@ function convertToResponseInput(
 	customSystemPromptOverride?: string[],
 	planMode: boolean = false, // When true, use Plan mode system prompt
 	vulnerabilityHuntingMode: boolean = false, // When true, use Vulnerability Hunting mode system prompt
+	teamMode: boolean = false,
 	toolSearchDisabled: boolean = false,
 ): {
 	input: any[];
@@ -350,6 +352,7 @@ function convertToResponseInput(
 								planMode,
 								vulnerabilityHuntingMode,
 								toolSearchDisabled,
+								teamMode,
 							) +
 							'</environment_context>',
 					},
@@ -362,6 +365,7 @@ function convertToResponseInput(
 			planMode,
 			vulnerabilityHuntingMode,
 			toolSearchDisabled,
+			teamMode,
 		);
 	} else {
 		// 既没有自定义系统提示词，也不需要添加默认系统提示词
@@ -554,6 +558,7 @@ export async function* createStreamingResponse(
 		customSystemPromptContent,
 		options.planMode || false, // Pass planMode to use correct system prompt
 		options.vulnerabilityHuntingMode || false,
+		options.teamMode || false,
 		options.toolSearchDisabled || false,
 	);
 

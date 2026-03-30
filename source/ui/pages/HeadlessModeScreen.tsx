@@ -16,6 +16,7 @@ import {
 	createMessageWithFileInstructions,
 } from '../../utils/core/fileUtils.js';
 import {isSensitiveCommand} from '../../utils/execution/sensitiveCommandManager.js';
+import {getTeamMode} from '../../utils/config/projectSettings.js';
 import {getCurrentTheme} from '../../utils/config/themeConfig.js';
 import {themes} from '../themes/index.js';
 import {
@@ -717,6 +718,7 @@ export default function HeadlessModeScreen({
 				addMultipleToAlwaysApproved,
 				yoloModeRef: {current: true}, // Always use YOLO mode in headless
 				planMode: false, // HeadlessMode doesn't support Plan mode
+				teamMode: getTeamMode(),
 				setContextUsage: streamingState.setContextUsage,
 				useBasicModel: false,
 				getPendingMessages: () => [],

@@ -1,23 +1,11 @@
 import type {ChatMessage} from '../../../api/chat.js';
 import {getOpenAiConfig} from '../../../utils/config/apiConfig.js';
-import {
-	collectAllMCPTools,
-	getMCPServicesInfo,
-	type MCPServiceTools,
-	type MCPTool,
-} from '../../../utils/execution/mcpToolsManager.js';
+import type {MCPTool} from '../../../utils/execution/mcpToolsManager.js';
 import {toolSearchService} from '../../../utils/execution/toolSearchService.js';
 import {sessionManager} from '../../../utils/session/sessionManager.js';
-import {snowBridgeClient} from '../../../utils/session/vcpCompatibility/bridgeClient.js';
-import {
-	buildSessionBridgeToolSnapshot,
-	clearBridgeToolSnapshotSession,
-	type SessionBridgeToolSnapshot,
-} from '../../../utils/session/vcpCompatibility/toolSnapshot.js';
-import {
-	resolveToolRegistry,
-	resolveToolTransport,
-} from '../../../utils/session/vcpCompatibility/toolRouteArbiter.js';
+// Keep Snow Core at seam level. VCP translation, routing and bridge details
+// must stay behind the toolPlaneFacade boundary.
+import {prepareToolPlane} from '../../../utils/session/vcpCompatibility/toolPlaneFacade.js';
 import {initializeConversationSession} from './sessionInitializer.js';
 import {buildEditorContextContent} from './editorContextBuilder.js';
 import {cleanOrphanedToolCalls} from '../utils/messageCleanup.js';
@@ -45,36 +33,16 @@ export async function prepareConversationSetup(
 	);
 
 	const config = getOpenAiConfig();
-	const transport = resolveToolTransport(config);
 	const currentSessionId = sessionManager.getCurrentSession()?.id;
-	let localTools: MCPTool[] = [];
-	let localServicesInfo: MCPServiceTools[] = [];
-	let bridgeSnapshot: SessionBridgeToolSnapshot | undefined;
-	let toolSnapshotKey: string | undefined;
-
-	if (transport === 'bridge' || transport === 'hybrid') {
-		const manifest = await snowBridgeClient.getManifest(config);
-		bridgeSnapshot = buildSessionBridgeToolSnapshot(
-			currentSessionId,
-			manifest,
-		);
-		toolSnapshotKey = bridgeSnapshot.snapshotKey;
-	} else {
-		clearBridgeToolSnapshotSession(currentSessionId);
-	}
-
-	if (transport === 'local' || transport === 'hybrid') {
-		localTools = await collectAllMCPTools();
-		localServicesInfo = await getMCPServicesInfo();
-	}
-
-	const {tools: allMCPTools, servicesInfo, duplicateToolNames} =
-		resolveToolRegistry({
-			config,
-			localTools,
-			localServicesInfo,
-			bridgeSnapshot,
-		});
+	const {
+		tools: allMCPTools,
+		servicesInfo,
+		duplicateToolNames,
+		toolPlaneKey,
+	} = await prepareToolPlane({
+		config,
+		sessionKey: currentSessionId,
+	});
 
 	if (duplicateToolNames.length > 0) {
 		console.warn(
@@ -105,7 +73,7 @@ export async function prepareConversationSetup(
 		activeTools,
 		discoveredToolNames,
 		useToolSearch,
-		toolSnapshotKey,
+		toolSnapshotKey: toolPlaneKey,
 	};
 }
 

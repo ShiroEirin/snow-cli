@@ -27,18 +27,23 @@ function ensureSnowDir(): void {
 	}
 }
 
+function parseSettingsContent(content: string): ProjectSettings {
+	const normalizedContent = content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
+	return JSON.parse(normalizedContent) as ProjectSettings;
+}
+
 function loadSettings(): ProjectSettings {
 	try {
 		// 优先读取项目配置
 		if (fs.existsSync(PROJECT_SETTINGS_FILE)) {
 			const content = fs.readFileSync(PROJECT_SETTINGS_FILE, 'utf-8');
-			return JSON.parse(content) as ProjectSettings;
+			return parseSettingsContent(content);
 		}
 
 		// 如果项目配置不存在，读取全局配置
 		if (fs.existsSync(GLOBAL_SETTINGS_FILE)) {
 			const content = fs.readFileSync(GLOBAL_SETTINGS_FILE, 'utf-8');
-			return JSON.parse(content) as ProjectSettings;
+			return parseSettingsContent(content);
 		}
 
 		return {};
