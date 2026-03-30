@@ -195,3 +195,38 @@ title:「始」Sunny Days「末」
 	t.false(tool?.function.description.includes('TOOL_REQUEST'));
 	t.false(tool?.function.description.includes('tool_name'));
 });
+
+test('skip transport-like description parameters without hiding real user params', (t: any) => {
+	const toolPlane = translateBridgeManifestToToolPlane({
+		plugins: [
+			{
+				name: 'HybridRouter',
+				displayName: 'Hybrid Router',
+				description: 'Route execution.',
+				pluginType: 'hybridservice',
+				bridgeCommands: [
+					{
+						commandName: 'RunRoute',
+						description: `执行路由。
+参数:
+- commandIdentifier (字符串, 必需): RunRoute
+- action (字符串, 必需): fixed to run_route
+- route (字符串, 必需): 目标路由
+- mode (字符串, 可选): local 或 bridge`,
+						parameters: [],
+					},
+				],
+			},
+		],
+	});
+
+	const parameters = toolPlane.modelTools[0]?.function.parameters as
+		| Record<string, any>
+		| undefined;
+
+	t.deepEqual(
+		Object.keys(parameters?.['properties'] || {}).sort(),
+		['mode', 'route'],
+	);
+	t.deepEqual(parameters?.['required'], ['route']);
+});

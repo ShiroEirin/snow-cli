@@ -85,6 +85,33 @@ export function getToolExecutionBinding(
 	return bindingLeaseStore.getResource(toolPlaneKey)?.get(toolName);
 }
 
+export function filterToolExecutionBindings(
+	toolNames: string[],
+	toolPlaneKey?: string,
+): ToolExecutionBinding[] {
+	const bindingPlane = bindingLeaseStore.getResource(toolPlaneKey);
+	if (!bindingPlane) {
+		return [];
+	}
+
+	const filteredBindings: ToolExecutionBinding[] = [];
+	const seenToolNames = new Set<string>();
+
+	for (const toolName of toolNames) {
+		if (seenToolNames.has(toolName)) {
+			continue;
+		}
+
+		seenToolNames.add(toolName);
+		const binding = bindingPlane.get(toolName);
+		if (binding) {
+			filteredBindings.push(binding);
+		}
+	}
+
+	return filteredBindings;
+}
+
 function stringifyBridgeArgumentValue(value: unknown): unknown {
 	if (typeof value === 'string') {
 		return value;

@@ -25,6 +25,7 @@ type BridgeStatusListener = (event: unknown) => void;
 const BRIDGE_EXECUTE_TIMEOUT_MS = 120_000;
 const BRIDGE_ASYNC_EXECUTE_TIMEOUT_MS = 10 * 60 * 1000;
 const BRIDGE_MANIFEST_CACHE_MS = 30_000;
+const BRIDGE_MANIFEST_CACHE_MAX_ENTRIES = 100;
 
 type BridgeManifestCacheEntry = {
 	manifest: BridgeManifestResponse;
@@ -100,6 +101,31 @@ export class SnowBridgeClient {
 		const connectionKey = this.buildConnectionKey(config);
 		this.manifestCache.delete(connectionKey);
 		this.pendingManifestRequests.delete(connectionKey);
+	}
+
+	private touchManifestCacheEntry(
+		connectionKey: string,
+		entry: BridgeManifestCacheEntry,
+	): void {
+		this.manifestCache.delete(connectionKey);
+		this.manifestCache.set(connectionKey, entry);
+	}
+
+	private pruneManifestCache(now = Date.now()): void {
+		for (const [connectionKey, entry] of this.manifestCache.entries()) {
+			if (entry.expiresAt <= now) {
+				this.manifestCache.delete(connectionKey);
+			}
+		}
+
+		while (this.manifestCache.size > BRIDGE_MANIFEST_CACHE_MAX_ENTRIES) {
+			const oldestConnectionKey = this.manifestCache.keys().next().value;
+			if (!oldestConnectionKey) {
+				break;
+			}
+
+			this.manifestCache.delete(oldestConnectionKey);
+		}
 	}
 
 	private rejectAllPending(error: Error): void {
@@ -327,9 +353,14 @@ export class SnowBridgeClient {
 		config: Pick<ApiConfig, 'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken'>,
 	): Promise<BridgeManifestResponse> {
 		const connectionKey = this.buildConnectionKey(config);
+		const now = Date.now();
 		const cachedManifest = this.manifestCache.get(connectionKey);
-		if (cachedManifest && cachedManifest.expiresAt > Date.now()) {
+		if (cachedManifest && cachedManifest.expiresAt > now) {
+			this.touchManifestCacheEntry(connectionKey, cachedManifest);
 			return cachedManifest.manifest;
+		}
+		if (cachedManifest) {
+			this.manifestCache.delete(connectionKey);
 		}
 
 		const pendingManifest = this.pendingManifestRequests.get(connectionKey);
@@ -357,10 +388,11 @@ export class SnowBridgeClient {
 				const manifest = {
 					plugins: response.plugins || [],
 				};
-				this.manifestCache.set(connectionKey, {
+				this.touchManifestCacheEntry(connectionKey, {
 					manifest,
 					expiresAt: Date.now() + BRIDGE_MANIFEST_CACHE_MS,
 				});
+				this.pruneManifestCache();
 				return manifest;
 			})
 			.finally(() => {

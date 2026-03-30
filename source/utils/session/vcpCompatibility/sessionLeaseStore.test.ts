@@ -75,3 +75,37 @@ test('session lease store expires idle resources and aliases together', (t: any)
 
 	store.dispose();
 });
+
+test('session lease store does not full-sweep on hot getResource reads before interval', (t: any) => {
+	let now = 10_000;
+	const store = new SessionLeaseStore<Map<string, string>>({
+		defaultKey: '__default__',
+		ttlMs: 10_000,
+		sweepIntervalMs: 5_000,
+		now: () => now,
+	}) as any;
+	let sweepCount = 0;
+	const originalSweepExpired = store.sweepExpired.bind(store);
+
+	store.sweepExpired = () => {
+		sweepCount += 1;
+		return originalSweepExpired();
+	};
+
+	store.rotateSession({
+		sessionKey: 'chat-session',
+		nextResourceKey: 'plane-a',
+		value: new Map([['tool-a', 'binding-a']]),
+	});
+
+	sweepCount = 0;
+	t.is(store.getResource('chat-session')?.get('tool-a'), 'binding-a');
+	t.is(store.getResource('plane-a')?.get('tool-a'), 'binding-a');
+	t.is(sweepCount, 0);
+
+	now += 5_001;
+	t.is(store.getResource('chat-session')?.get('tool-a'), 'binding-a');
+	t.is(sweepCount, 1);
+
+	store.dispose();
+});

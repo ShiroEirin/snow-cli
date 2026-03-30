@@ -6,6 +6,7 @@ import {
 	coerceBridgeExecutionArguments,
 	clearToolExecutionBindings,
 	clearToolExecutionBindingsSession,
+	filterToolExecutionBindings,
 	getToolExecutionBinding,
 	rotateToolExecutionBindingsSession,
 } from './toolExecutionBinding.js';
@@ -96,6 +97,44 @@ test('drop stale session fallback after explicit plane cleanup', (t: any) => {
 	t.is(
 		getToolExecutionBinding('vcp-codesearcher-searchcode', 'chat-session'),
 		undefined,
+	);
+});
+
+test('filter execution bindings down to the retained tool plane', (t: any) => {
+	rotateToolExecutionBindingsSession({
+		sessionKey: 'chat-session',
+		nextToolPlaneKey: 'plane-b',
+		bindings: [
+			{
+				kind: 'local',
+				toolName: 'filesystem-read',
+			},
+			{
+				kind: 'bridge',
+				toolName: 'vcp-codesearcher-searchcode',
+				pluginName: 'CodeSearcher',
+				displayName: 'CodeSearcher',
+				commandName: 'SearchCode',
+				stringifyArgumentNames: [],
+			},
+		],
+	});
+
+	t.deepEqual(
+		filterToolExecutionBindings(
+			['vcp-codesearcher-searchcode', 'send_message_to_agent'],
+			'plane-b',
+		),
+		[
+			{
+				kind: 'bridge',
+				toolName: 'vcp-codesearcher-searchcode',
+				pluginName: 'CodeSearcher',
+				displayName: 'CodeSearcher',
+				commandName: 'SearchCode',
+				stringifyArgumentNames: [],
+			},
+		],
 	);
 });
 

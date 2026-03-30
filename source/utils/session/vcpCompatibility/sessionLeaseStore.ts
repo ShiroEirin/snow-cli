@@ -18,14 +18,17 @@ export type SessionLeaseStoreOptions = {
 export class SessionLeaseStore<T> {
 	private readonly defaultKey: string;
 	private readonly ttlMs: number;
+	private readonly sweepIntervalMs: number;
 	private readonly now: () => number;
 	private readonly resources = new Map<string, LeaseRecord<T>>();
 	private readonly sessions = new Map<string, SessionLinkRecord>();
 	private readonly sweepTimer: NodeJS.Timeout | null;
+	private nextSweepAt = Number.POSITIVE_INFINITY;
 
 	constructor(options: SessionLeaseStoreOptions) {
 		this.defaultKey = options.defaultKey;
 		this.ttlMs = options.ttlMs;
+		this.sweepIntervalMs = options.sweepIntervalMs;
 		this.now = options.now || Date.now;
 		this.sweepTimer =
 			options.sweepIntervalMs > 0
@@ -33,6 +36,10 @@ export class SessionLeaseStore<T> {
 						this.sweepExpired();
 				  }, options.sweepIntervalMs)
 				: null;
+		this.nextSweepAt =
+			options.sweepIntervalMs > 0
+				? this.now() + options.sweepIntervalMs
+				: Number.POSITIVE_INFINITY;
 
 		this.sweepTimer?.unref?.();
 	}
@@ -47,7 +54,7 @@ export class SessionLeaseStore<T> {
 	}
 
 	registerResource(resourceKey: string | undefined, value: T): string {
-		this.sweepExpired();
+		this.sweepIfDue();
 		const resolvedKey = this.resolveKey(resourceKey);
 		this.resources.set(resolvedKey, this.createLeaseRecord(value));
 		return resolvedKey;
@@ -58,7 +65,7 @@ export class SessionLeaseStore<T> {
 		nextResourceKey?: string;
 		value: T;
 	}): string {
-		this.sweepExpired();
+		this.sweepIfDue();
 		const resolvedSessionKey = this.resolveKey(options.sessionKey);
 		this.clearSession(resolvedSessionKey);
 
@@ -74,19 +81,13 @@ export class SessionLeaseStore<T> {
 	}
 
 	clearResource(resourceKey?: string): void {
-		this.sweepExpired();
+		this.sweepIfDue();
 		const resolvedResourceKey = this.resolveKey(resourceKey);
-		this.resources.delete(resolvedResourceKey);
-
-		for (const [sessionKey, record] of this.sessions.entries()) {
-			if (record.resourceKey === resolvedResourceKey) {
-				this.sessions.delete(sessionKey);
-			}
-		}
+		this.deleteResource(resolvedResourceKey);
 	}
 
 	clearSession(sessionKey?: string): void {
-		this.sweepExpired();
+		this.sweepIfDue();
 		const resolvedSessionKey = this.resolveKey(sessionKey);
 		const record = this.sessions.get(resolvedSessionKey);
 		if (!record) {
@@ -98,9 +99,9 @@ export class SessionLeaseStore<T> {
 	}
 
 	getResource(resourceOrSessionKey?: string): T | undefined {
-		this.sweepExpired();
+		this.sweepIfDue();
 		const resolvedLookupKey = this.resolveKey(resourceOrSessionKey);
-		const directResource = this.resources.get(resolvedLookupKey);
+		const directResource = this.getLiveResource(resolvedLookupKey);
 		if (directResource) {
 			this.resources.set(
 				resolvedLookupKey,
@@ -113,8 +114,12 @@ export class SessionLeaseStore<T> {
 		if (!sessionRecord) {
 			return;
 		}
+		if (sessionRecord.expiresAt <= this.now()) {
+			this.sessions.delete(resolvedLookupKey);
+			return;
+		}
 
-		const leasedResource = this.resources.get(sessionRecord.resourceKey);
+		const leasedResource = this.getLiveResource(sessionRecord.resourceKey);
 		if (!leasedResource) {
 			this.sessions.delete(resolvedLookupKey);
 			return;
@@ -151,11 +156,48 @@ export class SessionLeaseStore<T> {
 				this.sessions.delete(sessionKey);
 			}
 		}
+
+		this.nextSweepAt =
+			this.sweepIntervalMs > 0
+				? now + this.sweepIntervalMs
+				: Number.POSITIVE_INFINITY;
+	}
+
+	private sweepIfDue(): void {
+		if (this.now() < this.nextSweepAt) {
+			return;
+		}
+
+		this.sweepExpired();
 	}
 
 	private resolveKey(key?: string): string {
 		const normalizedKey = key?.trim();
 		return normalizedKey ? normalizedKey : this.defaultKey;
+	}
+
+	private getLiveResource(resourceKey: string): LeaseRecord<T> | undefined {
+		const record = this.resources.get(resourceKey);
+		if (!record) {
+			return;
+		}
+
+		if (record.expiresAt > this.now()) {
+			return record;
+		}
+
+		this.deleteResource(resourceKey);
+		return;
+	}
+
+	private deleteResource(resourceKey: string): void {
+		this.resources.delete(resourceKey);
+
+		for (const [sessionKey, record] of this.sessions.entries()) {
+			if (record.resourceKey === resourceKey) {
+				this.sessions.delete(sessionKey);
+			}
+		}
 	}
 
 	private createLeaseRecord(value: T): LeaseRecord<T> {

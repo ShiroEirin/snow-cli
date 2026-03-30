@@ -20,6 +20,10 @@ import type {MCPTool} from './mcpToolsManager.js';
 import type {ChatMessage} from '../../api/chat.js';
 import {resolveVcpModeRequest} from '../session/vcpCompatibility/mode.js';
 import {prepareToolPlane} from '../session/vcpCompatibility/toolPlaneFacade.js';
+import {
+	filterToolExecutionBindings,
+	rotateToolExecutionBindingsSession,
+} from '../session/vcpCompatibility/toolExecutionBinding.js';
 
 export interface SubAgentMessage {
 	type: 'sub_agent_message';
@@ -1268,6 +1272,16 @@ Inserted log points:
 				error: `Sub-agent "${agent.name}" has no valid tools configured`,
 			};
 		}
+
+		const allowedExecutionBindings = filterToolExecutionBindings(
+			allowedTools.map((tool: MCPTool) => tool.function.name),
+			preparedToolPlane.toolPlaneKey,
+		);
+		const subAgentToolPlaneKey = rotateToolExecutionBindingsSession({
+			sessionKey: toolPlaneSessionKey,
+			nextToolPlaneKey: `${preparedToolPlane.toolPlaneKey}:allowed`,
+			bindings: allowedExecutionBindings,
+		});
 
 		// ── Inject the inter-agent messaging tool ──
 		// This tool is always available to all sub-agents (not part of MCP tools)
@@ -2755,7 +2769,7 @@ You have access to these collaboration tools:
 						undefined,
 						undefined,
 						undefined,
-						toolPlaneSessionKey,
+						subAgentToolPlaneKey,
 					);
 					toolResults.push(toolResult as ChatMessage);
 

@@ -93,6 +93,73 @@ export interface ChatCompletionMessageParam {
 	tool_calls?: ToolCall[];
 }
 
+function getStreamingToolCallOverlap(
+	currentValue: string,
+	incomingValue: string,
+): number {
+	const maxOverlap = Math.min(currentValue.length, incomingValue.length);
+
+	for (let length = maxOverlap; length > 0; length--) {
+		if (currentValue.endsWith(incomingValue.slice(0, length))) {
+			return length;
+		}
+	}
+
+	return 0;
+}
+
+export function mergeStreamingToolCallField(
+	currentValue: string,
+	incomingValue?: string,
+): {value: string; delta: string} {
+	const nextFragment = incomingValue || '';
+
+	if (!nextFragment) {
+		return {
+			value: currentValue,
+			delta: '',
+		};
+	}
+
+	if (!currentValue) {
+		return {
+			value: nextFragment,
+			delta: nextFragment,
+		};
+	}
+
+	if (nextFragment === currentValue) {
+		return {
+			value: currentValue,
+			delta: '',
+		};
+	}
+
+	// Some OpenAI-compatible providers resend the full accumulated tool field
+	// instead of a pure delta. Prefer the longer full value over duplicating it.
+	if (nextFragment.startsWith(currentValue)) {
+		return {
+			value: nextFragment,
+			delta: nextFragment.slice(currentValue.length),
+		};
+	}
+
+	if (currentValue.endsWith(nextFragment)) {
+		return {
+			value: currentValue,
+			delta: '',
+		};
+	}
+
+	const overlapLength = getStreamingToolCallOverlap(currentValue, nextFragment);
+	const appendFragment = nextFragment.slice(overlapLength);
+
+	return {
+		value: currentValue + appendFragment,
+		delta: appendFragment,
+	};
+}
+
 /**
  * Convert internal ChatMessage to OpenAI's message format
  * Supports both text-only and multimodal (text + images) messages
@@ -669,13 +736,21 @@ export async function* createStreamingChatCompletion(
 						// Yield tool call deltas for token counting
 						let deltaText = '';
 						if (deltaCall.function?.name) {
-							toolCallsBuffer[index].function.name += deltaCall.function.name;
-							deltaText += deltaCall.function.name;
+							const mergedName = mergeStreamingToolCallField(
+								toolCallsBuffer[index].function.name,
+								deltaCall.function.name,
+							);
+							toolCallsBuffer[index].function.name = mergedName.value;
+							deltaText += mergedName.delta;
 						}
 						if (deltaCall.function?.arguments) {
-							toolCallsBuffer[index].function.arguments +=
-								deltaCall.function.arguments;
-							deltaText += deltaCall.function.arguments;
+							const mergedArguments = mergeStreamingToolCallField(
+								toolCallsBuffer[index].function.arguments,
+								deltaCall.function.arguments,
+							);
+							toolCallsBuffer[index].function.arguments =
+								mergedArguments.value;
+							deltaText += mergedArguments.delta;
 						}
 
 						// Stream the delta to frontend for real-time token counting

@@ -268,8 +268,24 @@ function normalizeParameterDefinitions(
 	return Array.from(definitions.values());
 }
 
-function shouldSkipDescriptionParameter(name: string): boolean {
-	return /^(tool_name|command\d*)$/i.test(name);
+function shouldSkipDescriptionParameter(
+	name: string,
+	description?: string,
+): boolean {
+	if (/^(tool_name|command\d*|commandidentifier|commandname|toolid)$/i.test(name)) {
+		return true;
+	}
+
+	if (
+		/^action$/i.test(name) &&
+		/\b(?:固定为|固定值|always|must be|(?:is\s+)?fixed\s+to|command|命令)\b/i.test(
+			description || '',
+		)
+	) {
+		return true;
+	}
+
+	return false;
 }
 
 function normalizeDescriptionParameterName(name: string): string {
@@ -370,12 +386,11 @@ function extractParameterDefinitionsFromDescription(
 		const name = normalizeDescriptionParameterName(
 			match.groups['backtickName'] || match.groups['plainName'] || '',
 		);
-		if (!name || shouldSkipDescriptionParameter(name)) {
-			continue;
-		}
-
 		const parameterDescription = match.groups['description']?.trim();
 		const meta = match.groups['meta']?.trim();
+		if (!name || shouldSkipDescriptionParameter(name, [meta, parameterDescription].filter(Boolean).join(', '))) {
+			continue;
+		}
 		const typeHint = [meta, parameterDescription].filter(Boolean).join(', ');
 		const required = isRequiredHint(meta) || isRequiredHint(parameterDescription);
 
