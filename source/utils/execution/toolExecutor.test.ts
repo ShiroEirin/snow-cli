@@ -14,6 +14,7 @@ import {
 	clearToolExecutionBindings,
 	registerToolExecutionBindings,
 } from '../session/vcpCompatibility/toolExecutionBinding.js';
+import {lineHash} from '../../mcp/utils/filesystem/hashline.utils.js';
 
 let toolPlaneSequence = 0;
 
@@ -102,24 +103,29 @@ test('invalid concatenated tool arguments fail instead of truncating payload', a
 });
 
 test.serial(
-	'filesystem-edit keeps the native line-range contract',
+	'filesystem-edit uses the current hashline operations contract',
 	async (t: any) => {
 		const tempDir = mkdtempSync(join(tmpdir(), 'snow-tool-edit-'));
 		const filePath = join(tempDir, 'native-edit.ts');
 		const toolPlaneKey = registerLocalToolBindings(['filesystem-edit']);
 		writeFileSync(filePath, 'line1\nline2\nline3\n', 'utf8');
+		const startAnchor = `2:${lineHash('line2')}`;
 
 		try {
 			const lineEditCall: ToolCall = {
-				id: 'native-line-edit',
+				id: 'hashline-edit',
 				type: 'function',
 				function: {
 					name: 'filesystem-edit',
 					arguments: JSON.stringify({
 						filePath,
-						startLine: 2,
-						endLine: 2,
-						newContent: 'LINE2',
+						operations: [
+							{
+								type: 'replace',
+								startAnchor,
+								content: 'LINE2',
+							},
+						],
 					}),
 				},
 			};
@@ -131,36 +137,32 @@ test.serial(
 			t.false(lineEditResult.content.startsWith('Error:'));
 			t.true(readFileSync(filePath, 'utf8').includes('LINE2'));
 
-			const hashlineStyleCall: ToolCall = {
-				id: 'hashline-should-fail',
+			const legacyLineRangeCall: ToolCall = {
+				id: 'legacy-line-edit-should-fail',
 				type: 'function',
 				function: {
 					name: 'filesystem-edit',
 					arguments: JSON.stringify({
 						filePath,
-						operations: [
-							{
-								type: 'replace',
-								startAnchor: '2:deadbeef',
-								content: 'SHOULD_NOT_APPLY',
-							},
-						],
+						startLine: 2,
+						endLine: 2,
+						newContent: 'SHOULD_NOT_APPLY',
 					}),
 				},
 			};
 
-			const hashlineStyleResult = await executeToolCallWithBindings(
-				hashlineStyleCall,
+			const legacyLineRangeResult = await executeToolCallWithBindings(
+				legacyLineRangeCall,
 				toolPlaneKey,
 			);
 			t.true(
-				hashlineStyleResult.content.includes(
-					'Missing required parameters for filesystem-edit tool.',
+				legacyLineRangeResult.content.includes(
+					"Missing required parameter 'operations' for filesystem-edit tool.",
 				),
 			);
 			t.true(
-				hashlineStyleResult.content.includes(
-					"'startLine', 'endLine', and 'newContent' are required.",
+				legacyLineRangeResult.content.includes(
+					'array of {type, startAnchor, endAnchor?, content?} operations',
 				),
 			);
 			t.false(readFileSync(filePath, 'utf8').includes('SHOULD_NOT_APPLY'));
@@ -172,16 +174,14 @@ test.serial(
 );
 
 test.serial(
-	'filesystem-edit_search remains available with the native search/replace contract',
+	'filesystem-edit_search is no longer routed as an available native edit tool',
 	async (t: any) => {
-		const tempDir = mkdtempSync(join(tmpdir(), 'snow-tool-search-'));
-		const filePath = join(tempDir, 'native-edit-search.ts');
-		const toolPlaneKey = registerLocalToolBindings(['filesystem-edit_search']);
-		writeFileSync(filePath, 'alpha\nbeta\nalpha\n', 'utf8');
+		const toolPlaneKey = registerLocalToolBindings(['filesystem-edit']);
+		const filePath = join(tmpdir(), 'native-edit-search.ts');
 
 		try {
 			const toolCall: ToolCall = {
-				id: 'native-edit-search',
+				id: 'native-edit-search-missing-binding',
 				type: 'function',
 				function: {
 					name: 'filesystem-edit_search',
@@ -194,11 +194,13 @@ test.serial(
 			};
 
 			const result = await executeToolCallWithBindings(toolCall, toolPlaneKey);
-			t.false(result.content.startsWith('Error:'));
-			t.is(readFileSync(filePath, 'utf8'), 'alpha\nBETA\nalpha\n');
+			t.true(
+				result.content.includes(
+					'Error: Tool execution binding not found for filesystem-edit_search',
+				),
+			);
 		} finally {
 			clearToolExecutionBindings(toolPlaneKey);
-			rmSync(tempDir, {recursive: true, force: true});
 		}
 	},
 );

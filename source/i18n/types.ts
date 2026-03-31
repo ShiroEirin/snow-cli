@@ -1405,6 +1405,18 @@ export type TranslationKeys = {
 		moreBelow: string;
 		toolsListTitle: string;
 		toolsNavigationHint: string;
+		mcpSourceProject: string;
+		mcpSourceGlobal: string;
+	};
+	mcpConfigScreen: {
+		title: string;
+		scopeProject: string;
+		scopeGlobal: string;
+		navigationHint: string;
+		savedSuccess: string;
+		configErrors: string;
+		reverted: string;
+		invalidJson: string;
 	};
 	// Running Agents Panel
 	runningAgentsPanel: {

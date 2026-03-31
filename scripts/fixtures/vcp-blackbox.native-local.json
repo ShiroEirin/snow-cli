@@ -1,0 +1,23 @@
+{
+  "snowcfg": {
+    "baseUrl": "http://127.0.0.1:6005/v1",
+    "apiKey": "123456",
+    "requestMethod": "chat",
+    "backendMode": "native",
+    "toolTransport": "local",
+    "advancedModel": "kimi-k2.5",
+    "basicModel": "kimi-k2.5",
+    "maxContextTokens": 256000,
+    "maxTokens": 128000,
+    "anthropicBeta": false,
+    "streamIdleTimeoutSec": 180,
+    "editSimilarityThreshold": 0.75,
+    "streamingDisplay": false,
+    "enableAutoCompress": true,
+    "autoCompressThreshold": 80,
+    "showThinking": true,
+    "toolResultTokenLimit": 60000,
+    "systemPromptId": "",
+    "customHeadersSchemeId": ""
+  }
+}
