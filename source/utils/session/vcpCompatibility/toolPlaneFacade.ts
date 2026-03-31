@@ -19,6 +19,7 @@ import {
 	clearToolExecutionBindingsSession,
 	rotateToolExecutionBindingsSession,
 } from './toolExecutionBinding.js';
+import {DEFAULT_TOOL_PLANE_KEY} from './constants.js';
 import {logger} from '../../core/logger.js';
 
 export type PreparedToolPlane = {
@@ -39,7 +40,7 @@ const EMPTY_LOCAL_TOOL_PLANE: LocalToolPlane = {
 };
 
 function resolveFallbackToolPlaneKey(sessionKey?: string): string {
-	return sessionKey?.trim() || '__default__';
+	return sessionKey?.trim() || DEFAULT_TOOL_PLANE_KEY;
 }
 
 export async function prepareToolPlane(options: {

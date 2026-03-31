@@ -1,5 +1,6 @@
 import type {MCPTool} from '../../execution/mcpToolsManager.js';
 import {SessionLeaseStore} from './sessionLeaseStore.js';
+import {DEFAULT_TOOL_PLANE_KEY} from './constants.js';
 
 export type LocalToolExecutionBinding = {
 	kind: 'local';
@@ -19,7 +20,6 @@ export type ToolExecutionBinding =
 	| LocalToolExecutionBinding
 	| BridgeToolExecutionBinding;
 
-const DEFAULT_TOOL_PLANE_KEY = '__default__';
 const TOOL_EXECUTION_BINDING_TTL_MS = 6 * 60 * 60 * 1000;
 const TOOL_EXECUTION_BINDING_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 

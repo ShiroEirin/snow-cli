@@ -7,6 +7,7 @@ import {
 } from './bridgeManifestTranslator.js';
 import type {BridgeToolExecutionBinding} from './toolExecutionBinding.js';
 import {SessionLeaseStore} from './sessionLeaseStore.js';
+import {DEFAULT_BRIDGE_SNAPSHOT_KEY} from './constants.js';
 
 export type BridgeToolSnapshot = {
 	modelTools: BridgeModelToolDescriptor[];
@@ -18,7 +19,6 @@ export type SessionBridgeToolSnapshot = BridgeToolSnapshot & {
 	snapshotKey: string;
 };
 
-const DEFAULT_BRIDGE_SNAPSHOT_KEY = '__default__';
 const BRIDGE_SNAPSHOT_TTL_MS = 6 * 60 * 60 * 1000;
 const BRIDGE_SNAPSHOT_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 

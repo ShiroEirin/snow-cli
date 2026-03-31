@@ -10,9 +10,10 @@ import {
 	getToolExecutionBinding,
 	rotateToolExecutionBindingsSession,
 } from './toolExecutionBinding.js';
+import {DEFAULT_TOOL_PLANE_KEY} from './constants.js';
 
 test.afterEach(() => {
-	clearToolExecutionBindings('__default__');
+	clearToolExecutionBindings(DEFAULT_TOOL_PLANE_KEY);
 	clearToolExecutionBindings('plane-a');
 	clearToolExecutionBindings('plane-b');
 	clearToolExecutionBindingsSession('chat-session');
