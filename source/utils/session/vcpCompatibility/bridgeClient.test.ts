@@ -4,10 +4,22 @@ import {SnowBridgeClient} from './bridgeClient.js';
 
 const test = anyTest as any;
 
-const bridgeConfig: Pick<ApiConfig, 'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken'> = {
+const bridgeConfig: Pick<
+	ApiConfig,
+	'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken' | 'toolTransport'
+> = {
 	baseUrl: 'http://127.0.0.1:6005',
 	bridgeVcpKey: '123456',
 	bridgeAccessToken: '',
+	toolTransport: 'bridge',
+};
+
+const hybridConfig: Pick<
+	ApiConfig,
+	'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken' | 'toolTransport'
+> = {
+	...bridgeConfig,
+	toolTransport: 'hybrid',
 };
 
 test('cancelTool surfaces cancellation transport failures', async (t: any) => {
@@ -94,6 +106,56 @@ test('getManifest evicts expired cache entries before reloading', async (t: any)
 	client.disconnect();
 });
 
+test('bridge and hybrid share the same connection key', (t: any) => {
+	const client = new SnowBridgeClient() as any;
+
+	t.is(
+		client.buildConnectionKey(bridgeConfig),
+		client.buildConnectionKey(hybridConfig),
+	);
+	client.disconnect();
+});
+
+test('ensureConnected reuses the same socket when switching bridge mode', async (t: any) => {
+	const client = new SnowBridgeClient() as any;
+	let cleanupCount = 0;
+
+	client.cleanupSocket = () => {
+		cleanupCount += 1;
+	};
+	client.socket = {
+		readyState: 1,
+	};
+	client.activeConnectionKey = client.buildConnectionKey(bridgeConfig);
+
+	await client.ensureConnected(hybridConfig);
+
+	t.is(cleanupCount, 0);
+	t.is(client.activeConnectionKey, client.buildConnectionKey(bridgeConfig));
+	client.disconnect();
+});
+
+test('getManifest reuses cache across bridge and hybrid transport modes', async (t: any) => {
+	const client = new SnowBridgeClient() as any;
+	let sendCount = 0;
+
+	client.sendRequest = async () => {
+		sendCount += 1;
+		return {
+			status: 'success',
+			plugins: [{name: 'shared-cache'}],
+		};
+	};
+
+	const bridgeManifest = await client.getManifest(bridgeConfig);
+	const hybridManifest = await client.getManifest(hybridConfig);
+
+	t.is(sendCount, 1);
+	t.deepEqual(bridgeManifest, hybridManifest);
+	t.is(client.manifestCache.size, 1);
+	client.disconnect();
+});
+
 test('getManifest keeps manifest cache bounded with LRU-style eviction', async (t: any) => {
 	const client = new SnowBridgeClient() as any;
 	let sendCount = 0;
@@ -111,6 +173,7 @@ test('getManifest keeps manifest cache bounded with LRU-style eviction', async (
 			baseUrl: `http://127.0.0.1:${6005 + index}`,
 			bridgeVcpKey: String(index),
 			bridgeAccessToken: '',
+			toolTransport: 'bridge',
 		});
 	}
 
@@ -119,6 +182,55 @@ test('getManifest keeps manifest cache bounded with LRU-style eviction', async (
 		baseUrl: 'http://127.0.0.1:6005',
 		bridgeVcpKey: '0',
 		bridgeAccessToken: '',
+		toolTransport: 'bridge',
 	})));
+	client.disconnect();
+});
+
+test('sendConnectedRequest includes Snow bridge request headers', async (t: any) => {
+	const client = new SnowBridgeClient() as any;
+	let serializedPayload = '';
+
+	client.socket = {
+		send(payload: string) {
+			serializedPayload = payload;
+		},
+		removeAllListeners() {},
+		close() {},
+		readyState: 3,
+	};
+
+	const requestPromise = client.sendConnectedRequest({
+		config: {
+			...hybridConfig,
+		},
+		type: 'get_vcp_manifests',
+		expectedType: 'vcp_manifest_response',
+		payload: {
+			requestId: 'request-headers-1',
+		},
+		timeoutMs: 5_000,
+	});
+
+	client.handleMessage(
+		JSON.stringify({
+			type: 'vcp_manifest_response',
+			data: {
+				requestId: 'request-headers-1',
+				status: 'success',
+				plugins: [],
+			},
+		}),
+	);
+
+	await requestPromise;
+
+	const parsedPayload = JSON.parse(serializedPayload);
+	t.deepEqual(parsedPayload.data.requestHeaders, {
+		'x-snow-client': 'snow-cli',
+		'x-snow-protocol': 'function-calling',
+		'x-snow-tool-mode': 'hybrid',
+		'x-snow-channel': 'bridge-ws',
+	});
 	client.disconnect();
 });

@@ -26,6 +26,7 @@ const BRIDGE_EXECUTE_TIMEOUT_MS = 120_000;
 const BRIDGE_ASYNC_EXECUTE_TIMEOUT_MS = 10 * 60 * 1000;
 const BRIDGE_MANIFEST_CACHE_MS = 30_000;
 const BRIDGE_MANIFEST_CACHE_MAX_ENTRIES = 100;
+const SNOW_BRIDGE_CHANNEL = 'bridge-ws';
 
 type BridgeManifestCacheEntry = {
 	manifest: BridgeManifestResponse;
@@ -44,13 +45,27 @@ export class SnowBridgeClient {
 
 	private buildConnectionKey(config: Pick<
 		ApiConfig,
-		'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken'
+		'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken' | 'toolTransport'
 	>): string {
 		return JSON.stringify({
 			baseUrl: config.baseUrl,
 			bridgeVcpKey: config.bridgeVcpKey || '',
 			bridgeAccessToken: config.bridgeAccessToken || '',
 		});
+	}
+
+	private buildBridgeRequestHeaders(
+		config: Pick<ApiConfig, 'toolTransport'>,
+	): Record<string, string> {
+		const toolMode =
+			config.toolTransport === 'hybrid' ? 'hybrid' : 'bridge';
+
+		return {
+			'x-snow-client': 'snow-cli',
+			'x-snow-protocol': 'function-calling',
+			'x-snow-tool-mode': toolMode,
+			'x-snow-channel': SNOW_BRIDGE_CHANNEL,
+		};
 	}
 
 	private buildWebSocketUrl(config: Pick<ApiConfig, 'baseUrl' | 'bridgeVcpKey'>): string {
@@ -90,7 +105,10 @@ export class SnowBridgeClient {
 	}
 
 	clearManifestCache(
-		config?: Pick<ApiConfig, 'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken'>,
+		config?: Pick<
+			ApiConfig,
+			'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken' | 'toolTransport'
+		>,
 	): void {
 		if (!config) {
 			this.manifestCache.clear();
@@ -226,7 +244,10 @@ export class SnowBridgeClient {
 	}
 
 	private async ensureConnected(
-		config: Pick<ApiConfig, 'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken'>,
+		config: Pick<
+			ApiConfig,
+			'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken' | 'toolTransport'
+		>,
 	): Promise<void> {
 		const nextConnectionKey = this.buildConnectionKey(config);
 		if (
@@ -274,7 +295,10 @@ export class SnowBridgeClient {
 	}
 
 	private sendRequest<TResponse>(options: {
-		config: Pick<ApiConfig, 'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken'>;
+		config: Pick<
+			ApiConfig,
+			'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken' | 'toolTransport'
+		>;
 		type: string;
 		expectedType: string;
 		payload: Record<string, unknown>;
@@ -291,7 +315,10 @@ export class SnowBridgeClient {
 	}
 
 	private sendConnectedRequest<TResponse>(options: {
-		config: Pick<ApiConfig, 'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken'>;
+		config: Pick<
+			ApiConfig,
+			'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken' | 'toolTransport'
+		>;
 		type: string;
 		expectedType: string;
 		payload: Record<string, unknown>;
@@ -313,6 +340,7 @@ export class SnowBridgeClient {
 					...options.payload,
 					requestId,
 					accessToken: options.config.bridgeAccessToken || undefined,
+					requestHeaders: this.buildBridgeRequestHeaders(options.config),
 					clientInfo: {
 						clientId: 'snow-cli',
 						clientName: 'snow-cli',
@@ -350,7 +378,10 @@ export class SnowBridgeClient {
 	}
 
 	async getManifest(
-		config: Pick<ApiConfig, 'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken'>,
+		config: Pick<
+			ApiConfig,
+			'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken' | 'toolTransport'
+		>,
 	): Promise<BridgeManifestResponse> {
 		const connectionKey = this.buildConnectionKey(config);
 		const now = Date.now();
@@ -404,7 +435,10 @@ export class SnowBridgeClient {
 	}
 
 	async executeTool(options: {
-		config: Pick<ApiConfig, 'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken'>;
+		config: Pick<
+			ApiConfig,
+			'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken' | 'toolTransport'
+		>;
 		toolName: string;
 		toolArgs: Record<string, unknown>;
 		onStatus?: BridgeStatusListener;
@@ -510,7 +544,10 @@ export class SnowBridgeClient {
 	}
 
 	async cancelTool(options: {
-		config: Pick<ApiConfig, 'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken'>;
+		config: Pick<
+			ApiConfig,
+			'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken' | 'toolTransport'
+		>;
 		requestId: string;
 		invocationId: string;
 	}): Promise<void> {

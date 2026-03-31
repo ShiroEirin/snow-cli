@@ -722,6 +722,9 @@ function isRetryableScenarioExtractionError(error) {
 		error instanceof Error ? error.message : String(error || '');
 
 	return [
+		'Unexpected end of JSON input',
+		'Unexpected non-whitespace character after JSON',
+		'Unable to locate session file for',
 		'Expected tool "',
 		'Expected tool result for "',
 		'Expected final assistant reply for "',
