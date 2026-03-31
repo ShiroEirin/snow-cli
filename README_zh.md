@@ -81,8 +81,14 @@ winget install Microsoft.WindowsTerminal
 - [LSP 配置与用法](docs/usage/zh/19.LSP配置.md) - LSP 配置文件、语言服务器安装、ACE 工具用法(跳转/大纲)
 - [SSE 服务模式](docs/usage/zh/20.SSE服务模式.md) - SSE 服务器启动、API 端点说明、工具确认流程、权限配置、YOLO 模式、客户端集成示例
 - [自定义 StatusLine 指南](docs/usage/zh/21.自定义StatusLine指南.md) - 用户级状态栏插件、hook 结构、覆盖机制、中英文示例
-- [VCP 五层边界与 Seam 说明](docs/usage/zh/22.VCP五层边界与Seam说明.md) - Snow Core seam 级改动边界、五层职责划分与防回退测试
 - [Team 模式指南](docs/usage/zh/22.Team模式指南.md) - 多智能体协作、并行任务执行、团队管理
+
+### VCP TUI 专题（0.8 测试口径）
+
+- [VCP 五层边界与 Seam 说明](docs/usage/zh/22.VCP五层边界与Seam说明.md) - 当前分支的五层职责、Snow Core seam 约束与边界防回退测试
+- [VCP TUI 测试标准分支说明](docs/usage/zh/23.VCPTUI测试标准分支说明.md) - 当前 0.8 测试标准分支的目标、配置前提、已实现能力与未承诺项
+- [SnowBridge 与工具传输模式](docs/usage/zh/24.SnowBridge与工具传输模式.md) - `local / bridge / hybrid` 的真实行为、配置方式、自动请求头与故障语义
+- [VCP 兼容验证与已知限制](docs/usage/zh/25.VCP兼容验证与已知限制.md) - 当前黑盒/定向验证口径、建议测试命令、已知限制与 1.0 前待补项
 
 ### 推荐使用的 ROLE.md
 
