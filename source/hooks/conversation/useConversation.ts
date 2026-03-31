@@ -11,16 +11,95 @@ import {
 import {processStreamRound} from './core/streamProcessor.js';
 import {handleToolCallRound} from './core/toolCallRoundHandler.js';
 import {handleOnStopHooks} from './core/onStopHookHandler.js';
-import {sanitizeAssistantContent} from './utils/assistantContentSanitizer.js';
 import type {
 	ConversationHandlerOptions,
 	ConversationUsage,
+	StreamRoundResult,
 } from './core/conversationTypes.js';
+import {sanitizeAssistantContent} from './utils/assistantContentSanitizer.js';
 
 export type {
 	ConversationHandlerOptions,
 	UserQuestionResult,
 } from './core/conversationTypes.js';
+
+/**
+ * Builds the sanitized assistant payloads used by the normal assistant path.
+ *
+ * @param streamResult - The completed stream round result.
+ * @param discontinued - Whether the message was interrupted by abort.
+ * @returns Sanitized content plus optional UI/persisted messages.
+ */
+export function buildSanitizedFinalAssistantTurn(
+	streamResult: Pick<
+		StreamRoundResult,
+		| 'streamedContent'
+		| 'receivedReasoning'
+		| 'receivedThinking'
+		| 'receivedReasoningContent'
+		| 'hasStreamedLines'
+	>,
+	discontinued: boolean,
+): {
+	assistantContent: string;
+	finalAssistantMessage?: Message;
+	assistantMessage?: ChatMessage;
+} {
+	const assistantContent = sanitizeAssistantContent(
+		streamResult.streamedContent,
+	);
+
+	if (!assistantContent) {
+		return {assistantContent: ''};
+	}
+
+	const thinking = extractThinkingContent(
+		streamResult.receivedThinking,
+		streamResult.receivedReasoning,
+		streamResult.receivedReasoningContent,
+	);
+
+	return {
+		assistantContent,
+		finalAssistantMessage: {
+			role: 'assistant',
+			content: assistantContent,
+			streaming: false,
+			discontinued,
+			thinking,
+		},
+		assistantMessage: {
+			role: 'assistant',
+			content: assistantContent,
+			reasoning: streamResult.receivedReasoning,
+			thinking: streamResult.receivedThinking,
+			reasoning_content: streamResult.receivedReasoningContent,
+		},
+	};
+}
+
+/**
+ * Replaces streamed line fragments with the final assistant message when needed.
+ *
+ * @param messages - Current UI messages.
+ * @param finalAssistantMessage - Sanitized final assistant message.
+ * @param replaceStreamingLines - Whether streaming fragments should be removed.
+ * @returns Updated UI messages for the completed assistant turn.
+ */
+export function mergeFinalAssistantDisplayMessage(
+	messages: Message[],
+	finalAssistantMessage: Message,
+	replaceStreamingLines: boolean,
+): Message[] {
+	if (!replaceStreamingLines) {
+		return [...messages, finalAssistantMessage];
+	}
+
+	return [
+		...messages.filter(message => !message.streamingLine),
+		finalAssistantMessage,
+	];
+}
 
 /**
  * Handle conversation with streaming and tool calls.
@@ -88,7 +167,6 @@ export async function handleConversationWithTools(
 
 	let accumulatedUsage: ConversationUsage | null = null;
 	const sessionApprovedTools = new Set<string>();
-	let allowVcpTimeBridge = true;
 
 	try {
 		while (true) {
@@ -101,7 +179,6 @@ export async function handleConversationWithTools(
 				config,
 				model,
 				conversationMessages,
-				allowVcpTimeBridge,
 				activeTools,
 				controller,
 				encoder: encoderManager,
@@ -112,7 +189,6 @@ export async function handleConversationWithTools(
 				setContextUsage,
 				options,
 			});
-			allowVcpTimeBridge = false;
 
 			setStreamTokenCount(0);
 			accumulatedUsage = mergeUsage(accumulatedUsage, streamResult.roundUsage);
@@ -165,33 +241,23 @@ export async function handleConversationWithTools(
 				continue;
 			}
 
-			const sanitizedAssistantContent = sanitizeAssistantContent(
-				streamResult.streamedContent,
-			);
+			const {assistantContent, finalAssistantMessage, assistantMessage} =
+				buildSanitizedFinalAssistantTurn(
+					streamResult,
+					controller.signal.aborted,
+				);
 
-			if (sanitizedAssistantContent) {
-				if (!streamResult.hasStreamedLines) {
-					const finalAssistantMessage: Message = {
-						role: 'assistant',
-						content: sanitizedAssistantContent,
-						streaming: false,
-						discontinued: controller.signal.aborted,
-						thinking: extractThinkingContent(
-							streamResult.receivedThinking,
-							streamResult.receivedReasoning,
-							streamResult.receivedReasoningContent,
+			if (assistantContent && assistantMessage) {
+				if (finalAssistantMessage) {
+					setMessages(prev =>
+						mergeFinalAssistantDisplayMessage(
+							prev,
+							finalAssistantMessage,
+							streamResult.hasStreamedLines,
 						),
-					};
-					setMessages(prev => [...prev, finalAssistantMessage]);
+					);
 				}
 
-				const assistantMessage: ChatMessage = {
-					role: 'assistant',
-					content: sanitizedAssistantContent,
-					reasoning: streamResult.receivedReasoning,
-					thinking: streamResult.receivedThinking,
-					reasoning_content: streamResult.receivedReasoningContent,
-				};
 				conversationMessages.push(assistantMessage);
 				saveMessage(assistantMessage).catch(error => {
 					console.error('Failed to save assistant message:', error);

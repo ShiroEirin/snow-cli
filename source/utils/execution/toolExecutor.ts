@@ -3,6 +3,8 @@ import {subAgentService} from '../../mcp/subagent.js';
 import {teamService} from '../../mcp/team.js';
 import {runningSubAgentTracker} from './runningSubAgentTracker.js';
 import {getOpenAiConfig} from '../config/apiConfig.js';
+import {parseJsonWithFix} from '../core/retryUtils.js';
+import {logger} from '../core/logger.js';
 import {sessionManager} from '../session/sessionManager.js';
 import {snowBridgeClient} from '../session/vcpCompatibility/bridgeClient.js';
 import {
@@ -15,67 +17,59 @@ import type {ConfirmationResult} from '../../ui/components/tools/ToolConfirmatio
 import type {ImageContent} from '../../api/types.js';
 import type {MultimodalContent} from '../../mcp/types/filesystem.types.js';
 
-//安全解析JSON，处理可能被拼接的多个JSON对象
-function safeParseToolArguments(argsString: string): Record<string, any> {
+function parseToolArguments(
+	argsString: string,
+	toolName: string,
+	strict: boolean,
+): Record<string, any> {
 	if (!argsString || argsString.trim() === '') {
 		return {};
 	}
 
-	try {
-		return JSON.parse(argsString);
-	} catch (error) {
-		//尝试只解析第一个完整的JSON对象
-		//这处理了多个工具调用参数被错误拼接的情况
-		const firstBraceIndex = argsString.indexOf('{');
-		if (firstBraceIndex === -1) {
-			return {};
-		}
+	const parseResult = parseJsonWithFix<Record<string, any>>(argsString, {
+		toolName: `${toolName} arguments`,
+		fallbackValue: {},
+		logWarning: true,
+		logError: false,
+	});
+	const parsedArguments = parseResult.data;
+	const isPlainObject =
+		parsedArguments !== null &&
+		typeof parsedArguments === 'object' &&
+		!Array.isArray(parsedArguments);
 
-		let braceCount = 0;
-		let inString = false;
-		let escapeNext = false;
-
-		for (let i = firstBraceIndex; i < argsString.length; i++) {
-			const char = argsString[i];
-
-			if (escapeNext) {
-				escapeNext = false;
-				continue;
-			}
-
-			if (char === '\\') {
-				escapeNext = true;
-				continue;
-			}
-
-			if (char === '"') {
-				inString = !inString;
-				continue;
-			}
-
-			if (!inString) {
-				if (char === '{') {
-					braceCount++;
-				} else if (char === '}') {
-					braceCount--;
-					if (braceCount === 0) {
-						//找到第一个完整的JSON对象
-						const firstJsonObject = argsString.substring(
-							firstBraceIndex,
-							i + 1,
-						);
-						try {
-							return JSON.parse(firstJsonObject);
-						} catch {
-							return {};
-						}
-					}
-				}
-			}
-		}
-
-		return {};
+	if (parseResult.success && isPlainObject) {
+		return parsedArguments;
 	}
+
+	const errorMessage = parseResult.success
+		? `Tool "${toolName}" arguments must be a JSON object.`
+		: `Invalid tool arguments JSON for ${toolName}. Refusing to execute a malformed payload.`;
+	logger.error(errorMessage);
+	logger.error(`Raw tool arguments for ${toolName}: ${argsString}`);
+	if (parseResult.fixedJson && parseResult.fixedJson !== argsString) {
+		logger.error(`Fixed candidate for ${toolName}: ${parseResult.fixedJson}`);
+	}
+
+	if (strict) {
+		throw new Error(errorMessage);
+	}
+
+	return {};
+}
+
+function parseToolArgumentsOrThrow(
+	argsString: string,
+	toolName: string,
+): Record<string, any> {
+	return parseToolArguments(argsString, toolName, true);
+}
+
+function safeParseToolArguments(
+	argsString: string,
+	toolName: string,
+): Record<string, any> {
+	return parseToolArguments(argsString, toolName, false);
 }
 
 export interface ToolCall {
@@ -315,7 +309,10 @@ export async function executeToolCall(
 	}
 
 	try {
-		const args = safeParseToolArguments(toolCall.function.arguments);
+		const args = parseToolArgumentsOrThrow(
+			toolCall.function.arguments,
+			toolCall.function.name,
+		);
 
 		// Execute beforeToolCall hook
 		try {
@@ -470,8 +467,9 @@ export async function executeToolCall(
 					requestToolConfirmation: subAgentToolConfirmation
 						? async (toolCall: ToolCall) => {
 								// Use the adapter to convert to the expected signature
-								const args = safeParseToolArguments(
+								const args = parseToolArgumentsOrThrow(
 									toolCall.function.arguments,
+									toolCall.function.name,
 								);
 								return await subAgentToolConfirmation(
 									toolCall.function.name,
@@ -710,7 +708,10 @@ export async function executeToolCall(
 				'afterToolCall',
 				{
 					toolName: toolCall.function.name,
-					args: safeParseToolArguments(toolCall.function.arguments),
+					args: safeParseToolArguments(
+						toolCall.function.arguments,
+						toolCall.function.name,
+					),
 					result,
 					error: executionError,
 				},
@@ -834,9 +835,12 @@ function getResourceIdentifier(toolCall: ToolCall): string {
 
 	if (resourceType === 'filesystem') {
 		try {
-			const args = JSON.parse(toolCall.function.arguments);
+			const args = safeParseToolArguments(
+				toolCall.function.arguments,
+				toolName,
+			);
 			// Support both single file and array of files
-			const filePath = args.filePath;
+			const filePath = args['filePath'];
 			if (typeof filePath === 'string') {
 				return `filesystem:${filePath}`;
 			} else if (Array.isArray(filePath)) {

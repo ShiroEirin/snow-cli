@@ -12,7 +12,8 @@ import {
 	rmSync,
 	writeFileSync,
 } from 'node:fs';
-import {dirname, join, resolve} from 'node:path';
+import {dirname, isAbsolute, join, resolve} from 'node:path';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 
 const VALID_MODES = new Set(['local', 'bridge', 'hybrid']);
 const OPTIONAL_SNOW_FILES = [
@@ -23,6 +24,36 @@ const OPTIONAL_SNOW_FILES = [
 ];
 const REQUEST_TIMEOUT_MS = 180000;
 const HEALTH_TIMEOUT_MS = 30000;
+const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const DEFAULT_BASE_CONFIG = {
+	snowcfg: {
+		baseUrl: 'https://api.openai.com/v1',
+		apiKey: '',
+		requestMethod: 'chat',
+		backendMode: 'native',
+		toolTransport: 'local',
+		advancedModel: '',
+		basicModel: '',
+		maxContextTokens: 120000,
+		maxTokens: 32000,
+		anthropicBeta: false,
+		streamIdleTimeoutSec: 180,
+		editSimilarityThreshold: 0.75,
+		streamingDisplay: false,
+	},
+};
+const LOCAL_READ_PROBE = {
+	query: 'source/cli.tsx',
+	expectedContent: '#!/usr/bin/env node',
+	fallbacks: [
+		'source/cli.tsx',
+		join('snow-cli', 'source', 'cli.tsx'),
+	],
+};
+const BRIDGE_SEARCH_PROBE = {
+	query: 'SnowBridge',
+	expectedPathIncludes: 'Plugin/SnowBridge/plugin-manifest.json',
+};
 
 const MODE_SCENARIOS = {
 	local: [
@@ -31,15 +62,18 @@ const MODE_SCENARIOS = {
 			buildPrompt: filePath =>
 				`Call exactly the tool \`filesystem-read\` on the file \`${filePath}\`. After the tool returns, reply with the first line only.`,
 			expectedTool: 'filesystem-read',
-			expectedToolResultIncludes: '<div align="center">',
+			expectedToolResultIncludes: LOCAL_READ_PROBE.expectedContent,
+			expectedAssistantIncludes: LOCAL_READ_PROBE.expectedContent,
 		},
 	],
 	bridge: [
 		{
 			name: 'bridge-search',
 			prompt:
-				'Call exactly the tool `vcp-servercodesearcher-searchcode` to search this workspace for `SnowBridge`. After the tool returns, reply with the first matched file path only.',
+				`Call exactly the tool \`vcp-servercodesearcher-searchcode\` to search this workspace for \`${BRIDGE_SEARCH_PROBE.query}\`. After the tool returns, reply with the first matched file path only.`,
 			expectedTool: 'vcp-servercodesearcher-searchcode',
+			expectedToolResultIncludes: BRIDGE_SEARCH_PROBE.expectedPathIncludes,
+			expectedAssistantIncludes: BRIDGE_SEARCH_PROBE.expectedPathIncludes,
 		},
 	],
 	hybrid: [
@@ -48,55 +82,154 @@ const MODE_SCENARIOS = {
 			buildPrompt: filePath =>
 				`Call exactly the tool \`filesystem-read\` on the file \`${filePath}\`. After the tool returns, reply with the first line only.`,
 			expectedTool: 'filesystem-read',
-			expectedToolResultIncludes: '<div align="center">',
+			expectedToolResultIncludes: LOCAL_READ_PROBE.expectedContent,
+			expectedAssistantIncludes: LOCAL_READ_PROBE.expectedContent,
 		},
 		{
 			name: 'bridge-search',
 			prompt:
-				'Call exactly the tool `vcp-servercodesearcher-searchcode` to search this workspace for `SnowBridge`. After the tool returns, reply with the first matched file path only.',
+				`Call exactly the tool \`vcp-servercodesearcher-searchcode\` to search this workspace for \`${BRIDGE_SEARCH_PROBE.query}\`. After the tool returns, reply with the first matched file path only.`,
 			expectedTool: 'vcp-servercodesearcher-searchcode',
+			expectedToolResultIncludes: BRIDGE_SEARCH_PROBE.expectedPathIncludes,
+			expectedAssistantIncludes: BRIDGE_SEARCH_PROBE.expectedPathIncludes,
 		},
 	],
 };
 
-function resolveRuntimeWorkDir() {
-	const candidates = [
-		process.env['VCP_BLACKBOX_WORKDIR'],
-		process.cwd(),
-		dirname(process.cwd()),
-	]
-		.filter(Boolean)
-		.map(candidate => resolve(String(candidate)));
+function resolvePathFrom(baseDir, candidate) {
+	return isAbsolute(candidate) ? resolve(candidate) : resolve(baseDir, candidate);
+}
 
-	for (const candidate of candidates) {
-		if (existsSync(join(candidate, '.snow', 'settings.json'))) {
-			return candidate;
+function readJsonFile(filePath) {
+	return JSON.parse(readFileSync(filePath, 'utf8'));
+}
+
+function normalizeConfigShape(parsedConfig) {
+	if (!parsedConfig || typeof parsedConfig !== 'object') {
+		return structuredClone(DEFAULT_BASE_CONFIG);
+	}
+
+	return {
+		...structuredClone(DEFAULT_BASE_CONFIG),
+		...parsedConfig,
+		snowcfg: {
+			...structuredClone(DEFAULT_BASE_CONFIG).snowcfg,
+			...(parsedConfig?.snowcfg || parsedConfig?.openai || {}),
+		},
+	};
+}
+
+function tryLoadProfileConfig(snowDir) {
+	const activeProfilePath = join(snowDir, 'active-profile.json');
+	const profileCandidates = [];
+
+	if (existsSync(activeProfilePath)) {
+		try {
+			const activeProfile = String(
+				readJsonFile(activeProfilePath)?.activeProfile || '',
+			).trim();
+			if (activeProfile) {
+				profileCandidates.push(activeProfile);
+			}
+		} catch {}
+	}
+
+	profileCandidates.push('default');
+
+	for (const profileName of new Set(profileCandidates)) {
+		const profilePath = join(snowDir, 'profiles', `${profileName}.json`);
+		if (!existsSync(profilePath)) {
+			continue;
+		}
+
+		return {
+			configPath: profilePath,
+			configSource: `profile:${profileName}`,
+			parsedConfig: normalizeConfigShape(readJsonFile(profilePath)),
+			sourceSnowDir: snowDir,
+		};
+	}
+
+	return null;
+}
+
+export function resolveRuntimeWorkDir(options = {}) {
+	const {
+		workDir,
+		invocationCwd = process.cwd(),
+		projectRoot = PROJECT_ROOT,
+	} = options;
+	const explicitWorkDir = workDir || process.env['VCP_BLACKBOX_WORKDIR'];
+	if (explicitWorkDir) {
+		return resolvePathFrom(invocationCwd, String(explicitWorkDir));
+	}
+
+	const anchoredProjectRoot = resolve(projectRoot);
+	if (existsSync(join(anchoredProjectRoot, '.snow', 'settings.json'))) {
+		return anchoredProjectRoot;
+	}
+
+	return anchoredProjectRoot;
+}
+
+export function resolveReadTarget(workDir) {
+	for (const relativePath of LOCAL_READ_PROBE.fallbacks) {
+		const absolutePath = join(workDir, relativePath);
+		if (existsSync(absolutePath)) {
+			return absolutePath.replaceAll('\\', '/');
 		}
 	}
 
-	return resolve(process.cwd());
+	throw new Error(
+		`Unable to resolve local filesystem probe target (${LOCAL_READ_PROBE.query}) from runtime work dir: ${workDir}`,
+	);
 }
 
-function resolveReadTarget(workDir) {
-	const candidates = [
-		'README_zh.md',
-		join('snow-cli', 'README_zh.md'),
-	];
-
-	for (const relativePath of candidates) {
-		if (existsSync(join(workDir, relativePath))) {
-			return relativePath.replaceAll('\\', '/');
-		}
+function resolveCliEntrypoint() {
+	const bundleEntry = join(PROJECT_ROOT, 'bundle', 'cli.mjs');
+	if (existsSync(bundleEntry)) {
+		return {
+			command: process.execPath,
+			args: [bundleEntry],
+			label: 'bundle/cli.mjs',
+		};
 	}
 
-	throw new Error(`Unable to resolve README_zh.md from runtime work dir: ${workDir}`);
+	const distEntry = join(PROJECT_ROOT, 'dist', 'cli.js');
+	if (existsSync(distEntry)) {
+		return {
+			command: process.execPath,
+			args: [distEntry],
+			label: 'dist/cli.js',
+		};
+	}
+
+	const sourceEntry = join(PROJECT_ROOT, 'source', 'cli.tsx');
+	if (existsSync(sourceEntry)) {
+		return {
+			command: process.execPath,
+			args: ['--loader=ts-node/esm/transpile-only', sourceEntry],
+			label: 'source/cli.tsx via ts-node/esm/transpile-only',
+		};
+	}
+
+	throw new Error(
+		[
+			'Unable to resolve Snow CLI entrypoint.',
+			`Checked: ${bundleEntry}`,
+			`Checked: ${distEntry}`,
+			`Checked: ${sourceEntry}`,
+		].join('\n'),
+	);
 }
 
-function parseArguments(argv) {
+export function parseArguments(argv) {
 	const options = {
 		modes: [],
 		keepTemp: false,
 		timeoutMs: REQUEST_TIMEOUT_MS,
+		workDir: undefined,
+		configPath: undefined,
 	};
 
 	for (let index = 0; index < argv.length; index += 1) {
@@ -134,6 +267,28 @@ function parseArguments(argv) {
 			continue;
 		}
 
+		if (arg === '--work-dir') {
+			const workDir = argv[index + 1];
+			if (!workDir) {
+				throw new Error('Invalid --work-dir value: (empty)');
+			}
+
+			options.workDir = workDir;
+			index += 1;
+			continue;
+		}
+
+		if (arg === '--config') {
+			const configPath = argv[index + 1];
+			if (!configPath) {
+				throw new Error('Invalid --config value: (empty)');
+			}
+
+			options.configPath = configPath;
+			index += 1;
+			continue;
+		}
+
 		if (arg === '--timeout-ms') {
 			const timeoutMs = Number.parseInt(argv[index + 1] || '', 10);
 			if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
@@ -151,18 +306,60 @@ function parseArguments(argv) {
 	return options;
 }
 
-function loadBaseConfig() {
-	const configPath = join(os.homedir(), '.snow', 'config.json');
-	if (!existsSync(configPath)) {
-		throw new Error(`Snow config not found: ${configPath}`);
+export function loadBaseConfig(options = {}) {
+	const {
+		configPath,
+		invocationCwd = process.cwd(),
+		homeDir = os.homedir(),
+	} = options;
+	const explicitConfigPath = configPath || process.env['VCP_BLACKBOX_CONFIG'];
+	if (explicitConfigPath) {
+		const resolvedConfigPath = resolvePathFrom(
+			invocationCwd,
+			String(explicitConfigPath),
+		);
+		if (!existsSync(resolvedConfigPath)) {
+			throw new Error(`Snow config not found: ${resolvedConfigPath}`);
+		}
+
+		const parsedConfig = normalizeConfigShape(readJsonFile(resolvedConfigPath));
+		return {
+			configPath: resolvedConfigPath,
+			configSource: 'explicit',
+			parsedConfig,
+			snowConfig: parsedConfig.snowcfg || {},
+			sourceSnowDir: dirname(resolvedConfigPath),
+		};
 	}
 
-	const parsedConfig = JSON.parse(readFileSync(configPath, 'utf8'));
-	const snowConfig = parsedConfig?.snowcfg || {};
+	const snowDir = join(homeDir, '.snow');
+	const defaultConfigPath = join(snowDir, 'config.json');
+	if (existsSync(defaultConfigPath)) {
+		const parsedConfig = normalizeConfigShape(readJsonFile(defaultConfigPath));
+		return {
+			configPath: defaultConfigPath,
+			configSource: 'home-config',
+			parsedConfig,
+			snowConfig: parsedConfig.snowcfg || {},
+			sourceSnowDir: snowDir,
+		};
+	}
+
+	const profileConfig = tryLoadProfileConfig(snowDir);
+	if (profileConfig) {
+		return {
+			...profileConfig,
+			snowConfig: profileConfig.parsedConfig.snowcfg || {},
+		};
+	}
+
+	const parsedConfig = structuredClone(DEFAULT_BASE_CONFIG);
 	return {
-		configPath,
+		configPath: null,
+		configSource: 'default',
 		parsedConfig,
-		snowConfig,
+		snowConfig: parsedConfig.snowcfg || {},
+		sourceSnowDir: null,
 	};
 }
 
@@ -181,7 +378,7 @@ function resolveModes(snowConfig, requestedModes) {
 function ensureModeSupported(snowConfig, mode) {
 	if ((mode === 'bridge' || mode === 'hybrid') && !snowConfig.bridgeVcpKey?.trim()) {
 		throw new Error(
-			`Mode "${mode}" requires bridgeVcpKey in ~/.snow/config.json.`,
+			`Mode "${mode}" requires bridgeVcpKey in the resolved Snow config.`,
 		);
 	}
 }
@@ -196,7 +393,7 @@ function cloneConfigForMode(parsedConfig, mode) {
 	};
 }
 
-function createIsolatedSnowHome(parsedConfig, mode) {
+function createIsolatedSnowHome(parsedConfig, mode, sourceSnowDir) {
 	const tempRoot = mkdtempSync(join(os.tmpdir(), 'snow-runtime-blackbox-'));
 	const tempSnowDir = join(tempRoot, '.snow');
 	mkdirSync(tempSnowDir, {recursive: true});
@@ -207,11 +404,12 @@ function createIsolatedSnowHome(parsedConfig, mode) {
 		'utf8',
 	);
 
-	const sourceSnowDir = join(os.homedir(), '.snow');
-	for (const fileName of OPTIONAL_SNOW_FILES) {
-		const sourcePath = join(sourceSnowDir, fileName);
-		if (existsSync(sourcePath)) {
-			copyFileSync(sourcePath, join(tempSnowDir, fileName));
+	if (sourceSnowDir) {
+		for (const fileName of OPTIONAL_SNOW_FILES) {
+			const sourcePath = join(sourceSnowDir, fileName);
+			if (existsSync(sourcePath)) {
+				copyFileSync(sourcePath, join(tempSnowDir, fileName));
+			}
 		}
 	}
 
@@ -515,44 +713,100 @@ function readSessionMessages(tempRoot, sessionId) {
 	return Array.isArray(session.messages) ? session.messages : [];
 }
 
-function extractScenarioResultFromSession(options) {
+function normalizeComparableText(value) {
+	return String(value).replaceAll('\\', '/');
+}
+
+function isRetryableScenarioExtractionError(error) {
+	const message =
+		error instanceof Error ? error.message : String(error || '');
+
+	return [
+		'Expected tool "',
+		'Expected tool result for "',
+		'Expected final assistant reply for "',
+		'Final assistant reply for "',
+	].some(fragment => message.includes(fragment));
+}
+
+function collectComparableStrings(value, bucket = []) {
+	if (typeof value === 'string') {
+		bucket.push(value);
+		return bucket;
+	}
+
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			collectComparableStrings(item, bucket);
+		}
+
+		return bucket;
+	}
+
+	if (value && typeof value === 'object') {
+		for (const item of Object.values(value)) {
+			collectComparableStrings(item, bucket);
+		}
+	}
+
+	return bucket;
+}
+
+export function extractScenarioResultFromSession(options) {
 	const {
 		messages,
 		scenario,
 		previousMessageCount,
 	} = options;
 	const nextMessages = messages.slice(previousMessageCount);
-	let matchedToolCall;
+	const matchedToolCalls = [];
+	let toolCallMessageIndex = -1;
 
-	for (const message of nextMessages) {
+	for (const [messageIndex, message] of nextMessages.entries()) {
 		if (!Array.isArray(message.tool_calls)) {
 			continue;
 		}
 
-		matchedToolCall = message.tool_calls.find(toolCall =>
-			toolCall?.function?.name === scenario.expectedTool,
+		const toolCalls = message.tool_calls.filter(
+			toolCall => toolCall?.function?.name === scenario.expectedTool,
 		);
-		if (matchedToolCall) {
-			break;
+		if (toolCalls.length > 0) {
+			matchedToolCalls.push(...toolCalls);
+			toolCallMessageIndex = messageIndex;
 		}
 	}
 
+	const matchedToolCall = matchedToolCalls[0];
 	if (!matchedToolCall) {
 		throw new Error(
 			`Expected tool "${scenario.expectedTool}" was not recorded in session history.`,
 		);
 	}
 
-	const toolResultMessage = nextMessages.find(
+	if (matchedToolCalls.length > 1) {
+		throw new Error(
+			`Expected exactly one "${scenario.expectedTool}" tool call, but found ${matchedToolCalls.length}.`,
+		);
+	}
+
+	const toolResultMessageIndex = nextMessages.findIndex(
 		message => message.tool_call_id === matchedToolCall.id,
 	);
+	const toolResultMessage =
+		toolResultMessageIndex >= 0 ? nextMessages[toolResultMessageIndex] : undefined;
 	const rawToolResultContent = String(toolResultMessage?.content || '');
 	let toolResultContent = rawToolResultContent;
+	let toolResultComparableCandidates = [rawToolResultContent];
 	try {
 		const parsedToolResult = JSON.parse(rawToolResultContent);
 		if (typeof parsedToolResult?.content === 'string') {
 			toolResultContent = parsedToolResult.content;
 		}
+
+		toolResultComparableCandidates = [
+			toolResultContent,
+			...collectComparableStrings(parsedToolResult),
+		];
 	} catch {}
 
 	if (!toolResultContent) {
@@ -569,10 +823,54 @@ function extractScenarioResultFromSession(options) {
 
 	if (
 		scenario.expectedToolResultIncludes &&
-		!toolResultContent.includes(scenario.expectedToolResultIncludes)
+		!toolResultComparableCandidates.some(candidate =>
+			normalizeComparableText(candidate).includes(
+				normalizeComparableText(scenario.expectedToolResultIncludes),
+			),
+		)
 	) {
 		throw new Error(
 			`Tool result for "${scenario.expectedTool}" did not include expected text "${scenario.expectedToolResultIncludes}"`,
+		);
+	}
+
+	const finalAssistantMessage = nextMessages
+		.slice(Math.max(toolCallMessageIndex, toolResultMessageIndex) + 1)
+		.find(message => {
+			if (message?.role !== 'assistant') {
+				return false;
+			}
+
+			if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+				return false;
+			}
+
+			return String(message.content || '').trim().length > 0;
+		});
+	if (!finalAssistantMessage) {
+		throw new Error(
+			`Expected final assistant reply for "${scenario.expectedTool}" was not recorded in session history.`,
+		);
+	}
+
+	const finalAssistantContent = String(finalAssistantMessage.content || '').trim();
+	if (
+		scenario.expectedAssistantIncludes &&
+		!normalizeComparableText(finalAssistantContent).includes(
+			normalizeComparableText(scenario.expectedAssistantIncludes),
+		)
+	) {
+		throw new Error(
+			`Final assistant reply for "${scenario.expectedTool}" did not include expected text "${scenario.expectedAssistantIncludes}"`,
+		);
+	}
+
+	if (
+		/<\/?think(?:ing)?>/i.test(finalAssistantContent) ||
+		/<<<\[?TOOL_REQUEST\]?>>>|tool_name\s*[:=]/i.test(finalAssistantContent)
+	) {
+		throw new Error(
+			`Final assistant reply for "${scenario.expectedTool}" still contained leaked hidden/protocol content.`,
 		);
 	}
 
@@ -581,8 +879,49 @@ function extractScenarioResultFromSession(options) {
 		expectedTool: scenario.expectedTool,
 		toolCall: matchedToolCall,
 		toolResultPreview: toolResultContent.slice(0, 240),
+		finalAssistantPreview: finalAssistantContent.slice(0, 240),
 		messageCount: messages.length,
 	};
+}
+
+export async function waitForScenarioResultFromSession(options) {
+	const {
+		scenario,
+		previousMessageCount,
+		timeoutMs,
+		readMessages,
+		pollIntervalMs = 200,
+	} = options;
+	const deadline = Date.now() + timeoutMs;
+	let lastError;
+
+	while (Date.now() <= deadline) {
+		try {
+			return extractScenarioResultFromSession({
+				messages: readMessages(),
+				scenario,
+				previousMessageCount,
+			});
+		} catch (error) {
+			lastError = error instanceof Error ? error : new Error(String(error));
+			if (!isRetryableScenarioExtractionError(lastError)) {
+				throw lastError;
+			}
+		}
+
+		const remainingMs = deadline - Date.now();
+		if (remainingMs <= 0) {
+			break;
+		}
+
+		await sleep(Math.min(pollIntervalMs, remainingMs));
+	}
+
+	throw new Error(
+		`Timed out waiting for persisted scenario result for "${scenario.expectedTool}": ${
+			lastError?.message || 'unknown error'
+		}`,
+	);
 }
 
 async function captureScenarioResult(options) {
@@ -600,11 +939,11 @@ async function captureScenarioResult(options) {
 		event => event.type === 'complete',
 		timeoutMs,
 	);
-	const messages = readSessionMessages(tempRoot, sessionId);
-	return extractScenarioResultFromSession({
-		messages,
+	return waitForScenarioResultFromSession({
 		scenario,
 		previousMessageCount,
+		timeoutMs: Math.min(timeoutMs, 10_000),
+		readMessages: () => readSessionMessages(tempRoot, sessionId),
 	});
 }
 
@@ -637,16 +976,25 @@ async function runScenario(
 }
 
 async function runMode(options) {
-	const {mode, parsedConfig, workDir, timeoutMs, keepTemp, readTarget} = options;
-	const {tempRoot} = createIsolatedSnowHome(parsedConfig, mode);
+	const {
+		mode,
+		parsedConfig,
+		workDir,
+		timeoutMs,
+		keepTemp,
+		readTarget,
+		sourceSnowDir,
+	} = options;
+	const {tempRoot} = createIsolatedSnowHome(parsedConfig, mode, sourceSnowDir);
+	const entrypoint = resolveCliEntrypoint();
 	const port = await getFreePort();
 	const baseUrl = `http://127.0.0.1:${port}`;
 	const logFilePath = join(tempRoot, 'sse-daemon.log');
 
 	const child = spawn(
-		process.execPath,
+		entrypoint.command,
 		[
-			'bundle/cli.mjs',
+			...entrypoint.args,
 			'--sse',
 			'--sse-daemon-mode',
 			'--sse-port',
@@ -655,7 +1003,7 @@ async function runMode(options) {
 			workDir,
 		],
 		{
-			cwd: workDir,
+			cwd: PROJECT_ROOT,
 			env: {
 				...process.env,
 				FORCE_COLOR: '0',
@@ -738,6 +1086,7 @@ async function runMode(options) {
 
 		return {
 			entry: 'runtime-blackbox',
+			cliEntrypoint: entrypoint.label,
 			mode,
 			port,
 			sessionId,
@@ -770,9 +1119,11 @@ async function runMode(options) {
 
 async function run() {
 	const options = parseArguments(process.argv.slice(2));
-	const {parsedConfig, snowConfig} = loadBaseConfig();
+	const {parsedConfig, snowConfig, configSource, sourceSnowDir} = loadBaseConfig({
+		configPath: options.configPath,
+	});
 	const modes = resolveModes(snowConfig, options.modes);
-	const workDir = resolveRuntimeWorkDir();
+	const workDir = resolveRuntimeWorkDir({workDir: options.workDir});
 	const readTarget = resolveReadTarget(workDir);
 	const results = [];
 
@@ -784,6 +1135,7 @@ async function run() {
 				parsedConfig,
 				workDir,
 				readTarget,
+				sourceSnowDir,
 				timeoutMs: options.timeoutMs,
 				keepTemp: options.keepTemp,
 			}),
@@ -795,6 +1147,7 @@ async function run() {
 			{
 				config: {
 					entry: 'runtime-blackbox',
+					configSource,
 					workDir,
 					modes,
 					timeoutMs: options.timeoutMs,
@@ -807,17 +1160,27 @@ async function run() {
 	);
 }
 
-try {
-	await run();
-} catch (error) {
-	console.error(
-		JSON.stringify(
-			{
-				error: error instanceof Error ? error.message : String(error),
-			},
-			null,
-			2,
-		),
-	);
-	process.exitCode = 1;
+function isMainModule() {
+	if (!process.argv[1]) {
+		return false;
+	}
+
+	return pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
+}
+
+if (isMainModule()) {
+	try {
+		await run();
+	} catch (error) {
+		console.error(
+			JSON.stringify(
+				{
+					error: error instanceof Error ? error.message : String(error),
+				},
+				null,
+				2,
+			),
+		);
+		process.exitCode = 1;
+	}
 }

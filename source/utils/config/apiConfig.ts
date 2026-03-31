@@ -170,6 +170,20 @@ const SYSTEM_PROMPT_JSON_FILE = join(CONFIG_DIR, 'system-prompt.json'); // 新�
 const CUSTOM_HEADERS_FILE = join(CONFIG_DIR, 'custom-headers.json');
 export const STATUSLINE_HOOKS_DIR = join(CONFIG_DIR, 'plugin', 'statusline');
 
+export type MCPConfigScope = 'global' | 'project';
+
+function getProjectMCPConfigDir(): string {
+	return join(process.cwd(), '.snow');
+}
+
+function getProjectMCPConfigFilePath(): string {
+	return join(getProjectMCPConfigDir(), 'mcp-config.json');
+}
+
+export function getGlobalMCPConfigFilePath(): string {
+	return MCP_CONFIG_FILE;
+}
+
 /**
  * 迁移旧版本的 proxy 配置到新的独立文件
  */
@@ -480,34 +494,135 @@ function isValidUrl(url: string): boolean {
 	}
 }
 
-export function updateMCPConfig(mcpConfig: MCPConfig): void {
+export function updateMCPConfig(
+	mcpConfig: MCPConfig,
+	scope?: MCPConfigScope,
+): void {
+	const configData = JSON.stringify(mcpConfig, null, 2);
+
+	if (scope === 'project') {
+		const projectConfigDir = getProjectMCPConfigDir();
+		if (!existsSync(projectConfigDir)) {
+			mkdirSync(projectConfigDir, {recursive: true});
+		}
+
+		try {
+			writeFileSync(getProjectMCPConfigFilePath(), configData, 'utf8');
+		} catch (error) {
+			throw new Error(`Failed to save project MCP configuration: ${error}`);
+		}
+		return;
+	}
+
+	if (scope === undefined) {
+		const projectConfig = getProjectMCPConfig();
+		const nextGlobalConfig = cloneDefaultMCPConfig();
+		const nextProjectConfig = cloneDefaultMCPConfig();
+
+		for (const [serviceName, serverConfig] of Object.entries(
+			mcpConfig.mcpServers,
+		)) {
+			if (projectConfig.mcpServers[serviceName]) {
+				nextProjectConfig.mcpServers[serviceName] = serverConfig;
+			} else {
+				nextGlobalConfig.mcpServers[serviceName] = serverConfig;
+			}
+		}
+
+		const projectConfigDir = getProjectMCPConfigDir();
+		if (!existsSync(projectConfigDir)) {
+			mkdirSync(projectConfigDir, {recursive: true});
+		}
+
+		ensureConfigDirectory();
+
+		try {
+			writeFileSync(
+				MCP_CONFIG_FILE,
+				JSON.stringify(nextGlobalConfig, null, 2),
+				'utf8',
+			);
+			writeFileSync(
+				getProjectMCPConfigFilePath(),
+				JSON.stringify(nextProjectConfig, null, 2),
+				'utf8',
+			);
+		} catch (error) {
+			throw new Error(`Failed to save merged MCP configuration: ${error}`);
+		}
+
+		return;
+	}
+
 	ensureConfigDirectory();
 	try {
-		const configData = JSON.stringify(mcpConfig, null, 2);
 		writeFileSync(MCP_CONFIG_FILE, configData, 'utf8');
 	} catch (error) {
 		throw new Error(`Failed to save MCP configuration: ${error}`);
 	}
 }
 
-export function getMCPConfig(): MCPConfig {
+export function getGlobalMCPConfig(): MCPConfig {
 	ensureConfigDirectory();
 
 	if (!existsSync(MCP_CONFIG_FILE)) {
 		const defaultMCPConfig = cloneDefaultMCPConfig();
-		updateMCPConfig(defaultMCPConfig);
+		updateMCPConfig(defaultMCPConfig, 'global');
 		return defaultMCPConfig;
 	}
 
 	try {
 		const configData = readFileSync(MCP_CONFIG_FILE, 'utf8');
-		const config = JSON.parse(configData) as MCPConfig;
-		return config;
-	} catch (error) {
-		const defaultMCPConfig = cloneDefaultMCPConfig();
-		updateMCPConfig(defaultMCPConfig);
-		return defaultMCPConfig;
+		return JSON.parse(configData) as MCPConfig;
+	} catch {
+		return cloneDefaultMCPConfig();
 	}
+}
+
+export function getProjectMCPConfig(): MCPConfig {
+	const projectConfigPath = getProjectMCPConfigFilePath();
+	if (!existsSync(projectConfigPath)) {
+		return cloneDefaultMCPConfig();
+	}
+
+	try {
+		const configData = readFileSync(projectConfigPath, 'utf8');
+		return JSON.parse(configData) as MCPConfig;
+	} catch {
+		return cloneDefaultMCPConfig();
+	}
+}
+
+export function getMCPConfig(): MCPConfig {
+	const globalConfig = getGlobalMCPConfig();
+	const projectConfig = getProjectMCPConfig();
+
+	return {
+		mcpServers: {
+			...globalConfig.mcpServers,
+			...projectConfig.mcpServers,
+		},
+	};
+}
+
+export function getMCPServerSource(
+	serviceName: string,
+): MCPConfigScope | null {
+	const projectConfig = getProjectMCPConfig();
+	if (projectConfig.mcpServers[serviceName]) {
+		return 'project';
+	}
+
+	const globalConfig = getGlobalMCPConfig();
+	if (globalConfig.mcpServers[serviceName]) {
+		return 'global';
+	}
+
+	return null;
+}
+
+export function getMCPConfigByScope(scope: MCPConfigScope): MCPConfig {
+	return scope === 'project' ? getProjectMCPConfig() : getGlobalMCPConfig();
 }
 
 export function validateMCPConfig(config: Partial<MCPConfig>): string[] {

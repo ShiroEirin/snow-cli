@@ -12,7 +12,6 @@ import {
 import {isSensitiveCommand} from '../execution/sensitiveCommandManager.js';
 import {getTeamMode, getToolSearchEnabled} from '../config/projectSettings.js';
 import {randomUUID} from 'crypto';
-import {sanitizeAssistantContent} from '../../hooks/conversation/utils/assistantContentSanitizer.js';
 
 /**
  * 待处理的交互请求
@@ -410,14 +409,7 @@ class SSEManager {
 		// 消息保存函数
 		const saveMessage = async (msg: any) => {
 			try {
-				const persistedMessage =
-					msg?.role === 'assistant' && typeof msg?.content === 'string'
-						? {
-								...msg,
-								content: sanitizeAssistantContent(msg.content),
-						  }
-						: msg;
-				await sessionManager.addMessage(persistedMessage);
+				await sessionManager.addMessage(msg);
 				// 不记录每条消息，避免日志过多
 			} catch (error) {
 				this.log('保存消息失败', 'error');

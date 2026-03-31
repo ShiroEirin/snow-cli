@@ -2,7 +2,11 @@ import anyTest from 'ava';
 
 const test = anyTest as any;
 
-import {mergeStreamingToolCallField} from './chat.js';
+import {
+	applyStreamingToolCallDelta,
+	finalizeStreamingToolCalls,
+	mergeStreamingToolCallField,
+} from './chat.js';
 
 test('append standard tool name deltas', (t: any) => {
 	const merged = mergeStreamingToolCallField('filesystem-', 'read');
@@ -59,4 +63,85 @@ test('promote resent full tool arguments over partial json prefix', (t: any) => 
 		value: '{"filePath":"D:/repo/.helloagents/INDEX.md"}',
 		delta: 'INDEX.md"}',
 	});
+});
+
+test('keep missing-index parallel tool calls isolated by id and order', (t: any) => {
+	const toolCallsBuffer: Record<number, any> = {};
+	const toolCallIndexById = new Map<string, number>();
+
+	applyStreamingToolCallDelta(
+		toolCallsBuffer,
+		toolCallIndexById,
+		{
+			id: 'tool-1',
+			function: {name: 'filesystem-read'},
+		},
+		0,
+		2,
+	);
+	applyStreamingToolCallDelta(
+		toolCallsBuffer,
+		toolCallIndexById,
+		{
+			id: 'tool-2',
+			function: {name: 'filesystem-read'},
+		},
+		1,
+		2,
+	);
+	applyStreamingToolCallDelta(
+		toolCallsBuffer,
+		toolCallIndexById,
+		{
+			function: {arguments: '{"filePath":"D:/repo/a.txt"'},
+		},
+		0,
+		2,
+	);
+	applyStreamingToolCallDelta(
+		toolCallsBuffer,
+		toolCallIndexById,
+		{
+			function: {arguments: '{"filePath":"D:/repo/b.txt"}'},
+		},
+		1,
+		2,
+	);
+
+	const toolCalls = finalizeStreamingToolCalls(toolCallsBuffer);
+
+	t.deepEqual(
+		toolCalls.map((toolCall: any) => toolCall.id),
+		['tool-1', 'tool-2'],
+	);
+	t.deepEqual(
+		toolCalls.map((toolCall: any) => toolCall.function.name),
+		['filesystem-read', 'filesystem-read'],
+	);
+	t.is(toolCalls[0]!.function.arguments, '{"filePath":"D:/repo/a.txt"}');
+	t.is(toolCalls[1]!.function.arguments, '{"filePath":"D:/repo/b.txt"}');
+});
+
+test('finalize streaming tool calls repairs malformed json arguments', (t: any) => {
+	const toolCalls = finalizeStreamingToolCalls({
+		0: {
+			id: 'tool-1',
+			type: 'function',
+			function: {
+				name: 'filesystem-read',
+				arguments: '{"filePath":"D:/repo/.helloagents/INDEX.md"',
+			},
+		},
+	});
+
+	t.deepEqual(toolCalls, [
+		{
+			id: 'tool-1',
+			type: 'function',
+			function: {
+				name: 'filesystem-read',
+				arguments: '{"filePath":"D:/repo/.helloagents/INDEX.md"}',
+			},
+		},
+	]);
 });

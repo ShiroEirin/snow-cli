@@ -160,6 +160,230 @@ export function mergeStreamingToolCallField(
 	};
 }
 
+type StreamingToolCallDelta = NonNullable<
+	NonNullable<
+		ChatCompletionChunk['choices'][number]['delta']['tool_calls']
+	>[number]
+>;
+
+type StreamingToolCallBufferEntry = ToolCall;
+
+function createStreamingToolCallBufferEntry(): StreamingToolCallBufferEntry {
+	return {
+		id: '',
+		type: 'function',
+		function: {
+			name: '',
+			arguments: '',
+		},
+	};
+}
+
+function getNextStreamingToolCallIndex(
+	toolCallsBuffer: Record<number, StreamingToolCallBufferEntry>,
+): number {
+	const existingIndices = Object.keys(toolCallsBuffer).map(Number);
+	if (existingIndices.length === 0) {
+		return 0;
+	}
+
+	return Math.max(...existingIndices) + 1;
+}
+
+function getStreamingToolCallFieldMatchScore(
+	currentValue: string,
+	incomingValue?: string,
+): number {
+	const nextFragment = incomingValue || '';
+	if (!currentValue || !nextFragment) {
+		return 0;
+	}
+
+	if (nextFragment === currentValue) {
+		return 5;
+	}
+
+	if (nextFragment.startsWith(currentValue) || currentValue.startsWith(nextFragment)) {
+		return 4;
+	}
+
+	if (currentValue.endsWith(nextFragment) || nextFragment.endsWith(currentValue)) {
+		return 3;
+	}
+
+	const overlapLength = getStreamingToolCallOverlap(currentValue, nextFragment);
+	if (overlapLength > 0) {
+		return 2;
+	}
+
+	return 0;
+}
+
+function inferStreamingToolCallIndex(
+	toolCallsBuffer: Record<number, StreamingToolCallBufferEntry>,
+	deltaCall: StreamingToolCallDelta,
+): number | undefined {
+	let bestMatch: {index: number; score: number} | undefined;
+	let hasTie = false;
+
+	for (const [rawIndex, toolCall] of Object.entries(toolCallsBuffer)) {
+		const index = Number(rawIndex);
+		let score = 0;
+
+		score +=
+			getStreamingToolCallFieldMatchScore(
+				toolCall.function.name,
+				deltaCall.function?.name,
+			) * 3;
+		score += getStreamingToolCallFieldMatchScore(
+			toolCall.function.arguments,
+			deltaCall.function?.arguments,
+		);
+
+		if (score === 0) {
+			continue;
+		}
+
+		if (!bestMatch || score > bestMatch.score) {
+			bestMatch = {index, score};
+			hasTie = false;
+			continue;
+		}
+
+		if (score === bestMatch.score) {
+			hasTie = true;
+		}
+	}
+
+	if (!bestMatch || hasTie) {
+		return undefined;
+	}
+
+	return bestMatch.index;
+}
+
+function resolveStreamingToolCallIndex(
+	toolCallsBuffer: Record<number, StreamingToolCallBufferEntry>,
+	toolCallIndexById: Map<string, number>,
+	deltaCall: StreamingToolCallDelta,
+	deltaCallPosition: number,
+	deltaToolCallCount: number,
+): number {
+	if (typeof deltaCall.index === 'number') {
+		if (deltaCall.id) {
+			toolCallIndexById.set(deltaCall.id, deltaCall.index);
+		}
+		return deltaCall.index;
+	}
+
+	if (deltaCall.id) {
+		const existingIndex = toolCallIndexById.get(deltaCall.id);
+		if (existingIndex !== undefined) {
+			return existingIndex;
+		}
+	}
+
+	if (deltaToolCallCount > 1) {
+		const orderedIndex = deltaCallPosition;
+		const existingOrderedEntry = toolCallsBuffer[orderedIndex];
+		if (
+			!existingOrderedEntry ||
+			!existingOrderedEntry.id ||
+			!deltaCall.id ||
+			existingOrderedEntry.id === deltaCall.id
+		) {
+			if (deltaCall.id) {
+				toolCallIndexById.set(deltaCall.id, orderedIndex);
+			}
+			return orderedIndex;
+		}
+	}
+
+	const inferredIndex = inferStreamingToolCallIndex(toolCallsBuffer, deltaCall);
+	if (inferredIndex !== undefined) {
+		if (deltaCall.id) {
+			toolCallIndexById.set(deltaCall.id, inferredIndex);
+		}
+		return inferredIndex;
+	}
+
+	const nextIndex = getNextStreamingToolCallIndex(toolCallsBuffer);
+	if (deltaCall.id) {
+		toolCallIndexById.set(deltaCall.id, nextIndex);
+	}
+	return nextIndex;
+}
+
+export function applyStreamingToolCallDelta(
+	toolCallsBuffer: Record<number, StreamingToolCallBufferEntry>,
+	toolCallIndexById: Map<string, number>,
+	deltaCall: StreamingToolCallDelta,
+	deltaCallPosition: number,
+	deltaToolCallCount: number,
+): string {
+	const index = resolveStreamingToolCallIndex(
+		toolCallsBuffer,
+		toolCallIndexById,
+		deltaCall,
+		deltaCallPosition,
+		deltaToolCallCount,
+	);
+
+	if (!toolCallsBuffer[index]) {
+		toolCallsBuffer[index] = createStreamingToolCallBufferEntry();
+	}
+
+	if (deltaCall.id) {
+		toolCallsBuffer[index].id = deltaCall.id;
+		toolCallIndexById.set(deltaCall.id, index);
+	}
+
+	let deltaText = '';
+	if (deltaCall.function?.name) {
+		const mergedName = mergeStreamingToolCallField(
+			toolCallsBuffer[index].function.name,
+			deltaCall.function.name,
+		);
+		toolCallsBuffer[index].function.name = mergedName.value;
+		deltaText += mergedName.delta;
+	}
+
+	if (deltaCall.function?.arguments) {
+		const mergedArguments = mergeStreamingToolCallField(
+			toolCallsBuffer[index].function.arguments,
+			deltaCall.function.arguments,
+		);
+		toolCallsBuffer[index].function.arguments = mergedArguments.value;
+		deltaText += mergedArguments.delta;
+	}
+
+	return deltaText;
+}
+
+export function finalizeStreamingToolCalls(
+	toolCallsBuffer: Record<number, StreamingToolCallBufferEntry>,
+): ToolCall[] {
+	return Object.entries(toolCallsBuffer)
+		.sort(([left], [right]) => Number(left) - Number(right))
+		.map(([, toolCall]) => {
+			const rawArguments = toolCall.function.arguments.trim() || '{}';
+			const parseResult = parseJsonWithFix(rawArguments, {
+				toolName: toolCall.function.name || 'streaming tool call',
+				fallbackValue: {},
+				logWarning: true,
+				logError: true,
+			});
+
+			return {
+				...toolCall,
+				function: {
+					...toolCall.function,
+					arguments: JSON.stringify(parseResult.data || {}),
+				},
+			};
+		});
+}
+
 /**
  * Convert internal ChatMessage to OpenAI's message format
  * Supports both text-only and multimodal (text + images) messages
@@ -598,7 +822,7 @@ export async function* createStreamingChatCompletion(
 			// Use custom headers from options if provided, otherwise get from current config (supports profile override)
 			const customHeaders =
 				options.customHeaders || getCustomHeadersForConfig(config);
-			const vcpRequestHeaders = resolveVcpRequestHeaders(config);
+			const transportHeaders = resolveVcpRequestHeaders(config);
 
 			const fetchOptions = addProxyToFetchOptions(url, {
 				method: 'POST',
@@ -607,7 +831,7 @@ export async function* createStreamingChatCompletion(
 					Authorization: `Bearer ${config.apiKey}`,
 					'x-snow': getVersionHeader(),
 					...customHeaders,
-					...vcpRequestHeaders,
+					...transportHeaders,
 				},
 				body: JSON.stringify(requestBody),
 				signal: abortSignal,
@@ -645,7 +869,8 @@ export async function* createStreamingChatCompletion(
 			}
 
 			let contentBuffer = '';
-			let toolCallsBuffer: {[index: number]: any} = {};
+			let toolCallsBuffer: Record<number, StreamingToolCallBufferEntry> = {};
+			const toolCallIndexById = new Map<string, number>();
 			let hasToolCalls = false;
 			let usageData: UsageInfo | undefined;
 			let reasoningStarted = false; // Track if reasoning has started
@@ -715,43 +940,14 @@ export async function* createStreamingChatCompletion(
 				const deltaToolCalls = choice.delta?.tool_calls;
 				if (deltaToolCalls) {
 					hasToolCalls = true;
-					for (const deltaCall of deltaToolCalls) {
-						const index = deltaCall.index ?? 0;
-
-						if (!toolCallsBuffer[index]) {
-							toolCallsBuffer[index] = {
-								id: '',
-								type: 'function',
-								function: {
-									name: '',
-									arguments: '',
-								},
-							};
-						}
-
-						if (deltaCall.id) {
-							toolCallsBuffer[index].id = deltaCall.id;
-						}
-
-						// Yield tool call deltas for token counting
-						let deltaText = '';
-						if (deltaCall.function?.name) {
-							const mergedName = mergeStreamingToolCallField(
-								toolCallsBuffer[index].function.name,
-								deltaCall.function.name,
-							);
-							toolCallsBuffer[index].function.name = mergedName.value;
-							deltaText += mergedName.delta;
-						}
-						if (deltaCall.function?.arguments) {
-							const mergedArguments = mergeStreamingToolCallField(
-								toolCallsBuffer[index].function.arguments,
-								deltaCall.function.arguments,
-							);
-							toolCallsBuffer[index].function.arguments =
-								mergedArguments.value;
-							deltaText += mergedArguments.delta;
-						}
+					for (const [deltaCallPosition, deltaCall] of deltaToolCalls.entries()) {
+						const deltaText = applyStreamingToolCallDelta(
+							toolCallsBuffer,
+							toolCallIndexById,
+							deltaCall,
+							deltaCallPosition,
+							deltaToolCalls.length,
+						);
 
 						// Stream the delta to frontend for real-time token counting
 						if (deltaText) {
@@ -775,7 +971,7 @@ export async function* createStreamingChatCompletion(
 			if (hasToolCalls) {
 				yield {
 					type: 'tool_calls',
-					tool_calls: Object.values(toolCallsBuffer),
+					tool_calls: finalizeStreamingToolCalls(toolCallsBuffer),
 				};
 			}
 
