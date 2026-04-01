@@ -6,6 +6,7 @@ import {join} from 'path';
 const test = anyTest as any;
 
 import {
+	buildToolHistoryContent,
 	createTeamUserQuestionAdapter,
 	executeToolCall,
 	type ToolCall,
@@ -100,6 +101,114 @@ test('invalid concatenated tool arguments fail instead of truncating payload', a
 			'Error: Invalid tool arguments JSON for filesystem-read. Refusing to execute a malformed payload.',
 		),
 	);
+});
+
+test('buildToolHistoryContent strips bridge envelope noise and large details', (t: any) => {
+	const historyContent = buildToolHistoryContent(
+		{
+			requestId: 'request-1',
+			invocationId: 'invoke-1',
+			toolId: 'bridge-tool',
+			toolName: 'ServerFileOperator',
+			originName: 'ServerFileOperator',
+			status: 'success',
+			asyncStatus: {
+				enabled: false,
+				state: 'completed',
+				event: 'result',
+			},
+			result: {
+				content: [
+					{
+						type: 'text',
+						text: [
+							'Directory listing of `D:\\repo` (28 items)',
+							'',
+							'| 名称 | 类型 | 大小 |',
+							'|---|---|---|',
+							'| a | file | 1 |',
+							'| b | file | 2 |',
+							'| c | file | 3 |',
+							'| d | file | 4 |',
+							'| e | file | 5 |',
+							'| f | file | 6 |',
+							'| g | file | 7 |',
+							'| h | file | 8 |',
+							'| i | file | 9 |',
+							'| j | file | 10 |',
+							'| k | file | 11 |',
+							'| l | file | 12 |',
+							'| m | file | 13 |',
+							'| n | file | 14 |',
+							'| o | file | 15 |',
+							'| p | file | 16 |',
+							'| q | file | 17 |',
+							'| r | file | 18 |',
+							'| s | file | 19 |',
+							'| t | file | 20 |',
+							'| u | file | 21 |',
+							'| v | file | 22 |',
+							'| w | file | 23 |',
+						].join('\n'),
+					},
+				],
+				timestamp: '2026-04-01T15:18:25.747+08:00',
+			},
+			details: {
+				items: Array.from({length: 20}, (_, index) => ({name: `file-${index}`})),
+			},
+		},
+		'fallback tool text',
+	);
+
+	t.false(historyContent.includes('requestId'));
+	t.false(historyContent.includes('invocationId'));
+	t.false(historyContent.includes('"details"'));
+	t.false(historyContent.includes('"timestamp"'));
+	t.false(historyContent.includes('"type":"text"'));
+	t.true(historyContent.includes('"status":"success"'));
+	t.true(historyContent.includes('"asyncStatus"'));
+	t.true(historyContent.includes('Directory listing of `D:\\\\repo` (28 items)'));
+	t.true(historyContent.includes('[truncated'));
+});
+
+test('buildToolHistoryContent truncates oversized plain-text tool output', (t: any) => {
+	const historyContent = buildToolHistoryContent(
+		[
+			'line01',
+			'line02',
+			'line03',
+			'line04',
+			'line05',
+			'line06',
+			'line07',
+			'line08',
+			'line09',
+			'line10',
+			'line11',
+			'line12',
+			'line13',
+			'line14',
+			'line15',
+			'line16',
+			'line17',
+			'line18',
+			'line19',
+			'line20',
+			'line21',
+			'line22',
+			'line23',
+			'line24',
+			'line25',
+			'line26',
+		].join('\n'),
+		'fallback tool text',
+	);
+
+	t.true(historyContent.includes('line01'));
+	t.true(historyContent.includes('line24'));
+	t.false(historyContent.includes('line26'));
+	t.true(historyContent.includes('[truncated 2 more lines]'));
 });
 
 test.serial(

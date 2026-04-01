@@ -234,3 +234,43 @@ test('sendConnectedRequest includes Snow bridge request headers', async (t: any)
 	});
 	client.disconnect();
 });
+
+test('executeTool preserves the bridge status envelope for upper seams', async (t: any) => {
+	const client = new SnowBridgeClient() as any;
+
+	client.ensureConnected = async () => {};
+	client.sendConnectedRequest = async () => ({
+		status: 'success',
+		result: {
+			MaidName: 'Nova',
+			timestamp: '2026-04-01T12:02:51.374+08:00',
+		},
+		asyncStatus: {
+			enabled: false,
+			state: 'completed',
+			event: 'result',
+		},
+	});
+
+	const response = await client.executeTool({
+		config: bridgeConfig,
+		toolName: 'vcp-dailynote-create',
+		toolArgs: {
+			maid: 'Nova',
+			Date: '2026-04-01',
+			Content: 'Tag: SnowBridge',
+		},
+	});
+
+	t.is(response.status, 'success');
+	t.deepEqual(response.result, {
+		MaidName: 'Nova',
+		timestamp: '2026-04-01T12:02:51.374+08:00',
+	});
+	t.deepEqual(response.asyncStatus, {
+		enabled: false,
+		state: 'completed',
+		event: 'result',
+	});
+	client.disconnect();
+});

@@ -194,6 +194,7 @@ title:「始」Sunny Days「末」
 	t.false(tool?.function.description.includes('调用示例'));
 	t.false(tool?.function.description.includes('TOOL_REQUEST'));
 	t.false(tool?.function.description.includes('tool_name'));
+	t.true(tool?.function.description.includes('示例提示：歌词模式，不需要定义make_instrumental。'));
 });
 
 test('skip transport-like description parameters without hiding real user params', (t: any) => {
@@ -229,4 +230,36 @@ test('skip transport-like description parameters without hiding real user params
 		['mode', 'route'],
 	);
 	t.deepEqual(parameters?.['required'], ['route']);
+});
+
+test('mark description-derived schema as strict when command forbids extra parameters', (t: any) => {
+	const toolPlane = translateBridgeManifestToToolPlane({
+		plugins: [
+			{
+				name: 'WanVideoGen',
+				displayName: 'Wan Video Gen',
+				description: 'Video generation tools.',
+				pluginType: 'hybridservice',
+				bridgeCommands: [
+					{
+						command: 'submit_video',
+						description: `提交一个新的视频生成任务。
+严格按照以下格式和参数顺序调用。
+禁止包含任何其他参数。
+参数:
+- prompt (字符串, 必需): 视频提示词。
+- mode (字符串, 必需): t2v 或 i2v。`,
+						parameters: [],
+					},
+				],
+			},
+		],
+	});
+
+	const parameters = toolPlane.modelTools[0]?.function.parameters as
+		| Record<string, any>
+		| undefined;
+
+	t.false(parameters?.['additionalProperties']);
+	t.deepEqual(parameters?.['required'], ['prompt', 'mode']);
 });

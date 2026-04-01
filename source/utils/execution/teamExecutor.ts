@@ -844,7 +844,7 @@ ${role ? `Your role: ${role}` : ''}
 								messages.push({
 									role: 'tool' as const,
 									tool_call_id: tc.id,
-									content: result.content,
+									content: result.historyContent ?? result.content,
 								});
 							} catch (e: any) {
 								messages.push({
@@ -908,7 +908,7 @@ ${role ? `Your role: ${role}` : ''}
 							messages.push({
 								role: 'tool' as const,
 								tool_call_id: tc.id,
-								content: result.content,
+								content: result.historyContent ?? result.content,
 							});
 						} catch (e: any) {
 							messages.push({

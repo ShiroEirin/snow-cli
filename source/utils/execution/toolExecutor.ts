@@ -85,6 +85,7 @@ export interface ToolResult {
 	tool_call_id: string;
 	role: 'tool';
 	content: string;
+	historyContent?: string; // Compact content used when writing tool results into conversation history
 	images?: ImageContent[]; // Support multimodal content with images
 	editDiffData?: Record<string, any>; // Pre-extracted edit diff data for DiffViewer (survives token truncation)
 	messageStatus?: 'pending' | 'success' | 'error'; // Message status for UI rendering
@@ -122,6 +123,192 @@ export interface UserInteractionCallback {
 		customInput?: string;
 		cancelled?: boolean;
 	}>;
+}
+
+const TOOL_HISTORY_MAX_LINES = 24;
+const TOOL_HISTORY_MAX_CHARS = 1600;
+const TOOL_HISTORY_MAX_ARRAY_ITEMS = 5;
+const TOOL_HISTORY_MAX_DEPTH = 4;
+const TOOL_HISTORY_OMITTED_KEYS = new Set([
+	'requestId',
+	'invocationId',
+	'toolId',
+	'originName',
+	'details',
+	'timestamp',
+]);
+
+function summarizeToolHistoryText(text: string): string {
+	const normalized = text.replace(/\r\n?/g, '\n').trim();
+	if (!normalized) {
+		return '';
+	}
+
+	const lines = normalized.split('\n');
+	let summarized = normalized;
+
+	if (lines.length > TOOL_HISTORY_MAX_LINES) {
+		summarized =
+			lines.slice(0, TOOL_HISTORY_MAX_LINES).join('\n') +
+			`\n...[truncated ${lines.length - TOOL_HISTORY_MAX_LINES} more lines]`;
+	}
+
+	if (summarized.length > TOOL_HISTORY_MAX_CHARS) {
+		const remainingChars = summarized.length - TOOL_HISTORY_MAX_CHARS;
+		summarized =
+			summarized.slice(0, TOOL_HISTORY_MAX_CHARS) +
+			`...[truncated ${remainingChars} more chars]`;
+	}
+
+	return summarized;
+}
+
+function extractHistoryTextFromContentItems(items: MultimodalContent): string {
+	const parts: string[] = [];
+	let imageCount = 0;
+
+	for (const item of items) {
+		if (item.type === 'text' && item.text) {
+			parts.push(item.text);
+			continue;
+		}
+
+		if (item.type === 'image') {
+			imageCount++;
+		}
+	}
+
+	if (imageCount > 0) {
+		parts.push(`[${imageCount} image item${imageCount === 1 ? '' : 's'} omitted]`);
+	}
+
+	return summarizeToolHistoryText(parts.join('\n\n'));
+}
+
+function summarizeToolHistoryValue(value: any, depth = 0): any {
+	if (value === null || value === undefined) {
+		return value;
+	}
+
+	if (typeof value === 'string') {
+		return summarizeToolHistoryText(value);
+	}
+
+	if (
+		typeof value === 'number' ||
+		typeof value === 'boolean' ||
+		typeof value === 'bigint'
+	) {
+		return value;
+	}
+
+	if (depth >= TOOL_HISTORY_MAX_DEPTH) {
+		if (Array.isArray(value)) {
+			return `[Array(${value.length})]`;
+		}
+
+		if (typeof value === 'object') {
+			return `[Object(${Object.keys(value).length} keys)]`;
+		}
+	}
+
+	if (Array.isArray(value)) {
+		const summarizedItems = value
+			.slice(0, TOOL_HISTORY_MAX_ARRAY_ITEMS)
+			.map(item => summarizeToolHistoryValue(item, depth + 1));
+
+		if (value.length > TOOL_HISTORY_MAX_ARRAY_ITEMS) {
+			summarizedItems.push(
+				`[${value.length - TOOL_HISTORY_MAX_ARRAY_ITEMS} more items omitted]`,
+			);
+		}
+
+		return summarizedItems;
+	}
+
+	if (typeof value === 'object') {
+		const summarizedObject: Record<string, any> = {};
+
+		for (const [key, nestedValue] of Object.entries(value)) {
+			if (TOOL_HISTORY_OMITTED_KEYS.has(key)) {
+				continue;
+			}
+
+			if (key === 'content' && isMultimodalContent(nestedValue)) {
+				const flattenedContent = extractHistoryTextFromContentItems(nestedValue);
+				if (flattenedContent) {
+					summarizedObject[key] = flattenedContent;
+				}
+				continue;
+			}
+
+			if (
+				key === 'asyncStatus' &&
+				nestedValue &&
+				typeof nestedValue === 'object' &&
+				!Array.isArray(nestedValue)
+			) {
+				summarizedObject[key] = {
+					enabled: (nestedValue as any).enabled,
+					state: (nestedValue as any).state,
+					event: (nestedValue as any).event,
+				};
+				continue;
+			}
+
+			const summarizedValue = summarizeToolHistoryValue(nestedValue, depth + 1);
+			if (
+				summarizedValue === '' ||
+				summarizedValue === undefined ||
+				(Array.isArray(summarizedValue) && summarizedValue.length === 0)
+			) {
+				continue;
+			}
+
+			summarizedObject[key] = summarizedValue;
+		}
+
+		return summarizedObject;
+	}
+
+	return String(value);
+}
+
+export function buildToolHistoryContent(
+	result: any,
+	fallbackTextContent: string,
+): string {
+	if (isMultimodalContent(result)) {
+		return extractHistoryTextFromContentItems(result);
+	}
+
+	if (typeof result === 'string') {
+		return summarizeToolHistoryText(result);
+	}
+
+	if (result === null || result === undefined) {
+		return summarizeToolHistoryText(fallbackTextContent);
+	}
+
+	if (typeof result !== 'object') {
+		return summarizeToolHistoryText(String(result));
+	}
+
+	const summarizedValue = summarizeToolHistoryValue(result);
+	if (
+		summarizedValue &&
+		typeof summarizedValue === 'object' &&
+		!Array.isArray(summarizedValue) &&
+		Object.keys(summarizedValue).length > 0
+	) {
+		return JSON.stringify(summarizedValue);
+	}
+
+	if (Array.isArray(summarizedValue) && summarizedValue.length > 0) {
+		return JSON.stringify(summarizedValue);
+	}
+
+	return summarizeToolHistoryText(fallbackTextContent);
 }
 
 export function createTeamUserQuestionAdapter(
@@ -544,6 +731,7 @@ export async function executeToolCall(
 					tool_call_id: toolCall.id,
 					role: 'tool',
 					content: textContent,
+					historyContent: buildToolHistoryContent(toolResult, textContent),
 					images,
 				};
 				return result;
@@ -603,6 +791,7 @@ export async function executeToolCall(
 				tool_call_id: toolCall.id,
 				role: 'tool',
 				content: textContent,
+				historyContent: buildToolHistoryContent(toolResult, textContent),
 				images,
 				editDiffData,
 			};
@@ -735,6 +924,10 @@ export async function executeToolCall(
 
 						if (result && typeof result.content === 'string') {
 							result.content = replacedContent;
+							result.historyContent = buildToolHistoryContent(
+								replacedContent,
+								replacedContent,
+							);
 						}
 					} else if (exitCode >= 2 || exitCode < 0) {
 						// Exit code 2+: Set hookFailed flag on result

@@ -8,6 +8,14 @@ type BridgeEnvelope<T = unknown> = {
 	data?: T;
 };
 
+export type BridgeToolExecutionResponse = {
+	status: string;
+	result?: unknown;
+	error?: {message?: string};
+	asyncStatus?: Record<string, unknown>;
+	[key: string]: unknown;
+};
+
 type BridgePendingRequest = {
 	resolve: (value: any) => void;
 	reject: (error: Error) => void;
@@ -443,7 +451,7 @@ export class SnowBridgeClient {
 		toolArgs: Record<string, unknown>;
 		onStatus?: BridgeStatusListener;
 		abortSignal?: AbortSignal;
-	}): Promise<unknown> {
+	}): Promise<BridgeToolExecutionResponse> {
 		const requestId = randomUUID();
 		const invocationId = requestId;
 		const abortMessage = `SnowBridge tool execution aborted: ${options.toolName}`;
@@ -496,11 +504,7 @@ export class SnowBridgeClient {
 				throw new Error(abortMessage);
 			}
 
-			const response = await this.sendConnectedRequest<{
-				status: string;
-				result?: unknown;
-				error?: {message?: string};
-			}>({
+			const response = await this.sendConnectedRequest<BridgeToolExecutionResponse>({
 				config: options.config,
 				type: 'execute_vcp_tool',
 				expectedType: 'vcp_tool_result',
@@ -536,7 +540,7 @@ export class SnowBridgeClient {
 				throw new Error(response.error?.message || 'SnowBridge tool execution failed.');
 			}
 
-			return response.result;
+			return response;
 		} finally {
 			this.pendingStatusListeners.delete(invocationId);
 			options.abortSignal?.removeEventListener('abort', abortHandler);

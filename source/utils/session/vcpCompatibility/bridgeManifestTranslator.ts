@@ -301,6 +301,31 @@ function isLegacySectionStart(line: string): boolean {
 	);
 }
 
+function extractLegacySectionHint(line: string): string | null {
+	const normalizedLine = String(line || '').trim();
+	if (!normalizedLine) {
+		return null;
+	}
+
+	const parenthesizedHint =
+		/[（(]([^)）]+)[)）]\s*[:：]?\**$/u.exec(normalizedLine)?.[1]?.trim() ||
+		'';
+	if (parenthesizedHint) {
+		return `示例提示：${parenthesizedHint.replace(/[。；;:：]+$/u, '')}。`;
+	}
+
+	const colonHint =
+		/[:：]\s*(.+?)\**$/u.exec(normalizedLine)?.[1]?.trim() || '';
+	if (
+		colonHint &&
+		!/(?:TOOL_REQUEST|END_TOOL_REQUEST|tool_name|「始」|「末」)/i.test(colonHint)
+	) {
+		return `调用提示：${colonHint.replace(/[。；;:：]+$/u, '')}。`;
+	}
+
+	return null;
+}
+
 function isLegacyProtocolLine(line: string): boolean {
 	return (
 		/(<<<\[(?:TOOL_REQUEST|END_TOOL_REQUEST|TOOL_REQUEST_EXP|END_TOOL_REQUEST_EXP)\]>>>)/i.test(
@@ -350,6 +375,13 @@ function sanitizeBridgeText(text: string): string {
 		}
 
 		if (isLegacySectionStart(line)) {
+			const legacyHint = extractLegacySectionHint(line);
+			if (
+				legacyHint &&
+				!sanitizedLines.includes(legacyHint)
+			) {
+				sanitizedLines.push(legacyHint);
+			}
 			skippingLegacyBlock = true;
 			continue;
 		}
@@ -362,6 +394,19 @@ function sanitizeBridgeText(text: string): string {
 	}
 
 	return sanitizedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function hasStrictDescriptionContract(description: string): boolean {
+	const normalizedDescription = normalizeBridgeTextInput(description).toLowerCase();
+	return (
+		/不要包含任何未列出的参数|不要包含任何其他参数|禁止包含任何其他参数/u.test(
+			normalizedDescription,
+		) ||
+		/do not include any (?:other|unlisted) parameters/.test(
+			normalizedDescription,
+		) ||
+		/strictly (?:according to|follow)/.test(normalizedDescription)
+	);
 }
 
 function extractParameterDefinitionsFromDescription(
@@ -428,6 +473,9 @@ function buildModelDescription(options: {
 
 function buildParametersSchema(
 	parameterDefinitions: BridgeToolParameterDefinition[],
+	options?: {
+		strictDescriptionContract?: boolean;
+	},
 ): Record<string, unknown> {
 	const properties: Record<string, unknown> = {};
 	const required: string[] = [];
@@ -441,7 +489,8 @@ function buildParametersSchema(
 
 	const isStrictSchema =
 		parameterDefinitions.length > 0 &&
-		parameterDefinitions.every(parameter => parameter.source === 'structured');
+		(parameterDefinitions.every(parameter => parameter.source === 'structured') ||
+			options?.strictDescriptionContract === true);
 
 	return {
 		type: 'object',
@@ -505,7 +554,11 @@ export function translateBridgeManifestToToolPlane(
 			const stringifyArgumentNames = parameterDefinitions
 				.filter(parameter => parameter.source === 'description')
 				.map(parameter => parameter.name);
-			const parameters = buildParametersSchema(parameterDefinitions);
+			const parameters = buildParametersSchema(parameterDefinitions, {
+				strictDescriptionContract:
+					structuredParameterDefinitions.length === 0 &&
+					hasStrictDescriptionContract(command.description || ''),
+			});
 
 			modelTools.push({
 				type: 'function',

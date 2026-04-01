@@ -2766,7 +2766,10 @@ You have access to these collaboration tools:
 						undefined,
 						subAgentToolPlaneKey,
 					);
-					toolResults.push(toolResult as ChatMessage);
+					toolResults.push({
+						...toolResult,
+						content: toolResult.historyContent ?? toolResult.content,
+					} as ChatMessage);
 
 					// Send tool result to UI
 					if (onMessage) {

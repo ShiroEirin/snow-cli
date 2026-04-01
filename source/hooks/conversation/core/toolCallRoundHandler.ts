@@ -9,6 +9,7 @@ import {processToolCallsAfterStream} from './toolCallProcessor.js';
 import {resolveToolConfirmations} from './toolConfirmationFlow.js';
 import {handleAutoCompression} from './autoCompressHandler.js';
 import {buildToolResultMessages} from './toolResultDisplay.js';
+import {buildHistoryToolMessage} from './toolResultHistory.js';
 import {SubAgentUIHandler} from './subAgentMessageHandler.js';
 import {handlePendingMessages} from './pendingMessagesHandler.js';
 import {connectionManager} from '../../../utils/connection/ConnectionManager.js';
@@ -220,8 +221,9 @@ export async function handleToolCallRound(ctx: {
 	if (hookFailedResult) {
 		for (const result of toolResults) {
 			const {hookFailed, ...resultWithoutFlag} = result;
-			conversationMessages.push(resultWithoutFlag);
-			saveMessage(resultWithoutFlag).catch(error => {
+			const historyMessage = buildHistoryToolMessage(resultWithoutFlag);
+			conversationMessages.push(historyMessage);
+			saveMessage(historyMessage).catch(error => {
 				console.error('Failed to save tool result:', error);
 			});
 		}
@@ -268,10 +270,10 @@ export async function handleToolCallRound(ctx: {
 
 	for (const result of toolResults) {
 		const isError = result.content.startsWith('Error:');
-		const resultToSave = {
-			...result,
-			messageStatus: isError ? 'error' : 'success',
-		};
+		const resultToSave = buildHistoryToolMessage(
+			result,
+			isError ? 'error' : 'success',
+		);
 		conversationMessages.push(resultToSave as any);
 		try {
 			await saveMessage(resultToSave as any);
