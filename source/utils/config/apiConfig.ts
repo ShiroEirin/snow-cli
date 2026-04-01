@@ -61,7 +61,7 @@ export interface ApiConfig {
 	customHeadersSchemeId?: string;
 	// 文件搜索编辑相似度阈值 (0.0-1.0, 默认: 0.75, 建议非必要不修改)
 	editSimilarityThreshold?: number;
-	// 工具返回结果的最大 token 限制 (默认: 100000)
+	// 工具返回结果的最大 token 限制百分比，基于 maxContextTokens (默认: 30%, 范围: 1-100)
 	toolResultTokenLimit?: number;
 	// 流式逐行显示 AI 回复 (默认: false)
 	streamingDisplay?: boolean;
@@ -131,7 +131,9 @@ export interface CustomHeadersConfig {
 
 export const DEFAULT_STREAM_IDLE_TIMEOUT_SEC = 180;
 export const DEFAULT_AUTO_COMPRESS_THRESHOLD = 80;
-
+export const DEFAULT_TOOL_RESULT_TOKEN_LIMIT_PERCENT = 30;
+export const MAX_TOOL_RESULT_TOKEN_LIMIT_PERCENT = 80;
+export const MIN_TOOL_RESULT_TOKEN_LIMIT_PERCENT = 20;
 function normalizeStreamIdleTimeoutSec(value: unknown): number {
 	if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
 		return DEFAULT_STREAM_IDLE_TIMEOUT_SEC;
@@ -373,6 +375,20 @@ export function loadConfig(): AppConfig {
 		}
 
 		// 如果是从旧版本迁移过来的，保存新配置（移除 proxy 字段）
+
+		// 检测并迁移旧版本的 toolResultTokenLimit (数值写法 -> 百分比写法)
+		// 旧版本使用绝对数值 (如 100000)，新版本使用百分比 (1-100)
+		if (
+			typeof apiConfig.toolResultTokenLimit === 'number' &&
+			apiConfig.toolResultTokenLimit > MAX_TOOL_RESULT_TOKEN_LIMIT_PERCENT
+		) {
+			// 旧版本数值，转换为百分比 (默认 30%)
+			apiConfig.toolResultTokenLimit = DEFAULT_TOOL_RESULT_TOKEN_LIMIT_PERCENT;
+			mergedConfig.snowcfg = apiConfig;
+			// 静默保存新配置
+			saveConfig(mergedConfig);
+		}
+
 		if (
 			legacyMcp !== undefined ||
 			legacyProxy !== undefined ||

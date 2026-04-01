@@ -17,6 +17,7 @@ import {
 	getToolExecutionBinding,
 	type ToolExecutionBinding,
 } from '../session/vcpCompatibility/toolExecutionBinding.js';
+import {rewriteToolArgsForWorktree} from '../team/teamWorktree.js';
 
 export interface TeammateExecutionOptions {
 	onMessage?: (message: SubAgentMessage) => void;
@@ -310,6 +311,14 @@ You are teammate "${memberName}" in team "${teamName}".
 Your working directory (Git worktree): ${worktreePath}
 ${role ? `Your role: ${role}` : ''}
 
+### ⚠️ Worktree Path Rules (ENFORCED)
+- ALL file operations are restricted to YOUR worktree: \`${worktreePath}\`
+- Use **relative paths** (e.g., \`src/utils/foo.ts\`) — they are automatically resolved to your worktree.
+- You CANNOT read or write files in the main workspace or other teammates' worktrees.
+- When users or task descriptions mention file paths, treat them as relative to your worktree.
+- \`terminal-execute\` commands always run inside your worktree directory.
+- \`git push\` is forbidden — the lead handles all pushes after merging.
+
 ### Other Teammates`;
 
 		if (otherTeammates.length > 0) {
@@ -345,6 +354,7 @@ ${role ? `Your role: ${role}` : ''}
 ### Rules
 - You do NOT shut yourself down — the team lead controls your lifecycle.
 - **NEVER run \`git push\`.** All pushes are handled by the lead after merging.
+- **ALL file paths must be relative to your worktree** (\`${worktreePath}\`). Absolute paths pointing to the main workspace will be automatically remapped. Paths outside both your worktree and the main workspace will be rejected.
 - **When you finish all assigned work, you MUST call \`wait_for_messages\` with a summary.** This notifies the lead and efficiently blocks until new instructions arrive. Do NOT end your turn without calling \`wait_for_messages\`.`;
 
 		if (requirePlanApproval) {
@@ -829,8 +839,34 @@ ${role ? `Your role: ${role}` : ''}
 						// Fall through to execute non-blocked calls
 						for (const tc of nonBlockedCalls) {
 							try {
+								let toolArgs: any = {};
+								try {
+									toolArgs = JSON.parse(tc.function.arguments || '{}');
+								} catch {
+									toolArgs = {};
+								}
+								const rwResult = rewriteToolArgsForWorktree(
+									tc.function.name,
+									toolArgs,
+									worktreePath,
+								);
+								if (rwResult.error) {
+									messages.push({
+										role: 'tool' as const,
+										tool_call_id: tc.id,
+										content: `Error: ${rwResult.error}`,
+									});
+									continue;
+								}
+								const rewrittenCall = {
+									...tc,
+									function: {
+										...tc.function,
+										arguments: JSON.stringify(rwResult.args),
+									},
+								};
 								const result = await executeToolCall(
-									tc,
+									rewrittenCall,
 									abortSignal,
 									undefined,
 									onMessage,
@@ -893,8 +929,28 @@ ${role ? `Your role: ${role}` : ''}
 
 					if (approved) {
 						try {
+							const rwResult = rewriteToolArgsForWorktree(
+								toolName,
+								toolArgs,
+								worktreePath,
+							);
+							if (rwResult.error) {
+								messages.push({
+									role: 'tool' as const,
+									tool_call_id: tc.id,
+									content: `Error: ${rwResult.error}`,
+								});
+								continue;
+							}
+							const rewrittenCall = {
+								...tc,
+								function: {
+									...tc.function,
+									arguments: JSON.stringify(rwResult.args),
+								},
+							};
 							const result = await executeToolCall(
-								tc,
+								rewrittenCall,
 								abortSignal,
 								undefined,
 								onMessage,

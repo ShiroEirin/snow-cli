@@ -412,6 +412,9 @@ type CommandHandlerOptions = {
 	setShowRoleCreation: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowRoleDeletion: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowRoleList: React.Dispatch<React.SetStateAction<boolean>>;
+	setShowRoleSubagentCreation: React.Dispatch<React.SetStateAction<boolean>>;
+	setShowRoleSubagentDeletion: React.Dispatch<React.SetStateAction<boolean>>;
+	setShowRoleSubagentList: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowWorkingDirPanel: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowReviewCommitPanel: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowDiffReviewPanel: React.Dispatch<React.SetStateAction<boolean>>;
@@ -450,6 +453,7 @@ type CommandHandlerOptions = {
 		useBasicModel?: boolean,
 		hideUserMessage?: boolean,
 	) => Promise<void>;
+	setBtwPrompt: React.Dispatch<React.SetStateAction<string | null>>;
 	onQuit?: () => void;
 	onReindexCodebase?: (force?: boolean) => Promise<void>;
 	onToggleCodebase?: (mode?: string) => Promise<void>;
@@ -762,6 +766,39 @@ export function useCommandHandler(options: CommandHandlerOptions) {
 				options.setMessages(prev => [...prev, commandMessage]);
 			} else if (result.success && result.action === 'showRoleList') {
 				options.setShowRoleList(true);
+				const commandMessage: Message = {
+					role: 'command',
+					content: '',
+					commandName: commandName,
+				};
+				options.setMessages(prev => [...prev, commandMessage]);
+			} else if (
+				result.success &&
+				result.action === 'showRoleSubagentCreation'
+			) {
+				options.setShowRoleSubagentCreation(true);
+				const commandMessage: Message = {
+					role: 'command',
+					content: '',
+					commandName: commandName,
+				};
+				options.setMessages(prev => [...prev, commandMessage]);
+			} else if (
+				result.success &&
+				result.action === 'showRoleSubagentDeletion'
+			) {
+				options.setShowRoleSubagentDeletion(true);
+				const commandMessage: Message = {
+					role: 'command',
+					content: '',
+					commandName: commandName,
+				};
+				options.setMessages(prev => [...prev, commandMessage]);
+			} else if (
+				result.success &&
+				result.action === 'showRoleSubagentList'
+			) {
+				options.setShowRoleSubagentList(true);
 				const commandMessage: Message = {
 					role: 'command',
 					content: '',
@@ -1205,6 +1242,12 @@ export function useCommandHandler(options: CommandHandlerOptions) {
 					};
 					options.setMessages(prev => [...prev, errorMessage]);
 				}
+			} else if (
+				result.success &&
+				result.action === 'btw' &&
+				result.prompt
+			) {
+				options.setBtwPrompt(result.prompt);
 			} else if (result.success && result.action === 'toggleCodebase') {
 				// Handle toggle codebase command
 				if (options.onToggleCodebase) {

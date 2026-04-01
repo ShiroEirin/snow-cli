@@ -214,7 +214,11 @@ export const en: TranslationKeys = {
 		maxContextTokens: 'Max Context Tokens:',
 		maxTokens: 'Max Tokens:',
 		streamIdleTimeoutSec: 'Stream Idle Timeout(sec):',
-		toolResultTokenLimit: 'Tool Result Token Limit:',
+		toolResultTokenLimit: 'Tool Result Limit (%):',
+		toolResultTokenLimitHint:
+			'Algorithm: maxContextTokens × {percentage}% = {actualLimit} tokens',
+		toolResultTokenLimitDesc:
+			'Limits tool result as % of context window (recommended 20-40%, too low truncates, too high fills context)',
 		editSimilarityThreshold:
 			'Edit Similarity Threshold(0-1, change with caution):',
 		notSet: 'Not set',
@@ -587,6 +591,8 @@ export const en: TranslationKeys = {
 			gitline:
 				'Select git commits and insert their content into the current chat input',
 			role: 'Open or create ROLE.md file to customize AI assistant role. Use -l or --list to list all roles',
+			roleSubagent:
+				'Customize sub-agent prompts with ROLE-{name}.md files. Use -l to list, -d to delete',
 			usage: 'View token usage statistics with interactive charts',
 			export: 'Export chat conversation to text file with save dialog',
 			custom: 'Add custom command and save to ~/.snow/commands',
@@ -624,6 +630,7 @@ export const en: TranslationKeys = {
 			disconnect: 'Disconnect from the current Snow Instance',
 			connectionStatus: 'Show current Snow Instance connection status',
 			newPrompt: 'Generate a refined prompt from your requirement using AI',
+			btw: 'Ask a side-question while AI is working (temporary, no context saved)',
 			quit: 'Exit the application',
 		},
 		copyLastFeedback: {
@@ -1257,6 +1264,62 @@ export const en: TranslationKeys = {
 		confirmDeleteHint: 'Press Y to confirm, N to cancel',
 	},
 
+	roleSubagentCreation: {
+		title: 'Create Sub-Agent Role',
+		locationLabel: 'Select Location:',
+		locationGlobal: 'Global (~/.snow/)',
+		locationGlobalInfo: 'Available across all projects',
+		locationProject: 'Project (project root)',
+		locationProjectInfo: 'Only available in this project',
+		selectAgentLabel: 'Select Sub-Agent:',
+		selectAgentHint: '↑↓: Navigate | Enter: Select | ESC: Back',
+		noAvailableAgents:
+			'All sub-agents already have role files at this location.',
+		agentLabel: 'Sub-Agent:',
+		fileLabel: 'File:',
+		confirmQuestion: 'Create this role file?',
+		confirmYes: 'Yes, Create',
+		confirmNo: 'No, Cancel',
+		escCancel: 'Press ESC to cancel',
+		createSuccessMessage:
+			'Created sub-agent role successfully! | Agent: {agent} | Location: {location} | Path: {path}',
+		createErrorMessage: 'Failed to create sub-agent role: {error}',
+		errorUnknown: 'Unknown error',
+	},
+	roleSubagentDeletion: {
+		title: 'Delete Sub-Agent Role',
+		locationLabel: 'Select Location:',
+		locationGlobal: 'Global (~/.snow/)',
+		locationGlobalInfo: 'Sub-agent role files for all projects',
+		locationProject: 'Project (project root)',
+		locationProjectInfo: 'Sub-agent role files for current project only',
+		selectRoleLabel: 'Select role file to delete:',
+		selectRoleHint: '↑↓: Navigate | Enter: Select | ESC: Back',
+		noRoleFiles: 'No sub-agent role files found at this location.',
+		fileLabel: 'File:',
+		confirmQuestion: 'Confirm deletion?',
+		confirmYes: 'Yes, Delete',
+		confirmNo: 'No, Cancel',
+		escCancel: 'Press ESC to cancel',
+		deleteSuccessMessage:
+			'Deleted sub-agent role successfully! | Agent: {agent} | Location: {location} | Path: {path}',
+		deleteErrorMessage: 'Failed to delete sub-agent role: {error}',
+		errorNotFound: 'Sub-agent role file does not exist',
+		errorUnknown: 'Unknown error',
+	},
+	roleSubagentList: {
+		title: 'Sub-Agent Role Management',
+		tabGlobal: 'Global',
+		tabProject: 'Project',
+		noRoles:
+			'No sub-agent role files found. Use /role-subagent to create one.',
+		deleteSuccess: 'Role file deleted successfully',
+		loading: 'Processing...',
+		hints: 'Tab: Switch scope | D: Delete | ESC: Close',
+		confirmDelete: 'Confirm delete role for "{name}"?',
+		confirmDeleteHint: 'Press Y to confirm, N to cancel',
+	},
+
 	branchPanel: {
 		title: 'Git Branch Management',
 		notGitRepo:
@@ -1496,7 +1559,11 @@ export const en: TranslationKeys = {
 		moreAbove: '{count} more above',
 		moreBelow: '{count} more below',
 		toolsListTitle: '{service} - Tool List',
-		toolsNavigationHint: '↑↓ Navigate • ESC Back',
+		toolsNavigationHint: '↑↓ Navigate • Tab Toggle Tool (Global/Project) • ESC Back',
+		toolTogglingHint: 'Toggling tool {tool}...',
+		toolDisabled: '(Disabled)',
+		toolScopeGlobal: '[Global]',
+		toolScopeProject: '[Project]',
 		mcpSourceProject: ' [Project]',
 		mcpSourceGlobal: ' [Global]',
 	},
@@ -1505,10 +1572,12 @@ export const en: TranslationKeys = {
 		scopeProject: 'Project Config',
 		scopeGlobal: 'Global Config',
 		navigationHint: '↑↓ Navigate • Enter Edit • ESC Back',
-		savedSuccess: '{scope} MCP configuration saved successfully! Please use `snow` restart!',
+		savedSuccess:
+			'{scope} MCP configuration saved successfully! Please use `snow` restart!',
 		configErrors: 'Configuration errors: {errors}',
 		reverted: 'Changes have been reverted to the previous valid configuration.',
-		invalidJson: 'Invalid JSON format. Changes have been reverted to the previous valid configuration.',
+		invalidJson:
+			'Invalid JSON format. Changes have been reverted to the previous valid configuration.',
 	},
 	runningAgentsPanel: {
 		title: 'Running Agents',
@@ -1581,6 +1650,14 @@ export const en: TranslationKeys = {
 		actionRegenerate: 'Regenerate',
 		actionRetry: 'Retry',
 		actionCancel: 'Cancel',
+		errorPrefix: 'Error: ',
+		scrollHint: '↑↓ Scroll',
+	},
+	btw: {
+		title: '✦ BTW',
+		thinking: 'Thinking...',
+		escHint: 'ESC to cancel',
+		actionClose: 'Close',
 		errorPrefix: 'Error: ',
 		scrollHint: '↑↓ Scroll',
 	},

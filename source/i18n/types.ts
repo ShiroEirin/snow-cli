@@ -201,6 +201,8 @@ export type TranslationKeys = {
 		maxTokens: string;
 		streamIdleTimeoutSec: string;
 		toolResultTokenLimit: string;
+		toolResultTokenLimitHint: string;
+		toolResultTokenLimitDesc: string;
 		editSimilarityThreshold: string;
 		notSet: string;
 		enabled: string;
@@ -553,6 +555,7 @@ export type TranslationKeys = {
 			review: string;
 			gitline: string;
 			role: string;
+			roleSubagent: string;
 			usage: string;
 			backend: string;
 			loop: string;
@@ -581,6 +584,7 @@ export type TranslationKeys = {
 			disconnect: string;
 			connectionStatus: string;
 			newPrompt: string;
+			btw: string;
 			quit: string;
 		};
 		copyLastFeedback: {
@@ -1175,6 +1179,57 @@ export type TranslationKeys = {
 		confirmDelete: string;
 		confirmDeleteHint: string;
 	};
+	roleSubagentCreation: {
+		title: string;
+		locationLabel: string;
+		locationGlobal: string;
+		locationGlobalInfo: string;
+		locationProject: string;
+		locationProjectInfo: string;
+		selectAgentLabel: string;
+		selectAgentHint: string;
+		noAvailableAgents: string;
+		agentLabel: string;
+		fileLabel: string;
+		confirmQuestion: string;
+		confirmYes: string;
+		confirmNo: string;
+		escCancel: string;
+		createSuccessMessage: string;
+		createErrorMessage: string;
+		errorUnknown: string;
+	};
+	roleSubagentDeletion: {
+		title: string;
+		locationLabel: string;
+		locationGlobal: string;
+		locationGlobalInfo: string;
+		locationProject: string;
+		locationProjectInfo: string;
+		selectRoleLabel: string;
+		selectRoleHint: string;
+		noRoleFiles: string;
+		fileLabel: string;
+		confirmQuestion: string;
+		confirmYes: string;
+		confirmNo: string;
+		escCancel: string;
+		deleteSuccessMessage: string;
+		deleteErrorMessage: string;
+		errorNotFound: string;
+		errorUnknown: string;
+	};
+	roleSubagentList: {
+		title: string;
+		tabGlobal: string;
+		tabProject: string;
+		noRoles: string;
+		deleteSuccess: string;
+		loading: string;
+		hints: string;
+		confirmDelete: string;
+		confirmDeleteHint: string;
+	};
 	// Branch Panel
 	branchPanel: {
 		title: string;
@@ -1405,6 +1460,10 @@ export type TranslationKeys = {
 		moreBelow: string;
 		toolsListTitle: string;
 		toolsNavigationHint: string;
+		toolTogglingHint: string;
+		toolDisabled: string;
+		toolScopeGlobal: string;
+		toolScopeProject: string;
 		mcpSourceProject: string;
 		mcpSourceGlobal: string;
 	};
@@ -1488,6 +1547,14 @@ export type TranslationKeys = {
 		actionRegenerate: string;
 		actionRetry: string;
 		actionCancel: string;
+		errorPrefix: string;
+		scrollHint: string;
+	};
+	btw: {
+		title: string;
+		thinking: string;
+		escHint: string;
+		actionClose: string;
 		errorPrefix: string;
 		scrollHint: string;
 	};

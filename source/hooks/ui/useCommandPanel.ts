@@ -51,10 +51,16 @@ export function useCommandPanel(buffer: TextBuffer, isProcessing = false) {
 					t.commandPanel.commands.gitline ||
 					'Select git commits and insert them into the chat input',
 			},
-			{
-				name: 'role',
-				description: t.commandPanel.commands.role,
-			},
+		{
+			name: 'role',
+			description: t.commandPanel.commands.role,
+		},
+		{
+			name: 'role-subagent',
+			description:
+				t.commandPanel.commands.roleSubagent ||
+				'Customize sub-agent prompts with ROLE-{name}.md files. Use -l to list, -d to delete',
+		},
 			{
 				name: 'usage',
 				description: t.commandPanel.commands.usage,
@@ -201,19 +207,27 @@ export function useCommandPanel(buffer: TextBuffer, isProcessing = false) {
 					t.commandPanel.commands.team ||
 					'Toggle Agent Team mode - orchestrate multiple agents working together',
 			},
-			{
-				name: 'quit',
-				description: t.commandPanel.commands.quit,
-			},
-		],
-		[t],
-	);
+		{
+			name: 'quit',
+			description: t.commandPanel.commands.quit,
+		},
+		{
+			name: 'btw',
+			description:
+				t.commandPanel.commands.btw ||
+				'Ask a side-question while AI is working (temporary, no context saved)',
+			allowDuringProcessing: true,
+		},
+	],
+	[t],
+);
 
 	const normalizedBuiltInCommands = useMemo<CommandPanelCommand[]>(
 		() =>
 			builtInCommands.map(command => ({
-				...command,
-				type: 'builtin',
+				name: command.name,
+				description: command.description,
+				type: (command as any).allowDuringProcessing ? 'prompt' : 'builtin',
 			})),
 		[builtInCommands],
 	);
