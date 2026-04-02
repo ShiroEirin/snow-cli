@@ -168,6 +168,7 @@ export const zhTW: TranslationKeys = {
 		toolTransportLocal: 'Local tools（Snow 本地/MCP）',
 		toolTransportBridge: 'SnowBridge（VCP 工具橋接）',
 		toolTransportHybrid: 'Hybrid（本地工具 + SnowBridge）',
+		bridgeWsUrl: 'SnowBridge WebSocket 位址（可覆蓋 Base URL 推導）:',
 		bridgeVcpKey: 'SnowBridge VCP_Key（搭配 Base URL）:',
 		bridgeAccessToken: 'SnowBridge Access Token（可選）:',
 		anthropicBeta: 'Anthropic Beta:',

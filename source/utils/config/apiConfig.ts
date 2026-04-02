@@ -33,6 +33,7 @@ export interface ApiConfig {
 	requestMethod: RequestMethod;
 	backendMode?: BackendMode;
 	toolTransport?: ToolTransport;
+	bridgeWsUrl?: string;
 	bridgeVcpKey?: string;
 	bridgeAccessToken?: string;
 	advancedModel?: string;
@@ -483,6 +484,19 @@ export function validateApiConfig(config: Partial<ApiConfig>): string[] {
 		errors.push('Invalid base URL format');
 	}
 
+	if (config.bridgeWsUrl) {
+		if (!isValidUrl(config.bridgeWsUrl)) {
+			errors.push('Invalid SnowBridge WebSocket URL format');
+		} else {
+			const protocol = new URL(config.bridgeWsUrl).protocol;
+			if (protocol !== 'ws:' && protocol !== 'wss:') {
+				errors.push(
+					'SnowBridge WebSocket URL must use ws:// or wss:// protocol',
+				);
+			}
+		}
+	}
+
 	if (config.apiKey && config.apiKey.trim().length === 0) {
 		errors.push('API key cannot be empty');
 	}
@@ -491,9 +505,15 @@ export function validateApiConfig(config: Partial<ApiConfig>): string[] {
 		config.toolTransport === 'bridge' ||
 		config.toolTransport === 'hybrid'
 	) {
-		if (!config.bridgeVcpKey || config.bridgeVcpKey.trim().length === 0) {
+		const hasBridgeWsOverride =
+			typeof config.bridgeWsUrl === 'string' &&
+			config.bridgeWsUrl.trim().length > 0;
+		if (
+			!hasBridgeWsOverride &&
+			(!config.bridgeVcpKey || config.bridgeVcpKey.trim().length === 0)
+		) {
 			errors.push(
-				'bridgeVcpKey is required when toolTransport is set to bridge or hybrid',
+				'bridgeVcpKey is required when toolTransport is set to bridge or hybrid unless bridgeWsUrl is provided',
 			);
 		}
 	}

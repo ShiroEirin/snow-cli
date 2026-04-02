@@ -32,6 +32,8 @@ import {
 	type ProfileMode,
 	type RequestMethodOption,
 	MAX_VISIBLE_FIELDS,
+	shouldShowBridgeCredentialFields,
+	shouldShowToolTransportField,
 	stripFocusArtifacts,
 } from './types.js';
 import {isVcpModeEnabled} from '../../../utils/session/vcpCompatibility/mode.js';
@@ -58,6 +60,7 @@ export function useConfigState() {
 	>(undefined);
 	const [backendMode, setBackendMode] = useState<BackendMode>('native');
 	const [toolTransport, setToolTransport] = useState<ToolTransport>('local');
+	const [bridgeWsUrl, setBridgeWsUrl] = useState('');
 	const [bridgeVcpKey, setBridgeVcpKey] = useState('');
 	const [bridgeAccessToken, setBridgeAccessToken] = useState('');
 	const [systemPromptId, setSystemPromptId] = useState<
@@ -153,6 +156,11 @@ export function useConfigState() {
 	];
 
 	const getAllFields = (): ConfigField[] => {
+		const showToolTransport = shouldShowToolTransportField(backendMode);
+		const showBridgeCredentials = shouldShowBridgeCredentialFields(
+			backendMode,
+			toolTransport,
+		);
 		return [
 			'profile',
 			'baseUrl',
@@ -160,9 +168,13 @@ export function useConfigState() {
 			'requestMethod',
 			'enableVcpTimeBridge',
 			'backendMode',
-			'toolTransport',
-			...((toolTransport === 'bridge' || toolTransport === 'hybrid')
-				? (['bridgeVcpKey', 'bridgeAccessToken'] as ConfigField[])
+			...(showToolTransport ? (['toolTransport'] as ConfigField[]) : []),
+			...(showBridgeCredentials
+				? ([
+						'bridgeWsUrl',
+						'bridgeVcpKey',
+						'bridgeAccessToken',
+				  ] as ConfigField[])
 				: []),
 			'systemPromptId',
 			'customHeadersSchemeId',
@@ -283,15 +295,25 @@ export function useConfigState() {
 	}, [enableAutoCompress, currentField]);
 
 	useEffect(() => {
-		const bridgeFieldsVisible =
-			toolTransport === 'bridge' || toolTransport === 'hybrid';
+		const showToolTransport = shouldShowToolTransportField(backendMode);
+		if (!showToolTransport && currentField === 'toolTransport') {
+			setCurrentField('systemPromptId');
+			return;
+		}
+
+		const bridgeFieldsVisible = shouldShowBridgeCredentialFields(
+			backendMode,
+			toolTransport,
+		);
 		if (
 			!bridgeFieldsVisible &&
-			(currentField === 'bridgeVcpKey' || currentField === 'bridgeAccessToken')
+			(currentField === 'bridgeWsUrl' ||
+				currentField === 'bridgeVcpKey' ||
+				currentField === 'bridgeAccessToken')
 		) {
 			setCurrentField('systemPromptId');
 		}
-	}, [toolTransport, currentField]);
+	}, [backendMode, toolTransport, currentField]);
 
 	useEffect(() => {
 		if (responsesReasoningEffort === 'xhigh' && !supportsXHigh) {
@@ -318,6 +340,7 @@ export function useConfigState() {
 		setEnableVcpTimeBridge(config.enableVcpTimeBridge);
 		setBackendMode(config.backendMode || 'native');
 		setToolTransport(config.toolTransport || 'local');
+		setBridgeWsUrl(config.bridgeWsUrl || '');
 		setBridgeVcpKey(config.bridgeVcpKey || '');
 		setBridgeAccessToken(config.bridgeAccessToken || '');
 		setSystemPromptId(config.systemPromptId);
@@ -378,6 +401,7 @@ export function useConfigState() {
 			requestMethod,
 			backendMode,
 			toolTransport,
+			bridgeWsUrl,
 			bridgeVcpKey,
 			bridgeAccessToken,
 		};
@@ -415,6 +439,7 @@ export function useConfigState() {
 		if (currentField === 'profile') return activeProfile;
 		if (currentField === 'baseUrl') return baseUrl;
 		if (currentField === 'apiKey') return apiKey;
+		if (currentField === 'bridgeWsUrl') return bridgeWsUrl;
 		if (currentField === 'advancedModel') return advancedModel;
 		if (currentField === 'basicModel') return basicModel;
 		if (currentField === 'maxContextTokens') return maxContextTokens.toString();
@@ -590,6 +615,7 @@ export function useConfigState() {
 				enableVcpTimeBridge,
 				backendMode,
 				toolTransport,
+				bridgeWsUrl,
 				bridgeVcpKey,
 				bridgeAccessToken,
 				systemPromptId,
@@ -725,6 +751,7 @@ export function useConfigState() {
 			requestMethod,
 			backendMode,
 			toolTransport,
+			bridgeWsUrl,
 			bridgeVcpKey,
 			bridgeAccessToken,
 		});
@@ -736,6 +763,7 @@ export function useConfigState() {
 				enableVcpTimeBridge,
 				backendMode,
 				toolTransport,
+				bridgeWsUrl,
 				bridgeVcpKey,
 				bridgeAccessToken,
 				systemPromptId,
@@ -794,12 +822,13 @@ export function useConfigState() {
 				const fullConfig = buildSnowConfigDraft({
 					baseUrl,
 					apiKey,
-					requestMethod,
-					enableVcpTimeBridge,
-					backendMode,
-					toolTransport,
-					bridgeVcpKey,
-					bridgeAccessToken,
+				requestMethod,
+				enableVcpTimeBridge,
+				backendMode,
+				toolTransport,
+				bridgeWsUrl,
+				bridgeVcpKey,
+				bridgeAccessToken,
 					systemPromptId,
 					customHeadersSchemeId,
 					anthropicBeta,
@@ -876,6 +905,8 @@ export function useConfigState() {
 		setBackendMode,
 		toolTransport,
 		setToolTransport,
+		bridgeWsUrl,
+		setBridgeWsUrl,
 		bridgeVcpKey,
 		setBridgeVcpKey,
 		bridgeAccessToken,

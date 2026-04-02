@@ -7,8 +7,10 @@ import {join, resolve} from 'node:path';
 import {
 	extractScenarioResultFromSession,
 	loadBaseConfig,
+	parseArguments,
 	resolveReadTarget,
 	resolveRuntimeWorkDir,
+	validateBridgeSearchToolResult,
 	waitForScenarioResultFromSession,
 } from '../vcp-blackbox.mjs';
 
@@ -65,6 +67,36 @@ test('resolveReadTarget returns an absolute probe path', () => {
 		resolvedTarget.replaceAll('\\', '/'),
 		join(workDir, 'snow-cli', 'source', 'cli.tsx').replaceAll('\\', '/'),
 	);
+});
+
+test('resolveReadTarget honors an explicit probe file', () => {
+	const workDir = mkdtempSync(join(os.tmpdir(), 'vcp-blackbox-explicit-probe-'));
+	writeFileSync(join(workDir, 'main.py'), 'import tkinter as tk', 'utf8');
+
+	const resolvedTarget = resolveReadTarget(workDir, 'main.py');
+
+	assert.equal(
+		resolvedTarget.replaceAll('\\', '/'),
+		join(workDir, 'main.py').replaceAll('\\', '/'),
+	);
+});
+
+test('parseArguments accepts suite and probe options', () => {
+	const options = parseArguments([
+		'--suite',
+		'team',
+		'--mode',
+		'local',
+		'--probe-file',
+		'main.py',
+		'--probe-expected',
+		'import tkinter as tk',
+	]);
+
+	assert.equal(options.suite, 'team');
+	assert.deepEqual(options.modes, ['local']);
+	assert.equal(options.probeFile, 'main.py');
+	assert.equal(options.probeExpected, 'import tkinter as tk');
 });
 
 test('extractScenarioResultFromSession requires a final assistant reply', () => {
@@ -198,8 +230,7 @@ test('extractScenarioResultFromSession accepts bridge tool result matches inside
 	const scenario = {
 		name: 'bridge-search',
 		expectedTool: 'vcp-servercodesearcher-searchcode',
-		expectedToolResultIncludes: 'Plugin\\SnowBridge\\plugin-manifest.json',
-		expectedAssistantIncludes: 'Plugin\\SnowBridge\\plugin-manifest.json',
+		validateToolResult: validateBridgeSearchToolResult,
 	};
 
 	const result = extractScenarioResultFromSession({
@@ -222,14 +253,14 @@ test('extractScenarioResultFromSession accepts bridge tool result matches inside
 				tool_call_id: 'call-1',
 				content: JSON.stringify([
 					{
-						file_path: 'Plugin\\SnowBridge\\plugin-manifest.json',
+						file_path: '.helloagents\\modules\\plugin-system.md',
 						line_number: 2,
 					},
 				]),
 			},
 			{
 				role: 'assistant',
-				content: 'Plugin\\SnowBridge\\plugin-manifest.json',
+				content: '.helloagents\\modules\\plugin-system.md',
 			},
 		],
 		scenario,
@@ -238,7 +269,7 @@ test('extractScenarioResultFromSession accepts bridge tool result matches inside
 
 	assert.equal(
 		result.finalAssistantPreview,
-		'Plugin\\SnowBridge\\plugin-manifest.json',
+		'.helloagents\\modules\\plugin-system.md',
 	);
 });
 
@@ -288,8 +319,7 @@ test('extractScenarioResultFromSession accepts slash-normalized bridge assistant
 	const scenario = {
 		name: 'bridge-search',
 		expectedTool: 'vcp-servercodesearcher-searchcode',
-		expectedToolResultIncludes: 'Plugin/SnowBridge/plugin-manifest.json',
-		expectedAssistantIncludes: 'Plugin/SnowBridge/plugin-manifest.json',
+		validateToolResult: validateBridgeSearchToolResult,
 	};
 
 	const result = extractScenarioResultFromSession({
@@ -311,11 +341,11 @@ test('extractScenarioResultFromSession accepts slash-normalized bridge assistant
 				role: 'tool',
 				tool_call_id: 'call-1',
 				content:
-					'[{"file_path":"Plugin\\\\SnowBridge\\\\plugin-manifest.json","line_number":2}]',
+					'[{"file_path":".helloagents\\\\modules\\\\plugin-system.md","line_number":2}]',
 			},
 			{
 				role: 'assistant',
-				content: 'Plugin\\SnowBridge\\plugin-manifest.json',
+				content: '.helloagents\\modules\\plugin-system.md',
 			},
 		],
 		scenario,
@@ -324,7 +354,20 @@ test('extractScenarioResultFromSession accepts slash-normalized bridge assistant
 
 	assert.equal(
 		result.finalAssistantPreview,
-		'Plugin\\SnowBridge\\plugin-manifest.json',
+		'.helloagents\\modules\\plugin-system.md',
+	);
+});
+
+test('validateBridgeSearchToolResult rejects empty bridge search matches', () => {
+	assert.throws(
+		() =>
+			validateBridgeSearchToolResult({
+				parsedToolResult: {
+					status: 'success',
+					result: [],
+				},
+			}),
+		/did not contain a matched file path/,
 	);
 });
 
@@ -332,8 +375,7 @@ test('waitForScenarioResultFromSession retries until final assistant reply is pe
 	const scenario = {
 		name: 'bridge-search',
 		expectedTool: 'vcp-servercodesearcher-searchcode',
-		expectedToolResultIncludes: 'Plugin\\SnowBridge\\plugin-manifest.json',
-		expectedAssistantIncludes: 'Plugin\\SnowBridge\\plugin-manifest.json',
+		validateToolResult: validateBridgeSearchToolResult,
 	};
 	const messages = [
 		{
@@ -354,7 +396,7 @@ test('waitForScenarioResultFromSession retries until final assistant reply is pe
 			tool_call_id: 'call-1',
 			content: JSON.stringify([
 				{
-					file_path: 'Plugin\\SnowBridge\\plugin-manifest.json',
+					file_path: '.helloagents\\modules\\plugin-system.md',
 					line_number: 2,
 				},
 			]),
@@ -364,7 +406,7 @@ test('waitForScenarioResultFromSession retries until final assistant reply is pe
 	setTimeout(() => {
 		messages.push({
 			role: 'assistant',
-			content: 'Plugin\\SnowBridge\\plugin-manifest.json',
+			content: '.helloagents\\modules\\plugin-system.md',
 		});
 	}, 50);
 
@@ -378,6 +420,6 @@ test('waitForScenarioResultFromSession retries until final assistant reply is pe
 
 	assert.equal(
 		result.finalAssistantPreview,
-		'Plugin\\SnowBridge\\plugin-manifest.json',
+		'.helloagents\\modules\\plugin-system.md',
 	);
 });

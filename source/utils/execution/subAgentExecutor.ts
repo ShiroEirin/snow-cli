@@ -23,11 +23,13 @@ import type {ConfirmationResult} from '../../ui/components/tools/ToolConfirmatio
 import type {MCPTool} from './mcpToolsManager.js';
 import type {ChatMessage} from '../../api/chat.js';
 import {resolveVcpModeRequest} from '../session/vcpCompatibility/mode.js';
+import {applyVcpOutboundMessageTransforms} from '../session/vcpCompatibility/applyOutboundMessageTransforms.js';
 import {prepareToolPlane} from '../session/vcpCompatibility/toolPlaneFacade.js';
 import {
 	filterToolExecutionBindings,
 	rotateToolExecutionBindingsSession,
 } from '../session/vcpCompatibility/toolExecutionBinding.js';
+import {projectToolMessageForContext} from '../session/toolMessageProjection.js';
 
 export interface SubAgentMessage {
 	type: 'sub_agent_message';
@@ -553,17 +555,27 @@ You have access to these collaboration tools:
 
 			// Call API with sub-agent's tools - choose API based on resolved request
 			// Apply sub-agent configuration overrides (model already loaded from configProfile above)
+			const projectMessagesForModel = () =>
+				messages.map(message => projectToolMessageForContext(message));
 			const resolvedRequest = resolveVcpModeRequest(config, {
 				model,
 				tools: allowedTools,
 				toolChoice: 'auto',
+			});
+			const projectedMessages = projectMessagesForModel();
+			const transformedMessages = applyVcpOutboundMessageTransforms({
+				config: {
+					...config,
+					requestMethod: resolvedRequest.requestMethod,
+				},
+				messages: projectedMessages,
 			});
 			const stream =
 				resolvedRequest.requestMethod === 'anthropic'
 					? createStreamingAnthropicCompletion(
 							{
 								model,
-								messages,
+								messages: transformedMessages,
 								temperature: 0,
 								max_tokens: config.maxTokens || 4096,
 								tools: resolvedRequest.tools,
@@ -577,7 +589,7 @@ You have access to these collaboration tools:
 					? createStreamingGeminiCompletion(
 							{
 								model,
-								messages,
+								messages: transformedMessages,
 								temperature: 0,
 								tools: resolvedRequest.tools,
 								configProfile: agent.configProfile,
@@ -588,7 +600,7 @@ You have access to these collaboration tools:
 					? createStreamingResponse(
 							{
 								model,
-								messages,
+								messages: transformedMessages,
 								temperature: 0,
 								tools: resolvedRequest.tools,
 								tool_choice: resolvedRequest.toolChoice,
@@ -600,7 +612,7 @@ You have access to these collaboration tools:
 					: createStreamingChatCompletion(
 							{
 								model,
-								messages,
+								messages: transformedMessages,
 								temperature: 0,
 								tools: resolvedRequest.tools,
 								tool_choice: resolvedRequest.toolChoice,
@@ -760,7 +772,7 @@ You have access to these collaboration tools:
 			// Some third-party APIs or proxy servers may not include usage data in responses.
 			// In that case, use tiktoken to estimate the token count from the messages array.
 			if (latestTotalTokens === 0 && config.maxContextTokens) {
-				latestTotalTokens = countMessagesTokens(messages);
+				latestTotalTokens = countMessagesTokens(projectMessagesForModel());
 
 				// Send context_usage event with the tiktoken-estimated count
 				if (onMessage && latestTotalTokens > 0) {
@@ -1751,7 +1763,6 @@ You have access to these collaboration tools:
 					);
 					toolResults.push({
 						...toolResult,
-						content: toolResult.historyContent ?? toolResult.content,
 					} as ChatMessage);
 
 					// Send tool result to UI

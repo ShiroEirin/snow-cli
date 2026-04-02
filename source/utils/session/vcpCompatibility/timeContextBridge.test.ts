@@ -29,6 +29,7 @@ test('bridge follow-up ::Time query with previous user time anchor', t => {
 	t.true(
 		shouldApplyVcpTimeBridge(
 			{
+				backendMode: 'vcp',
 				baseUrl: 'http://localhost:8080/v1',
 				requestMethod: 'chat',
 			},
@@ -94,6 +95,7 @@ test('do not apply ::Time bridge on remote endpoints unless explicitly enabled',
 	t.false(
 		shouldApplyVcpTimeBridge(
 			{
+				backendMode: 'vcp',
 				baseUrl: 'https://api.example.com/v1',
 				requestMethod: 'chat',
 			},
@@ -103,6 +105,7 @@ test('do not apply ::Time bridge on remote endpoints unless explicitly enabled',
 
 	const transformedMessages = applyVcpOutboundMessageTransforms({
 		config: {
+			backendMode: 'vcp',
 			baseUrl: 'https://api.example.com/v1',
 			requestMethod: 'chat',
 		},
@@ -135,6 +138,7 @@ test('allow explicit ::Time bridge enablement on remote endpoints', t => {
 	t.true(
 		shouldApplyVcpTimeBridge(
 			{
+				backendMode: 'vcp',
 				baseUrl: 'https://api.example.com/v1',
 				requestMethod: 'chat',
 				enableVcpTimeBridge: true,
@@ -145,6 +149,7 @@ test('allow explicit ::Time bridge enablement on remote endpoints', t => {
 
 	const transformedMessages = applyVcpOutboundMessageTransforms({
 		config: {
+			backendMode: 'vcp',
 			baseUrl: 'https://api.example.com/v1',
 			requestMethod: 'chat',
 			enableVcpTimeBridge: true,
@@ -174,6 +179,7 @@ test('do not apply ::Time bridge for non-chat requests', t => {
 	t.false(
 		shouldApplyVcpTimeBridge(
 			{
+				backendMode: 'vcp',
 				baseUrl: 'http://localhost:8080/v1',
 				requestMethod: 'responses',
 			},
@@ -350,11 +356,55 @@ test('respect allowTimeBridge=false when outbound transforms are applied', t => 
 
 	const transformedMessages = applyVcpOutboundMessageTransforms({
 		config: {
+			backendMode: 'vcp',
 			baseUrl: 'http://localhost:8080/v1',
 			requestMethod: 'chat',
 		},
 		messages,
 		allowTimeBridge: false,
+	});
+
+	t.is(transformedMessages, messages);
+});
+
+test('do not apply ::Time bridge outside vcp mode even on localhost chat endpoints', t => {
+	const messages = [
+		{
+			role: 'system' as const,
+			content: '[[Nova日记本::Time]]',
+		},
+		{
+			role: 'user' as const,
+			content: '查一下昨天的日记',
+		},
+		{
+			role: 'assistant' as const,
+			content: '好的。',
+		},
+		{
+			role: 'user' as const,
+			content: '继续查一下',
+		},
+	];
+
+	t.false(
+		shouldApplyVcpTimeBridge(
+			{
+				backendMode: 'native',
+				baseUrl: 'http://localhost:8080/v1',
+				requestMethod: 'chat',
+			},
+			messages,
+		),
+	);
+
+	const transformedMessages = applyVcpOutboundMessageTransforms({
+		config: {
+			backendMode: 'native',
+			baseUrl: 'http://localhost:8080/v1',
+			requestMethod: 'chat',
+		},
+		messages,
 	});
 
 	t.is(transformedMessages, messages);

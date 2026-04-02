@@ -4,6 +4,7 @@ import type {
 	VcpOutboundTransform,
 	VcpOutboundTransformArgs,
 } from './types.js';
+import {isVcpModeEnabled} from './mode.js';
 import {isVcpSystemInvitationMessage} from './protocol.js';
 
 export type VcpTimeBridgeConfig = VcpCompatibilityConfig;
@@ -251,6 +252,10 @@ export function shouldApplyVcpTimeBridge(
 	config: VcpTimeBridgeConfig,
 	messages: ChatMessage[],
 ): boolean {
+	if (!isVcpModeEnabled(config)) {
+		return false;
+	}
+
 	if (config.requestMethod !== 'chat') {
 		return false;
 	}

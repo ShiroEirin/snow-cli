@@ -9,6 +9,7 @@ import {
 	buildToolHistoryContent,
 	createTeamUserQuestionAdapter,
 	executeToolCall,
+	type ToolResult,
 	type ToolCall,
 } from './toolExecutor.js';
 import {
@@ -16,6 +17,7 @@ import {
 	registerToolExecutionBindings,
 } from '../session/vcpCompatibility/toolExecutionBinding.js';
 import {lineHash} from '../../mcp/utils/filesystem/hashline.utils.js';
+import {teamService} from '../../mcp/team.js';
 
 let toolPlaneSequence = 0;
 
@@ -210,6 +212,76 @@ test('buildToolHistoryContent truncates oversized plain-text tool output', (t: a
 	t.false(historyContent.includes('line26'));
 	t.true(historyContent.includes('[truncated 2 more lines]'));
 });
+
+test('buildToolHistoryContent strips appended notebook block from history text', (t: any) => {
+	const historyContent = buildToolHistoryContent(
+		[
+			'📄 source/app.ts (lines 1-3/3)',
+			'1:aa→const answer = 42;',
+			'2:bb→console.log(answer);',
+			'',
+			'============================================================',
+			'📝 CODE NOTEBOOKS (Latest 10):',
+			'============================================================',
+			'  1. [2026-04-02 18:30] Remember to inspect the startup path.',
+			'  2. [2026-04-02 18:31] Prefer the native edit tool for this file.',
+		].join('\n'),
+		'fallback tool text',
+	);
+
+	t.true(historyContent.includes('📄 source/app.ts (lines 1-3/3)'));
+	t.true(historyContent.includes('1:aa→const answer = 42;'));
+	t.false(historyContent.includes('CODE NOTEBOOKS (Latest 10)'));
+	t.false(historyContent.includes('Remember to inspect the startup path.'));
+});
+
+test('buildToolHistoryContent preserves ordinary text outside notebook block format', (t: any) => {
+	const historyContent = buildToolHistoryContent(
+		'Assistant note: CODE NOTEBOOKS (Latest 10): label mentioned inline only.',
+		'fallback tool text',
+	);
+
+	t.is(
+		historyContent,
+		'Assistant note: CODE NOTEBOOKS (Latest 10): label mentioned inline only.',
+	);
+});
+
+test.serial(
+	'team top-level tool results carry summarized history sidecar',
+	async (t: any) => {
+		const originalExecute = teamService.execute;
+
+		teamService.execute = (async () => ({
+			success: true,
+			summary: 'Team finished work',
+			members: Array.from({length: 12}, (_, index) => ({
+				id: `member-${index}`,
+				status: index % 2 === 0 ? 'done' : 'pending',
+			})),
+		})) as typeof teamService.execute;
+
+		try {
+			const toolCall: ToolCall = {
+				id: 'team-tool-call',
+				type: 'function',
+				function: {
+					name: 'team-wait_for_teammates',
+					arguments: JSON.stringify({teamName: 'alpha'}),
+				},
+			};
+
+			const result = (await executeToolCall(toolCall)) as ToolResult;
+
+			t.truthy(result.historyContent);
+			t.true(result.content.includes('"members"'));
+			t.true(result.historyContent!.includes('"summary":"Team finished work"'));
+			t.false(result.historyContent!.includes('"member-11"'));
+		} finally {
+			teamService.execute = originalExecute;
+		}
+	},
+);
 
 test.serial(
 	'filesystem-edit uses the current hashline operations contract',

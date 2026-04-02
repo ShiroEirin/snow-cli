@@ -1,4 +1,8 @@
-import type {RequestMethod} from '../../../utils/config/apiConfig.js';
+import type {
+	BackendMode,
+	RequestMethod,
+	ToolTransport,
+} from '../../../utils/config/apiConfig.js';
 
 export type ConfigField =
 	| 'profile'
@@ -8,6 +12,7 @@ export type ConfigField =
 	| 'enableVcpTimeBridge'
 	| 'backendMode'
 	| 'toolTransport'
+	| 'bridgeWsUrl'
 	| 'bridgeVcpKey'
 	| 'bridgeAccessToken'
 	| 'systemPromptId'
@@ -95,6 +100,7 @@ export const SELECT_FIELDS: ConfigField[] = [
 	'enableVcpTimeBridge',
 	'backendMode',
 	'toolTransport',
+	'bridgeWsUrl',
 	'systemPromptId',
 	'customHeadersSchemeId',
 	'advancedModel',
@@ -112,6 +118,7 @@ export const isSelectField = (field: ConfigField) =>
 export const TEXT_INPUT_FIELDS: ConfigField[] = [
 	'baseUrl',
 	'apiKey',
+	'bridgeWsUrl',
 	'bridgeVcpKey',
 	'bridgeAccessToken',
 ];
@@ -121,6 +128,16 @@ export const isDirectTextInputField = (field: ConfigField) =>
 
 export const isEscapeClosableEditingField = (field: ConfigField) =>
 	isSelectField(field) || isDirectTextInputField(field);
+
+export const shouldShowToolTransportField = (backendMode: BackendMode) =>
+	backendMode === 'vcp';
+
+export const shouldShowBridgeCredentialFields = (
+	backendMode: BackendMode,
+	toolTransport: ToolTransport,
+) =>
+	shouldShowToolTransportField(backendMode) &&
+	(toolTransport === 'bridge' || toolTransport === 'hybrid');
 
 export const NUMERIC_FIELDS: ConfigField[] = [
 	'maxContextTokens',

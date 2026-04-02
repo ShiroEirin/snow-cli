@@ -13,11 +13,13 @@ import type {MCPTool} from './mcpToolsManager.js';
 import {teamTracker} from './teamTracker.js';
 import type {SubAgentMessage, TokenUsage} from './subAgentExecutor.js';
 import {prepareToolPlane} from '../session/vcpCompatibility/toolPlaneFacade.js';
+import {applyVcpOutboundMessageTransforms} from '../session/vcpCompatibility/applyOutboundMessageTransforms.js';
 import {
 	getToolExecutionBinding,
 	type ToolExecutionBinding,
 } from '../session/vcpCompatibility/toolExecutionBinding.js';
 import {rewriteToolArgsForWorktree} from '../team/teamWorktree.js';
+import {projectToolMessageForContext} from '../session/toolMessageProjection.js';
 
 export interface TeammateExecutionOptions {
 	onMessage?: (message: SubAgentMessage) => void;
@@ -408,10 +410,20 @@ ${role ? `Your role: ${role}` : ''}
 
 			// API call
 			const model = config.advancedModel || 'gpt-5';
+			const projectMessagesForModel = () =>
+				messages.map(message => projectToolMessageForContext(message));
 			const resolvedRequest = resolveVcpModeRequest(config, {
 				model,
 				tools: allowedTools,
 				toolChoice: 'auto',
+			});
+			const projectedMessages = projectMessagesForModel();
+			const transformedMessages = applyVcpOutboundMessageTransforms({
+				config: {
+					...config,
+					requestMethod: resolvedRequest.requestMethod,
+				},
+				messages: projectedMessages,
 			});
 
 			const stream =
@@ -419,7 +431,7 @@ ${role ? `Your role: ${role}` : ''}
 					? createStreamingAnthropicCompletion(
 							{
 								model,
-								messages,
+								messages: transformedMessages,
 								temperature: 0,
 								max_tokens: config.maxTokens || 4096,
 								tools: resolvedRequest.tools,
@@ -431,7 +443,7 @@ ${role ? `Your role: ${role}` : ''}
 					? createStreamingGeminiCompletion(
 							{
 								model,
-								messages,
+								messages: transformedMessages,
 								temperature: 0,
 								tools: resolvedRequest.tools,
 							},
@@ -441,7 +453,7 @@ ${role ? `Your role: ${role}` : ''}
 					? createStreamingResponse(
 							{
 								model,
-								messages,
+								messages: transformedMessages,
 								temperature: 0,
 								tools: resolvedRequest.tools,
 								tool_choice: resolvedRequest.toolChoice,
@@ -452,7 +464,7 @@ ${role ? `Your role: ${role}` : ''}
 					: createStreamingChatCompletion(
 							{
 								model,
-								messages,
+								messages: transformedMessages,
 								temperature: 0,
 								tools: resolvedRequest.tools,
 								tool_choice: resolvedRequest.toolChoice,
@@ -526,7 +538,7 @@ ${role ? `Your role: ${role}` : ''}
 
 			// Tiktoken fallback when API doesn't return usage
 			if (latestTotalTokens === 0 && config.maxContextTokens) {
-				latestTotalTokens = countMessagesTokens(messages);
+				latestTotalTokens = countMessagesTokens(projectMessagesForModel());
 				if (onMessage && latestTotalTokens > 0) {
 					const ctxPct = getContextPercentage(latestTotalTokens, config.maxContextTokens);
 					onMessage({
@@ -880,8 +892,9 @@ ${role ? `Your role: ${role}` : ''}
 								messages.push({
 									role: 'tool' as const,
 									tool_call_id: tc.id,
-									content: result.historyContent ?? result.content,
-								});
+									content: result.content,
+									historyContent: result.historyContent,
+								} as ChatMessage);
 							} catch (e: any) {
 								messages.push({
 									role: 'tool' as const,
@@ -964,8 +977,9 @@ ${role ? `Your role: ${role}` : ''}
 							messages.push({
 								role: 'tool' as const,
 								tool_call_id: tc.id,
-								content: result.historyContent ?? result.content,
-							});
+								content: result.content,
+								historyContent: result.historyContent,
+							} as ChatMessage);
 						} catch (e: any) {
 							messages.push({
 								role: 'tool' as const,

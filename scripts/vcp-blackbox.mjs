@@ -1,7 +1,7 @@
 import process from 'node:process';
 import os from 'node:os';
 import net from 'node:net';
-import {spawn} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import {
 	copyFileSync,
 	existsSync,
@@ -16,6 +16,7 @@ import {dirname, isAbsolute, join, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
 const VALID_MODES = new Set(['local', 'bridge', 'hybrid']);
+const VALID_SUITES = new Set(['core', 'subagent', 'team']);
 const OPTIONAL_SNOW_FILES = [
 	'proxy-config.json',
 	'mcp-config.json',
@@ -25,6 +26,7 @@ const OPTIONAL_SNOW_FILES = [
 const REQUEST_TIMEOUT_MS = 180000;
 const HEALTH_TIMEOUT_MS = 30000;
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const DEFAULT_SUITE = 'core';
 const DEFAULT_BASE_CONFIG = {
 	snowcfg: {
 		baseUrl: 'https://api.openai.com/v1',
@@ -52,49 +54,184 @@ const LOCAL_READ_PROBE = {
 };
 const BRIDGE_SEARCH_PROBE = {
 	query: 'SnowBridge',
-	expectedPathIncludes: 'Plugin/SnowBridge/plugin-manifest.json',
 };
 
-const MODE_SCENARIOS = {
-	local: [
-		{
-			name: 'filesystem-read',
-			buildPrompt: filePath =>
-				`Call exactly the tool \`filesystem-read\` on the file \`${filePath}\`. After the tool returns, reply with the first line only.`,
-			expectedTool: 'filesystem-read',
-			expectedToolResultIncludes: LOCAL_READ_PROBE.expectedContent,
-			expectedAssistantIncludes: LOCAL_READ_PROBE.expectedContent,
-		},
-	],
-	bridge: [
-		{
-			name: 'bridge-search',
-			prompt:
-				`Call exactly the tool \`vcp-servercodesearcher-searchcode\` to search this workspace for \`${BRIDGE_SEARCH_PROBE.query}\`. After the tool returns, reply with the first matched file path only.`,
-			expectedTool: 'vcp-servercodesearcher-searchcode',
-			expectedToolResultIncludes: BRIDGE_SEARCH_PROBE.expectedPathIncludes,
-			expectedAssistantIncludes: BRIDGE_SEARCH_PROBE.expectedPathIncludes,
-		},
-	],
-	hybrid: [
-		{
-			name: 'filesystem-read',
-			buildPrompt: filePath =>
-				`Call exactly the tool \`filesystem-read\` on the file \`${filePath}\`. After the tool returns, reply with the first line only.`,
-			expectedTool: 'filesystem-read',
-			expectedToolResultIncludes: LOCAL_READ_PROBE.expectedContent,
-			expectedAssistantIncludes: LOCAL_READ_PROBE.expectedContent,
-		},
-		{
-			name: 'bridge-search',
-			prompt:
-				`Call exactly the tool \`vcp-servercodesearcher-searchcode\` to search this workspace for \`${BRIDGE_SEARCH_PROBE.query}\`. After the tool returns, reply with the first matched file path only.`,
-			expectedTool: 'vcp-servercodesearcher-searchcode',
-			expectedToolResultIncludes: BRIDGE_SEARCH_PROBE.expectedPathIncludes,
-			expectedAssistantIncludes: BRIDGE_SEARCH_PROBE.expectedPathIncludes,
-		},
-	],
-};
+export function validateBridgeSearchToolResult(options = {}) {
+	const {parsedToolResult} = options;
+	const resultItems = Array.isArray(parsedToolResult)
+		? parsedToolResult
+		: Array.isArray(parsedToolResult?.result)
+			? parsedToolResult.result
+			: [];
+
+	if (
+		parsedToolResult &&
+		!Array.isArray(parsedToolResult) &&
+		parsedToolResult.status &&
+		parsedToolResult.status !== 'success'
+	) {
+		throw new Error(
+			`Bridge search tool returned non-success status: ${parsedToolResult.status}`,
+		);
+	}
+
+	const firstResultPath = resultItems
+		.map(item =>
+			typeof item?.file_path === 'string'
+				? item.file_path
+				: typeof item?.path === 'string'
+					? item.path
+					: '',
+		)
+		.find(Boolean);
+
+	if (!firstResultPath) {
+		throw new Error(
+			'Bridge search tool result did not contain a matched file path.',
+		);
+	}
+
+	return {
+		expectedAssistantIncludes: normalizeComparableText(firstResultPath),
+	};
+}
+
+function buildCoreModeScenarios(expectedContent) {
+	return {
+		local: [
+			{
+				name: 'filesystem-read',
+				buildPrompt: filePath =>
+					`Call exactly the tool \`filesystem-read\` on the file \`${filePath}\`. After the tool returns, reply with the first line only.`,
+				expectedTool: 'filesystem-read',
+				expectedToolResultIncludes: expectedContent,
+				expectedAssistantIncludes: expectedContent,
+			},
+		],
+		bridge: [
+			{
+				name: 'bridge-search',
+				validateToolResult: validateBridgeSearchToolResult,
+				prompt:
+					`Call exactly the tool \`vcp-servercodesearcher-searchcode\` to search this workspace for \`${BRIDGE_SEARCH_PROBE.query}\`. After the tool returns, reply with the first matched file path only.`,
+				expectedTool: 'vcp-servercodesearcher-searchcode',
+			},
+		],
+		hybrid: [
+			{
+				name: 'filesystem-read',
+				buildPrompt: filePath =>
+					`Call exactly the tool \`filesystem-read\` on the file \`${filePath}\`. After the tool returns, reply with the first line only.`,
+				expectedTool: 'filesystem-read',
+				expectedToolResultIncludes: expectedContent,
+				expectedAssistantIncludes: expectedContent,
+			},
+			{
+				name: 'bridge-search',
+				validateToolResult: validateBridgeSearchToolResult,
+				prompt:
+					`Call exactly the tool \`vcp-servercodesearcher-searchcode\` to search this workspace for \`${BRIDGE_SEARCH_PROBE.query}\`. After the tool returns, reply with the first matched file path only.`,
+				expectedTool: 'vcp-servercodesearcher-searchcode',
+			},
+		],
+	};
+}
+
+function buildSubagentModeScenarios(expectedContent) {
+	return {
+		local: [
+			{
+				name: 'subagent-explore',
+				buildPrompt: filePath =>
+					`Call exactly the tool \`subagent-agent_explore\` with a prompt that tells the sub-agent to use \`filesystem-read\` on \`${filePath}\` and return only the first line. After the tool returns, reply with the first line only.`,
+				expectedTool: 'subagent-agent_explore',
+				expectedAssistantIncludes: expectedContent,
+			},
+		],
+	};
+}
+
+function buildTeamModeScenarios(expectedContent) {
+	return {
+		local: [
+			{
+				name: 'team-runtime',
+				buildPrompt: filePath =>
+					[
+						'You are validating Agent Team mode in this git repository.',
+						'Follow this exact tool sequence:',
+						'1. Call `team-spawn_teammate` with name `reader` and a prompt telling the teammate to read the file path below, then wait for further messages.',
+						'2. Call `team-wait_for_teammates`.',
+						'3. Call `team-shutdown_teammate` for `reader`.',
+						'4. Call `team-merge_all_teammate_work` with strategy `auto`.',
+						'5. Call `team-cleanup_team`.',
+						'6. Call `filesystem-read` on the same file path.',
+						'After all tools return, reply with the first line only.',
+						`Target file: ${filePath}`,
+					].join(' '),
+				expectedAssistantIncludes: expectedContent,
+				validateMessages: ({messages, previousMessageCount, scenario}) => {
+					const collectedToolCalls = collectToolCalls(messages);
+					const expectedSequence = [
+						'team-spawn_teammate',
+						'team-wait_for_teammates',
+						'team-shutdown_teammate',
+						'team-merge_all_teammate_work',
+						'team-cleanup_team',
+						'filesystem-read',
+					];
+					assertToolCallSequence(collectedToolCalls, expectedSequence);
+					for (const entry of collectedToolCalls) {
+						if (expectedSequence.includes(entry.toolCall.function.name)) {
+							const toolResultMessage = messages.find(
+								message => message.tool_call_id === entry.toolCall.id,
+							);
+							if (!toolResultMessage?.content) {
+								throw new Error(
+									`Expected tool result for "${entry.toolCall.function.name}" was not recorded in session history.`,
+								);
+							}
+
+							if (String(toolResultMessage.content).startsWith('Error:')) {
+								throw new Error(
+									`Tool result for "${entry.toolCall.function.name}" failed: ${toolResultMessage.content}`,
+								);
+							}
+						}
+					}
+
+					const finalAssistantContent = extractFinalAssistantContent({
+						messages,
+						expectedAssistantIncludes: scenario.expectedAssistantIncludes,
+						expectedTool: 'filesystem-read',
+					});
+					return {
+						scenario: scenario.name,
+						expectedTool: 'team-spawn_teammate',
+						toolCall: collectedToolCalls[0]?.toolCall,
+						toolResultPreview: 'team sequence completed',
+						finalAssistantPreview: finalAssistantContent.slice(0, 240),
+						messageCount: previousMessageCount + messages.length,
+					};
+				},
+			},
+		],
+	};
+}
+
+function getModeScenarios(options) {
+	const expectedContent =
+		options.probeExpected || LOCAL_READ_PROBE.expectedContent;
+	switch (options.suite) {
+		case 'subagent':
+			return buildSubagentModeScenarios(expectedContent);
+		case 'team':
+			return buildTeamModeScenarios(expectedContent);
+		case 'core':
+		default:
+			return buildCoreModeScenarios(expectedContent);
+	}
+}
 
 function resolvePathFrom(baseDir, candidate) {
 	return isAbsolute(candidate) ? resolve(candidate) : resolve(baseDir, candidate);
@@ -172,7 +309,18 @@ export function resolveRuntimeWorkDir(options = {}) {
 	return anchoredProjectRoot;
 }
 
-export function resolveReadTarget(workDir) {
+export function resolveReadTarget(workDir, probeFile) {
+	if (probeFile) {
+		const explicitTarget = join(workDir, probeFile);
+		if (!existsSync(explicitTarget)) {
+			throw new Error(
+				`Unable to resolve explicit probe target (${probeFile}) from runtime work dir: ${workDir}`,
+			);
+		}
+
+		return explicitTarget.replaceAll('\\', '/');
+	}
+
 	for (const relativePath of LOCAL_READ_PROBE.fallbacks) {
 		const absolutePath = join(workDir, relativePath);
 		if (existsSync(absolutePath)) {
@@ -183,6 +331,69 @@ export function resolveReadTarget(workDir) {
 	throw new Error(
 		`Unable to resolve local filesystem probe target (${LOCAL_READ_PROBE.query}) from runtime work dir: ${workDir}`,
 	);
+}
+
+function assertGitRepository(repoPath) {
+	const result = spawnSync(
+		'git',
+		['-C', repoPath, 'rev-parse', '--is-inside-work-tree'],
+		{encoding: 'utf8'},
+	);
+	if (result.status !== 0) {
+		throw new Error(`Team blackbox requires a Git repository work dir: ${repoPath}`);
+	}
+}
+
+function prepareScenarioWorkDir(options) {
+	const {suite, workDir, tempRoot} = options;
+	if (suite !== 'team') {
+		return {
+			runtimeWorkDir: workDir,
+			templateRepo: undefined,
+		};
+	}
+
+	assertGitRepository(workDir);
+	const runtimeWorkDir = join(tempRoot, 'team-workspace');
+	const cloneResult = spawnSync(
+		'git',
+		['clone', '--quiet', '--no-local', workDir, runtimeWorkDir],
+		{encoding: 'utf8'},
+	);
+	if (cloneResult.status !== 0) {
+		throw new Error(
+			[
+				`Failed to clone team blackbox workspace from ${workDir}.`,
+				cloneResult.stderr?.trim(),
+			]
+				.filter(Boolean)
+				.join('\n'),
+		);
+	}
+
+	spawnSync(
+		'git',
+		['-C', runtimeWorkDir, 'config', 'user.name', 'Snow Blackbox'],
+		{encoding: 'utf8'},
+	);
+	spawnSync(
+		'git',
+		['-C', runtimeWorkDir, 'config', 'user.email', 'snow-blackbox@example.local'],
+		{encoding: 'utf8'},
+	);
+
+	const settingsDir = join(runtimeWorkDir, '.snow');
+	mkdirSync(settingsDir, {recursive: true});
+	writeFileSync(
+		join(settingsDir, 'settings.json'),
+		JSON.stringify({teamMode: true}, null, 2),
+		'utf8',
+	);
+
+	return {
+		runtimeWorkDir,
+		templateRepo: workDir,
+	};
 }
 
 function resolveCliEntrypoint() {
@@ -226,10 +437,13 @@ function resolveCliEntrypoint() {
 export function parseArguments(argv) {
 	const options = {
 		modes: [],
+		suite: DEFAULT_SUITE,
 		keepTemp: false,
 		timeoutMs: REQUEST_TIMEOUT_MS,
 		workDir: undefined,
 		configPath: undefined,
+		probeFile: undefined,
+		probeExpected: undefined,
 	};
 
 	for (let index = 0; index < argv.length; index += 1) {
@@ -267,6 +481,17 @@ export function parseArguments(argv) {
 			continue;
 		}
 
+		if (arg === '--suite') {
+			const suite = argv[index + 1];
+			if (!VALID_SUITES.has(suite)) {
+				throw new Error(`Unsupported --suite value: ${suite || '(empty)'}`);
+			}
+
+			options.suite = suite;
+			index += 1;
+			continue;
+		}
+
 		if (arg === '--work-dir') {
 			const workDir = argv[index + 1];
 			if (!workDir) {
@@ -274,6 +499,28 @@ export function parseArguments(argv) {
 			}
 
 			options.workDir = workDir;
+			index += 1;
+			continue;
+		}
+
+		if (arg === '--probe-file') {
+			const probeFile = argv[index + 1];
+			if (!probeFile) {
+				throw new Error('Invalid --probe-file value: (empty)');
+			}
+
+			options.probeFile = probeFile;
+			index += 1;
+			continue;
+		}
+
+		if (arg === '--probe-expected') {
+			const probeExpected = argv[index + 1];
+			if (!probeExpected) {
+				throw new Error('Invalid --probe-expected value: (empty)');
+			}
+
+			options.probeExpected = probeExpected;
 			index += 1;
 			continue;
 		}
@@ -375,10 +622,34 @@ function resolveModes(snowConfig, requestedModes) {
 	return ['local'];
 }
 
+function resolveModesForSuite(suite, snowConfig, requestedModes) {
+	if (suite === 'core') {
+		return resolveModes(snowConfig, requestedModes);
+	}
+
+	if (requestedModes.length === 0) {
+		return ['local'];
+	}
+
+	const uniqueModes = Array.from(new Set(requestedModes));
+	if (uniqueModes.some(mode => mode !== 'local')) {
+		throw new Error(`Suite "${suite}" only supports mode "local".`);
+	}
+
+	return uniqueModes;
+}
+
 function ensureModeSupported(snowConfig, mode) {
-	if ((mode === 'bridge' || mode === 'hybrid') && !snowConfig.bridgeVcpKey?.trim()) {
+	const hasBridgeWsUrl =
+		typeof snowConfig.bridgeWsUrl === 'string' &&
+		snowConfig.bridgeWsUrl.trim().length > 0;
+	if (
+		(mode === 'bridge' || mode === 'hybrid') &&
+		!hasBridgeWsUrl &&
+		!snowConfig.bridgeVcpKey?.trim()
+	) {
 		throw new Error(
-			`Mode "${mode}" requires bridgeVcpKey in the resolved Snow config.`,
+			`Mode "${mode}" requires bridgeVcpKey or bridgeWsUrl in the resolved Snow config.`,
 		);
 	}
 }
@@ -726,6 +997,7 @@ function isRetryableScenarioExtractionError(error) {
 		'Unexpected non-whitespace character after JSON',
 		'Unable to locate session file for',
 		'Expected tool "',
+		'Expected tool call sequence was not recorded',
 		'Expected tool result for "',
 		'Expected final assistant reply for "',
 		'Final assistant reply for "',
@@ -755,6 +1027,83 @@ function collectComparableStrings(value, bucket = []) {
 	return bucket;
 }
 
+function collectToolCalls(messages) {
+	const collectedToolCalls = [];
+	for (const [messageIndex, message] of messages.entries()) {
+		if (!Array.isArray(message.tool_calls)) {
+			continue;
+		}
+
+		for (const toolCall of message.tool_calls) {
+			collectedToolCalls.push({messageIndex, toolCall});
+		}
+	}
+
+	return collectedToolCalls;
+}
+
+function assertToolCallSequence(collectedToolCalls, expectedSequence) {
+	let cursor = 0;
+	for (const entry of collectedToolCalls) {
+		if (entry.toolCall.function.name === expectedSequence[cursor]) {
+			cursor += 1;
+		}
+		if (cursor === expectedSequence.length) {
+			return;
+		}
+	}
+
+	throw new Error(
+		`Expected tool call sequence was not recorded: ${expectedSequence.join(' -> ')}`,
+	);
+}
+
+function extractFinalAssistantContent(options) {
+	const {messages, expectedAssistantIncludes, expectedTool} = options;
+	const finalAssistantMessage = messages
+		.slice()
+		.reverse()
+		.find(message => {
+			if (message?.role !== 'assistant') {
+				return false;
+			}
+
+			if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+				return false;
+			}
+
+			return String(message.content || '').trim().length > 0;
+		});
+	if (!finalAssistantMessage) {
+		throw new Error(
+			`Expected final assistant reply for "${expectedTool}" was not recorded in session history.`,
+		);
+	}
+
+	const finalAssistantContent = String(finalAssistantMessage.content || '').trim();
+	if (
+		expectedAssistantIncludes &&
+		!normalizeComparableText(finalAssistantContent).includes(
+			normalizeComparableText(expectedAssistantIncludes),
+		)
+	) {
+		throw new Error(
+			`Final assistant reply for "${expectedTool}" did not include expected text "${expectedAssistantIncludes}"`,
+		);
+	}
+
+	if (
+		/<\/?think(?:ing)?>/i.test(finalAssistantContent) ||
+		/<<<\[?TOOL_REQUEST\]?>>>|tool_name\s*[:=]/i.test(finalAssistantContent)
+	) {
+		throw new Error(
+			`Final assistant reply for "${expectedTool}" still contained leaked hidden/protocol content.`,
+		);
+	}
+
+	return finalAssistantContent;
+}
+
 export function extractScenarioResultFromSession(options) {
 	const {
 		messages,
@@ -762,6 +1111,14 @@ export function extractScenarioResultFromSession(options) {
 		previousMessageCount,
 	} = options;
 	const nextMessages = messages.slice(previousMessageCount);
+	if (typeof scenario.validateMessages === 'function') {
+		return scenario.validateMessages({
+			messages: nextMessages,
+			scenario,
+			previousMessageCount,
+		});
+	}
+
 	const matchedToolCalls = [];
 	let toolCallMessageIndex = -1;
 
@@ -800,8 +1157,9 @@ export function extractScenarioResultFromSession(options) {
 	const rawToolResultContent = String(toolResultMessage?.content || '');
 	let toolResultContent = rawToolResultContent;
 	let toolResultComparableCandidates = [rawToolResultContent];
+	let parsedToolResult;
 	try {
-		const parsedToolResult = JSON.parse(rawToolResultContent);
+		parsedToolResult = JSON.parse(rawToolResultContent);
 		if (typeof parsedToolResult?.content === 'string') {
 			toolResultContent = parsedToolResult.content;
 		}
@@ -837,45 +1195,24 @@ export function extractScenarioResultFromSession(options) {
 		);
 	}
 
-	const finalAssistantMessage = nextMessages
-		.slice(Math.max(toolCallMessageIndex, toolResultMessageIndex) + 1)
-		.find(message => {
-			if (message?.role !== 'assistant') {
-				return false;
-			}
+	const scenarioValidation =
+		typeof scenario.validateToolResult === 'function'
+			? scenario.validateToolResult({
+				parsedToolResult,
+				rawToolResultContent,
+				toolResultComparableCandidates,
+			}) || {}
+			: {};
 
-			if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
-				return false;
-			}
-
-			return String(message.content || '').trim().length > 0;
-		});
-	if (!finalAssistantMessage) {
-		throw new Error(
-			`Expected final assistant reply for "${scenario.expectedTool}" was not recorded in session history.`,
-		);
-	}
-
-	const finalAssistantContent = String(finalAssistantMessage.content || '').trim();
-	if (
-		scenario.expectedAssistantIncludes &&
-		!normalizeComparableText(finalAssistantContent).includes(
-			normalizeComparableText(scenario.expectedAssistantIncludes),
-		)
-	) {
-		throw new Error(
-			`Final assistant reply for "${scenario.expectedTool}" did not include expected text "${scenario.expectedAssistantIncludes}"`,
-		);
-	}
-
-	if (
-		/<\/?think(?:ing)?>/i.test(finalAssistantContent) ||
-		/<<<\[?TOOL_REQUEST\]?>>>|tool_name\s*[:=]/i.test(finalAssistantContent)
-	) {
-		throw new Error(
-			`Final assistant reply for "${scenario.expectedTool}" still contained leaked hidden/protocol content.`,
-		);
-	}
+	const finalAssistantContent = extractFinalAssistantContent({
+		messages: nextMessages.slice(
+			Math.max(toolCallMessageIndex, toolResultMessageIndex) + 1,
+		),
+		expectedAssistantIncludes:
+			scenarioValidation.expectedAssistantIncludes ||
+			scenario.expectedAssistantIncludes,
+		expectedTool: scenario.expectedTool,
+	});
 
 	return {
 		scenario: scenario.name,
@@ -981,14 +1318,31 @@ async function runScenario(
 async function runMode(options) {
 	const {
 		mode,
+		suite,
 		parsedConfig,
 		workDir,
+		probeFile,
+		probeExpected,
 		timeoutMs,
 		keepTemp,
-		readTarget,
 		sourceSnowDir,
 	} = options;
 	const {tempRoot} = createIsolatedSnowHome(parsedConfig, mode, sourceSnowDir);
+	const preparedWorkDir = prepareScenarioWorkDir({
+		suite,
+		workDir,
+		tempRoot,
+	});
+	const runtimeWorkDir = preparedWorkDir.runtimeWorkDir;
+	const readTarget = resolveReadTarget(runtimeWorkDir, probeFile);
+	const modeScenarios = getModeScenarios({
+		suite,
+		probeExpected,
+	});
+	const suiteScenarios = modeScenarios[mode];
+	if (!suiteScenarios || suiteScenarios.length === 0) {
+		throw new Error(`Suite "${suite}" does not support mode "${mode}".`);
+	}
 	const entrypoint = resolveCliEntrypoint();
 	const port = await getFreePort();
 	const baseUrl = `http://127.0.0.1:${port}`;
@@ -1003,7 +1357,7 @@ async function runMode(options) {
 			'--sse-port',
 			String(port),
 			'--work-dir',
-			workDir,
+			runtimeWorkDir,
 		],
 		{
 			cwd: PROJECT_ROOT,
@@ -1036,10 +1390,10 @@ async function runMode(options) {
 		await eventStream.waitForEvent(0, event => event.type === 'connected', 5000);
 
 		const firstScenario = {
-			...MODE_SCENARIOS[mode][0],
-			prompt: MODE_SCENARIOS[mode][0].buildPrompt
-				? MODE_SCENARIOS[mode][0].buildPrompt(readTarget)
-				: MODE_SCENARIOS[mode][0].prompt,
+			...suiteScenarios[0],
+			prompt: suiteScenarios[0].buildPrompt
+				? suiteScenarios[0].buildPrompt(readTarget)
+				: suiteScenarios[0].prompt,
 		};
 		const sessionStartIndex = eventStream.events.length;
 		await postJson(`${baseUrl}/message`, {
@@ -1069,7 +1423,7 @@ async function runMode(options) {
 		const scenarioResults = [firstResult];
 		let previousMessageCount = firstResult.messageCount;
 
-		for (const scenario of MODE_SCENARIOS[mode].slice(1)) {
+		for (const scenario of suiteScenarios.slice(1)) {
 			const resolvedScenario = {
 				...scenario,
 				prompt: scenario.buildPrompt ? scenario.buildPrompt(readTarget) : scenario.prompt,
@@ -1090,9 +1444,13 @@ async function runMode(options) {
 		return {
 			entry: 'runtime-blackbox',
 			cliEntrypoint: entrypoint.label,
+			suite,
 			mode,
 			port,
 			sessionId,
+			workDir: runtimeWorkDir,
+			probeFile: readTarget,
+			templateRepo: preparedWorkDir.templateRepo,
 			scenarioResults,
 		};
 	} catch (error) {
@@ -1125,9 +1483,8 @@ async function run() {
 	const {parsedConfig, snowConfig, configSource, sourceSnowDir} = loadBaseConfig({
 		configPath: options.configPath,
 	});
-	const modes = resolveModes(snowConfig, options.modes);
+	const modes = resolveModesForSuite(options.suite, snowConfig, options.modes);
 	const workDir = resolveRuntimeWorkDir({workDir: options.workDir});
-	const readTarget = resolveReadTarget(workDir);
 	const results = [];
 
 	for (const mode of modes) {
@@ -1135,9 +1492,11 @@ async function run() {
 		results.push(
 			await runMode({
 				mode,
+				suite: options.suite,
 				parsedConfig,
 				workDir,
-				readTarget,
+				probeFile: options.probeFile,
+				probeExpected: options.probeExpected,
 				sourceSnowDir,
 				timeoutMs: options.timeoutMs,
 				keepTemp: options.keepTemp,
@@ -1150,11 +1509,14 @@ async function run() {
 			{
 				config: {
 					entry: 'runtime-blackbox',
-					configSource,
-					workDir,
-					modes,
-					timeoutMs: options.timeoutMs,
-				},
+				configSource,
+				suite: options.suite,
+				workDir,
+				modes,
+				timeoutMs: options.timeoutMs,
+				probeFile: options.probeFile || null,
+				probeExpected: options.probeExpected || null,
+			},
 				results,
 			},
 			null,

@@ -8,6 +8,7 @@ import {performHybridCompression} from '../../utils/core/subAgentContextCompress
 import {getOpenAiConfig} from '../../utils/config/apiConfig.js';
 import {getHybridCompressEnabled} from '../../utils/config/projectSettings.js';
 import {getTodoService} from '../../utils/execution/mcpToolsManager.js';
+import {projectToolMessageForContext} from '../../utils/session/toolMessageProjection.js';
 import {navigateTo} from '../integration/useGlobalNavigation.js';
 import type {UsageInfo} from '../../api/chat.js';
 import {resetTerminal} from '../../utils/execution/terminal.js';
@@ -87,16 +88,19 @@ export async function executeContextCompression(
 		const sessionMessages = currentSession.messages;
 
 		// 转换为 ChatMessage 格式（保留所有关键字段）
-		const chatMessages = sessionMessages.map(msg => ({
-			role: msg.role,
-			content: msg.content,
-			tool_call_id: msg.tool_call_id,
-			tool_calls: msg.tool_calls,
-			images: msg.images,
-			reasoning: msg.reasoning,
-			thinking: msg.thinking, // 保留 thinking 字段（Anthropic Extended Thinking）
-			subAgentInternal: msg.subAgentInternal,
-		}));
+		const chatMessages = sessionMessages.map(msg => {
+			const projectedMessage = projectToolMessageForContext(msg);
+			return {
+				role: projectedMessage.role,
+				content: projectedMessage.content,
+				tool_call_id: projectedMessage.tool_call_id,
+				tool_calls: projectedMessage.tool_calls,
+				images: projectedMessage.images,
+				reasoning: projectedMessage.reasoning,
+				thinking: projectedMessage.thinking, // 保留 thinking 字段（Anthropic Extended Thinking）
+				subAgentInternal: projectedMessage.subAgentInternal,
+			};
+		});
 
 		// Check if Hybrid Compress mode is enabled
 		const useHybridCompress = getHybridCompressEnabled();

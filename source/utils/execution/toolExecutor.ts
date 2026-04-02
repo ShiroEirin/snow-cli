@@ -129,6 +129,8 @@ const TOOL_HISTORY_MAX_LINES = 24;
 const TOOL_HISTORY_MAX_CHARS = 1600;
 const TOOL_HISTORY_MAX_ARRAY_ITEMS = 5;
 const TOOL_HISTORY_MAX_DEPTH = 4;
+const NOTEBOOK_HISTORY_BLOCK_PATTERN =
+	/(?:\n\n|\n|^)={20,}\n(?:\p{Extended_Pictographic}\uFE0F?\s*)?CODE NOTEBOOKS \(Latest 10\):\n={20,}\n[\s\S]*$/u;
 const TOOL_HISTORY_OMITTED_KEYS = new Set([
 	'requestId',
 	'invocationId',
@@ -138,8 +140,12 @@ const TOOL_HISTORY_OMITTED_KEYS = new Set([
 	'timestamp',
 ]);
 
+function stripNotebookHistoryBlock(text: string): string {
+	return text.replace(NOTEBOOK_HISTORY_BLOCK_PATTERN, '');
+}
+
 function summarizeToolHistoryText(text: string): string {
-	const normalized = text.replace(/\r\n?/g, '\n').trim();
+	const normalized = stripNotebookHistoryBlock(text.replace(/\r\n?/g, '\n')).trim();
 	if (!normalized) {
 		return '';
 	}
@@ -592,6 +598,10 @@ export async function executeToolCall(
 					tool_call_id: toolCall.id,
 					role: 'tool',
 					content: JSON.stringify(teamResult),
+					historyContent: buildToolHistoryContent(
+						teamResult,
+						JSON.stringify(teamResult),
+					),
 				};
 			} catch (error: any) {
 				result = {
@@ -710,6 +720,10 @@ export async function executeToolCall(
 					tool_call_id: toolCall.id,
 					role: 'tool',
 					content: subAgentContent,
+					historyContent: buildToolHistoryContent(
+						subAgentResult,
+						subAgentContent,
+					),
 				};
 			} finally {
 				// Always unregister the sub-agent when it completes (success or error)

@@ -8,6 +8,7 @@ export type ConfigDraftInput = Pick<
 	| 'enableVcpTimeBridge'
 	| 'backendMode'
 	| 'toolTransport'
+	| 'bridgeWsUrl'
 	| 'bridgeVcpKey'
 	| 'bridgeAccessToken'
 	| 'systemPromptId'

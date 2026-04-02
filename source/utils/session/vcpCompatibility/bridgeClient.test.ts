@@ -6,9 +6,14 @@ const test = anyTest as any;
 
 const bridgeConfig: Pick<
 	ApiConfig,
-	'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken' | 'toolTransport'
+	| 'baseUrl'
+	| 'bridgeWsUrl'
+	| 'bridgeVcpKey'
+	| 'bridgeAccessToken'
+	| 'toolTransport'
 > = {
 	baseUrl: 'http://127.0.0.1:6005',
+	bridgeWsUrl: '',
 	bridgeVcpKey: '123456',
 	bridgeAccessToken: '',
 	toolTransport: 'bridge',
@@ -16,7 +21,11 @@ const bridgeConfig: Pick<
 
 const hybridConfig: Pick<
 	ApiConfig,
-	'baseUrl' | 'bridgeVcpKey' | 'bridgeAccessToken' | 'toolTransport'
+	| 'baseUrl'
+	| 'bridgeWsUrl'
+	| 'bridgeVcpKey'
+	| 'bridgeAccessToken'
+	| 'toolTransport'
 > = {
 	...bridgeConfig,
 	toolTransport: 'hybrid',
@@ -153,6 +162,32 @@ test('getManifest reuses cache across bridge and hybrid transport modes', async 
 	t.is(sendCount, 1);
 	t.deepEqual(bridgeManifest, hybridManifest);
 	t.is(client.manifestCache.size, 1);
+	client.disconnect();
+});
+
+test('buildWebSocketUrl prefers explicit bridgeWsUrl override', (t: any) => {
+	const client = new SnowBridgeClient() as any;
+
+	t.is(
+		client.buildWebSocketUrl({
+			baseUrl: 'http://127.0.0.1:6005',
+			bridgeWsUrl: 'wss://bridge.example.com/socket',
+			bridgeVcpKey: '',
+		}),
+		'wss://bridge.example.com/socket',
+	);
+	client.disconnect();
+});
+
+test('buildConnectionKey includes explicit bridgeWsUrl override', (t: any) => {
+	const client = new SnowBridgeClient() as any;
+	const derivedKey = client.buildConnectionKey(bridgeConfig);
+	const explicitKey = client.buildConnectionKey({
+		...bridgeConfig,
+		bridgeWsUrl: 'wss://bridge.example.com/socket',
+	});
+
+	t.not(derivedKey, explicitKey);
 	client.disconnect();
 });
 

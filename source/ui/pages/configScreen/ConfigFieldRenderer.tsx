@@ -50,6 +50,8 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 		enableVcpTimeBridge,
 		backendMode,
 		toolTransport,
+		bridgeWsUrl,
+		setBridgeWsUrl,
 		bridgeVcpKey,
 		setBridgeVcpKey,
 		bridgeAccessToken,
@@ -281,6 +283,34 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 						<Box marginLeft={3}>
 							<Text color={theme.colors.menuSecondary}>
 								{bridgeVcpKey || t.configScreen.notSet}
+							</Text>
+						</Box>
+					)}
+				</Box>
+			);
+
+		case 'bridgeWsUrl':
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.bridgeWsUrl}
+					</Text>
+					{isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<TextInput
+								value={bridgeWsUrl}
+								onChange={value =>
+									setBridgeWsUrl(stripFocusArtifacts(value))
+								}
+								placeholder="wss://bridge.example.com/vcp-distributed-server/VCP_Key=Snow"
+							/>
+						</Box>
+					)}
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>
+								{bridgeWsUrl || t.configScreen.notSet}
 							</Text>
 						</Box>
 					)}

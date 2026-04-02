@@ -27,13 +27,20 @@ test('validate hybrid transport requires bridge key like bridge mode', (t: any) 
 		validateApiConfig({
 			toolTransport: 'hybrid',
 		}).includes(
-			'bridgeVcpKey is required when toolTransport is set to bridge or hybrid',
+			'bridgeVcpKey is required when toolTransport is set to bridge or hybrid unless bridgeWsUrl is provided',
 		),
 	);
 	t.deepEqual(
 		validateApiConfig({
 			toolTransport: 'hybrid',
 			bridgeVcpKey: 'Snow',
+		}),
+		[],
+	);
+	t.deepEqual(
+		validateApiConfig({
+			toolTransport: 'hybrid',
+			bridgeWsUrl: 'wss://bridge.example.com/vcp-distributed-server/VCP_Key=Snow',
 		}),
 		[],
 	);

@@ -168,6 +168,7 @@ export type TranslationKeys = {
 		toolTransportLocal: string;
 		toolTransportBridge: string;
 		toolTransportHybrid: string;
+		bridgeWsUrl: string;
 		bridgeVcpKey: string;
 		bridgeAccessToken: string;
 		anthropicBeta: string;

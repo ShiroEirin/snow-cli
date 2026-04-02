@@ -2,6 +2,10 @@ import type {ChatMessage} from '../../../api/chat.js';
 import {sessionManager} from '../../../utils/session/sessionManager.js';
 import type {MCPTool} from '../../../utils/execution/mcpToolsManager.js';
 import type {Message} from '../../../ui/components/chat/MessageList.js';
+import {
+	getVcpStreamingSuppressionDecision,
+	type VcpStreamingSuppressionState,
+} from '../../../utils/session/vcpCompatibility/display.js';
 import {createStreamGenerator} from './streamFactory.js';
 import type {
 	ConversationHandlerOptions,
@@ -42,6 +46,7 @@ export async function processStreamRound(ctx: {
 	setRetryStatus?: React.Dispatch<React.SetStateAction<any>>;
 	setContextUsage: React.Dispatch<React.SetStateAction<any>>;
 	options: ConversationHandlerOptions;
+	createStreamGeneratorImpl?: typeof createStreamGenerator;
 }): Promise<StreamRoundResult> {
 	const {
 		config,
@@ -56,6 +61,7 @@ export async function processStreamRound(ctx: {
 		setRetryStatus,
 		setContextUsage,
 		options,
+		createStreamGeneratorImpl,
 	} = ctx;
 
 	let streamedContent = '';
@@ -82,6 +88,7 @@ export async function processStreamRound(ctx: {
 	let codeBlockBuffer = '';
 	let tableBuffer = '';
 	let listBuffer = '';
+	let vcpStreamingSuppressionState: VcpStreamingSuppressionState = null;
 	const pendingStreamLines: Message[] = [];
 	let lastFlushTime = 0;
 
@@ -165,6 +172,17 @@ export async function processStreamRound(ctx: {
 			return;
 		}
 
+		const suppressionDecision = getVcpStreamingSuppressionDecision(
+			line,
+			vcpStreamingSuppressionState,
+		);
+		if (suppressionDecision.suppress) {
+			flushTableBuffer();
+			flushListBuffer();
+			vcpStreamingSuppressionState = suppressionDecision.nextState;
+			return;
+		}
+
 		if (line.trimStart().startsWith('```')) {
 			flushTableBuffer();
 			flushListBuffer();
@@ -227,7 +245,7 @@ export async function processStreamRound(ctx: {
 		}
 	};
 
-	const streamGenerator = createStreamGenerator({
+	const streamGenerator = (createStreamGeneratorImpl || createStreamGenerator)({
 		config,
 		model,
 		conversationMessages,

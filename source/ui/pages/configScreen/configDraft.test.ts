@@ -9,6 +9,7 @@ test('build snow config draft keeps bridge and reasoning fields', t => {
 		requestMethod: 'chat',
 		backendMode: 'vcp',
 		toolTransport: 'bridge',
+		bridgeWsUrl: 'wss://bridge.example.com/vcp-distributed-server/VCP_Key=Snow',
 		bridgeVcpKey: 'Snow',
 		bridgeAccessToken: 'token',
 		geminiThinking: {
@@ -25,6 +26,10 @@ test('build snow config draft keeps bridge and reasoning fields', t => {
 	});
 
 	t.is(draft.snowcfg.toolTransport, 'bridge');
+	t.is(
+		draft.snowcfg.bridgeWsUrl,
+		'wss://bridge.example.com/vcp-distributed-server/VCP_Key=Snow',
+	);
 	t.is(draft.snowcfg.bridgeVcpKey, 'Snow');
 	t.deepEqual(draft.snowcfg.geminiThinking, {
 		enabled: true,
