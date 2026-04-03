@@ -894,6 +894,7 @@ ${role ? `Your role: ${role}` : ''}
 									tool_call_id: tc.id,
 									content: result.content,
 									historyContent: result.historyContent,
+									previewContent: result.previewContent,
 								} as ChatMessage);
 							} catch (e: any) {
 								messages.push({
@@ -979,6 +980,7 @@ ${role ? `Your role: ${role}` : ''}
 								tool_call_id: tc.id,
 								content: result.content,
 								historyContent: result.historyContent,
+								previewContent: result.previewContent,
 							} as ChatMessage);
 						} catch (e: any) {
 							messages.push({

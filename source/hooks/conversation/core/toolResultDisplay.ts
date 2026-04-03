@@ -32,6 +32,7 @@ export function buildToolResultMessages(
 				toolName: toolCall.function.name,
 				content: result.content,
 				historyContent: result.historyContent,
+				previewContent: result.previewContent,
 				isError,
 			});
 			let usage: any = undefined;
@@ -68,6 +69,7 @@ export function buildToolResultMessages(
 			toolName: toolCall.function.name,
 			content: result.content,
 			historyContent: result.historyContent,
+			previewContent: result.previewContent,
 			isError,
 		});
 

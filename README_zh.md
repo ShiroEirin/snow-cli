@@ -88,7 +88,13 @@ winget install Microsoft.WindowsTerminal
 - [VCP 五层边界与 Seam 说明](docs/usage/zh/22.VCP五层边界与Seam说明.md) - 当前分支的五层职责、Snow Core seam 约束与边界防回退测试
 - [VCP TUI 测试标准分支说明](docs/usage/zh/23.VCPTUI测试标准分支说明.md) - 当前 0.8 测试标准分支的目标、配置前提、已实现能力与未承诺项
 - [SnowBridge 与工具传输模式](docs/usage/zh/24.SnowBridge与工具传输模式.md) - `local / bridge / hybrid` 的真实行为、配置方式、自动请求头与故障语义
-- [VCP 兼容验证与已知限制](docs/usage/zh/25.VCP兼容验证与已知限制.md) - 当前黑盒/定向验证口径、建议测试命令、已知限制与 1.0 前待补项
+- [VCP 兼容验证与已知限制](docs/usage/zh/25.VCP兼容验证与已知限制.md) - 当前黑盒/定向验证口径、bridge sidecar 的已验证范围、已知限制与 1.0 前待补项
+
+当前这一组文档的统一读法：
+
+- 它描述的是 `snow-cli` 当前 `VCP TUI 0.8` 测试标准分支，不是 `main` 的正式稳定承诺
+- 五层架构当前被视为“过渡性正确架构”，目标是先稳住边界，再识别哪些能力值得后续内化为 `Snow Core` 扩展点
+- `36.4 / 36.5` 已确认 `SnowBridge` sidecar 和 `bridge / hybrid` 主桥接链稳定，但 `FileOperator / UrlFetch / LightMemo / VSearch` 这批高膨胀插件仍建议后续补 targeted live 样本
 
 ### 推荐使用的 ROLE.md
 

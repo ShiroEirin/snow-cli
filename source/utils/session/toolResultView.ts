@@ -7,6 +7,7 @@ interface BuildToolResultViewOptions {
 	toolName: string;
 	content: string;
 	historyContent?: string;
+	previewContent?: string;
 	isError?: boolean;
 }
 
@@ -44,21 +45,29 @@ function shouldUseCompactPreview(toolName: string): boolean {
 export function buildToolResultView(
 	options: BuildToolResultViewOptions,
 ): ToolResultView {
-	const {toolName, content, historyContent, isError = false} = options;
-	const normalizedHistoryContent =
-		typeof historyContent === 'string' && historyContent.trim().length > 0
+	const {
+		toolName,
+		content,
+		historyContent,
+		previewContent,
+		isError = false,
+	} = options;
+	const normalizedPreviewContent =
+		typeof previewContent === 'string' && previewContent.trim().length > 0
+			? previewContent
+			: typeof historyContent === 'string' && historyContent.trim().length > 0
 			? historyContent
 			: undefined;
 
 	if (
 		!isError &&
-		normalizedHistoryContent &&
-		normalizedHistoryContent !== content &&
+		normalizedPreviewContent &&
+		normalizedPreviewContent !== content &&
 		shouldUseCompactPreview(toolName)
 	) {
 		return {
 			toolName,
-			previewContent: normalizedHistoryContent,
+			previewContent: normalizedPreviewContent,
 		};
 	}
 

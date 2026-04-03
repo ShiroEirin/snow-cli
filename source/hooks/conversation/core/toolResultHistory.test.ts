@@ -13,12 +13,14 @@ test('buildHistoryToolMessage preserves raw content while keeping summary sideca
 			role: 'tool',
 			content: 'raw tool result',
 			historyContent: 'summarized tool result',
+			previewContent: '{"summary":"ui preview"}',
 		},
 		'success',
 	);
 
 	t.is(message.content, 'raw tool result');
 	t.is(message.historyContent, 'summarized tool result');
+	t.is(message.previewContent, '{"summary":"ui preview"}');
 	t.is(message.messageStatus, 'success');
 });
 
@@ -40,12 +42,14 @@ test('buildConversationToolMessage projects summarized content for model context
 			role: 'tool',
 			content: 'raw tool result',
 			historyContent: 'summarized tool result',
+			previewContent: '{"summary":"ui preview"}',
 		},
 		'success',
 	);
 
 	t.is(message.content, 'summarized tool result');
 	t.is(message.historyContent, 'summarized tool result');
+	t.is(message.previewContent, '{"summary":"ui preview"}');
 	t.is(message.messageStatus, 'success');
 });
 
@@ -66,10 +70,22 @@ test('projectToolMessageForContext uses summarized tool content only for tool me
 		role: 'tool',
 		content: 'raw tool result',
 		historyContent: 'summarized tool result',
+		previewContent: '{"summary":"ui preview"}',
 	});
 
 	t.is(projectedToolMessage.content, 'summarized tool result');
 	t.is(projectedToolMessage.historyContent, 'summarized tool result');
+	t.is(projectedToolMessage.previewContent, '{"summary":"ui preview"}');
+
+	const projectedWithoutHistory = projectToolMessageForContext({
+		tool_call_id: 'tool-4b',
+		role: 'tool',
+		content: 'raw tool result',
+		previewContent: '{"summary":"ui preview"}',
+	});
+
+	t.is(projectedWithoutHistory.content, 'raw tool result');
+	t.is(projectedWithoutHistory.previewContent, '{"summary":"ui preview"}');
 
 	const projectedAssistantMessage = projectToolMessageForContext({
 		role: 'assistant',

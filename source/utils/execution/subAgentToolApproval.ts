@@ -203,6 +203,7 @@ export async function executeMcpTools(
 			tool_call_id: toolCall.id,
 			content: result.content,
 			...(result.historyContent ? {historyContent: result.historyContent} : {}),
+			...(result.previewContent ? {previewContent: result.previewContent} : {}),
 			...(result.messageStatus ? {messageStatus: result.messageStatus} : {}),
 			...(result.hookFailed
 				? {

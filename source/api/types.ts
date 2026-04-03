@@ -20,7 +20,8 @@ export interface ToolCall {
 export interface ChatMessage {
 	role: 'system' | 'user' | 'assistant' | 'tool';
 	content: string;
-	historyContent?: string; // Compact tool-result preview content used by replay/display sidecars
+	historyContent?: string; // Compact tool-result content used when projecting tool history back into model context
+	previewContent?: string; // Display-only compact preview content for replay/UI sidecars
 	messageStatus?: 'pending' | 'success' | 'error';
 	tool_call_id?: string;
 	tool_calls?: ToolCall[];

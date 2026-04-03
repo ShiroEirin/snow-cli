@@ -7,11 +7,12 @@ test('buildToolResultView uses compact preview for bridge tools', t => {
 		toolName: 'vcp-bridge-tool',
 		content: '{"content":"raw"}',
 		historyContent: 'preview summary',
+		previewContent: '{"summary":"preview summary"}',
 		isError: false,
 	});
 
 	t.is(result.toolName, 'vcp-bridge-tool');
-	t.is(result.previewContent, 'preview summary');
+	t.is(result.previewContent, '{"summary":"preview summary"}');
 });
 
 test('buildToolResultView keeps specialized previews on raw payloads', t => {
@@ -19,6 +20,7 @@ test('buildToolResultView keeps specialized previews on raw payloads', t => {
 		toolName: 'filesystem-read',
 		content: '{"content":"raw"}',
 		historyContent: 'preview summary',
+		previewContent: '{"summary":"preview summary"}',
 		isError: false,
 	});
 
@@ -30,8 +32,20 @@ test('buildToolResultView skips compact preview for errors', t => {
 		toolName: 'vcp-bridge-tool',
 		content: 'Error: boom',
 		historyContent: 'preview summary',
+		previewContent: '{"summary":"preview summary"}',
 		isError: true,
 	});
 
 	t.is(result.previewContent, undefined);
+});
+
+test('buildToolResultView falls back to historyContent when previewContent is absent', t => {
+	const result = buildToolResultView({
+		toolName: 'vcp-bridge-tool',
+		content: '{"content":"raw"}',
+		historyContent: 'preview summary',
+		isError: false,
+	});
+
+	t.is(result.previewContent, 'preview summary');
 });

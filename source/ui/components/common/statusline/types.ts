@@ -103,6 +103,8 @@ export interface StatusLineSystemState {
 		currentName?: string;
 		baseUrl?: string;
 		requestMethod?: string;
+		backendMode?: string;
+		toolTransport?: string;
 		advancedModel?: string;
 		basicModel?: string;
 		maxContextTokens?: number;

@@ -7,11 +7,13 @@ import {useI18n} from '../../../i18n/index.js';
 import {useTheme} from '../../contexts/ThemeContext.js';
 import {getSimpleMode} from '../../../utils/config/themeConfig.js';
 import {smartTruncatePath} from '../../../utils/ui/messageFormatter.js';
+import {configEvents} from '../../../utils/config/configEvents.js';
 import {
 	loadProfile,
 	getActiveProfileName,
 } from '../../../utils/config/configManager.js';
 import {useStatusLineHookItems} from './statusline/useStatusLineHooks.js';
+import {buildVcpToolPlaneIndicator} from './statusline/vcpToolPlane.js';
 import type {
 	BackendConnectionStatus,
 	StatusLineCodebaseProgress,
@@ -25,6 +27,7 @@ import type {
 
 const MEMORY_REFRESH_INTERVAL_MS = 5000;
 const PROCESS_MEMORY_COMMAND_TIMEOUT_MS = 1500;
+const PROFILE_CONFIG_REFRESH_INTERVAL_MS = 1000;
 const execFileAsync = promisify(execFile);
 const WINDOWS_POWERSHELL_CANDIDATES = [
 	'pwsh.exe',
@@ -309,12 +312,32 @@ export default function StatusLine({
 		() => (contextUsage ? buildContextWindowState(contextUsage) : undefined),
 		[contextUsage],
 	);
+	const profileName = currentProfileName ?? getActiveProfileName();
+	const [profileConfig, setProfileConfig] = React.useState(() =>
+		loadProfile(profileName),
+	);
 
-	// 获取当前 profile 的完整配置（不含 apiKey）
-	const profileConfig = React.useMemo(() => {
-		const profileName = currentProfileName ?? getActiveProfileName();
-		return loadProfile(profileName);
-	}, [currentProfileName]);
+	React.useEffect(() => {
+		const refreshProfileConfig = () => {
+			setProfileConfig(loadProfile(profileName));
+		};
+
+		refreshProfileConfig();
+		const timer = setInterval(
+			refreshProfileConfig,
+			PROFILE_CONFIG_REFRESH_INTERVAL_MS,
+		);
+		const handleConfigChange = () => {
+			refreshProfileConfig();
+		};
+
+		configEvents.onConfigChange(handleConfigChange);
+
+		return () => {
+			clearInterval(timer);
+			configEvents.removeConfigChangeListener(handleConfigChange);
+		};
+	}, [profileName]);
 
 	const statusLineHookContext = React.useMemo(() => {
 		const cfg = profileConfig?.snowcfg;
@@ -363,6 +386,8 @@ export default function StatusLine({
 					currentName: currentProfileName,
 					baseUrl: cfg?.baseUrl,
 					requestMethod: cfg?.requestMethod,
+					backendMode: cfg?.backendMode,
+					toolTransport: cfg?.toolTransport,
 					advancedModel: cfg?.advancedModel,
 					basicModel: cfg?.basicModel,
 					maxContextTokens: cfg?.maxContextTokens,
@@ -423,6 +448,29 @@ export default function StatusLine({
 		yoloMode,
 	]);
 	const statusLineHookItems = useStatusLineHookItems(statusLineHookContext);
+	const vcpToolPlaneIndicator = React.useMemo(
+		() =>
+			buildVcpToolPlaneIndicator(
+				{
+					backendMode: profileConfig?.snowcfg.backendMode,
+					toolTransport: profileConfig?.snowcfg.toolTransport,
+				},
+				{
+					label: t.configScreen.toolTransport,
+					local: t.configScreen.toolTransportLocal,
+					bridge: t.configScreen.toolTransportBridge,
+					hybrid: t.configScreen.toolTransportHybrid,
+				},
+			),
+		[
+			profileConfig?.snowcfg.backendMode,
+			profileConfig?.snowcfg.toolTransport,
+			t.configScreen.toolTransport,
+			t.configScreen.toolTransportBridge,
+			t.configScreen.toolTransportHybrid,
+			t.configScreen.toolTransportLocal,
+		],
+	);
 
 	const simpleMemoryStatusText = `⛁ ${formattedMemoryUsage}`;
 	const detailedMemoryStatusText = `⛁ ${t.chatScreen.memoryUsageLabel} ${formattedMemoryUsage}`;
@@ -509,6 +557,7 @@ export default function StatusLine({
 		copyStatusMessage ||
 		currentProfileName ||
 		compressBlockToast ||
+		vcpToolPlaneIndicator ||
 		statusLineHookItems.length > 0 ||
 		detailedMemoryStatusText;
 
@@ -531,6 +580,13 @@ export default function StatusLine({
 			statusItems.push({
 				text: item.text,
 				color: item.color || theme.colors.menuSecondary,
+			});
+		}
+
+		if (vcpToolPlaneIndicator) {
+			statusItems.push({
+				text: vcpToolPlaneIndicator.simpleText,
+				color: theme.colors.menuInfo,
 			});
 		}
 
@@ -679,6 +735,14 @@ export default function StatusLine({
 					</Text>
 				</Box>
 			))}
+
+			{vcpToolPlaneIndicator && (
+				<Box>
+					<Text color={theme.colors.menuInfo} dimColor>
+						{vcpToolPlaneIndicator.detailedText}
+					</Text>
+				</Box>
+			)}
 
 			<Box>
 				<Text color={theme.colors.menuSecondary} dimColor>

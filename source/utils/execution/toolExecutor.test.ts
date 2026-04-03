@@ -12,10 +12,12 @@ import {
 	type ToolResult,
 	type ToolCall,
 } from './toolExecutor.js';
+import {buildToolHistoryArtifacts} from './toolHistoryArtifacts.js';
 import {
 	clearToolExecutionBindings,
 	registerToolExecutionBindings,
 } from '../session/vcpCompatibility/toolExecutionBinding.js';
+import {snowBridgeClient} from '../session/vcpCompatibility/bridgeClient.js';
 import {lineHash} from '../../mcp/utils/filesystem/hashline.utils.js';
 import {teamService} from '../../mcp/team.js';
 
@@ -105,8 +107,8 @@ test('invalid concatenated tool arguments fail instead of truncating payload', a
 	);
 });
 
-test('buildToolHistoryContent strips bridge envelope noise and large details', (t: any) => {
-	const historyContent = buildToolHistoryContent(
+test('buildToolHistoryArtifacts split model history from UI preview summaries', (t: any) => {
+	const artifacts = buildToolHistoryArtifacts(
 		{
 			requestId: 'request-1',
 			invocationId: 'invoke-1',
@@ -162,20 +164,30 @@ test('buildToolHistoryContent strips bridge envelope noise and large details', (
 		},
 		'fallback tool text',
 	);
+	const historySummary = JSON.parse(artifacts.previewContent!);
 
-	t.false(historyContent.includes('requestId'));
-	t.false(historyContent.includes('invocationId'));
-	t.false(historyContent.includes('"details"'));
-	t.false(historyContent.includes('"timestamp"'));
-	t.false(historyContent.includes('"type":"text"'));
-	t.true(historyContent.includes('"status":"success"'));
-	t.true(historyContent.includes('"asyncStatus"'));
-	t.true(historyContent.includes('Directory listing of `D:\\\\repo` (28 items)'));
-	t.true(historyContent.includes('[truncated'));
+	t.truthy(artifacts.previewContent);
+	t.true(artifacts.historyContent.includes('"status":"success"'));
+	t.true(artifacts.historyContent.includes('"asyncStatus"'));
+	t.true(artifacts.historyContent.includes('Directory listing of `D:\\\\repo` (28 items)'));
+	t.true(artifacts.historyContent.includes('[truncated'));
+	t.false(artifacts.historyContent.includes('requestId'));
+	t.false(artifacts.historyContent.includes('invocationId'));
+	t.false(artifacts.historyContent.includes('"details"'));
+	t.false(artifacts.historyContent.includes('"timestamp"'));
+	t.is(historySummary.status, 'success');
+	t.is(historySummary.asyncState, 'completed');
+	t.true(historySummary.summary.includes('Directory listing of `D:\\repo` (28 items)'));
+	t.true(historySummary.itemCount >= 20);
+	t.true(Array.isArray(historySummary.topItems));
+	t.true(historySummary.topItems.length > 0);
+	t.true(historySummary.truncated);
+	t.false('rawPayloadRef' in historySummary);
+	t.not(artifacts.historyContent, artifacts.previewContent);
 });
 
-test('buildToolHistoryContent truncates oversized plain-text tool output', (t: any) => {
-	const historyContent = buildToolHistoryContent(
+test('buildToolHistoryArtifacts keep plain-text history separate from preview schema', (t: any) => {
+	const artifacts = buildToolHistoryArtifacts(
 		[
 			'line01',
 			'line02',
@@ -206,11 +218,17 @@ test('buildToolHistoryContent truncates oversized plain-text tool output', (t: a
 		].join('\n'),
 		'fallback tool text',
 	);
+	const historySummary = JSON.parse(artifacts.previewContent!);
 
-	t.true(historyContent.includes('line01'));
-	t.true(historyContent.includes('line24'));
-	t.false(historyContent.includes('line26'));
-	t.true(historyContent.includes('[truncated 2 more lines]'));
+	t.true(artifacts.historyContent.includes('line01'));
+	t.true(artifacts.historyContent.includes('line24'));
+	t.false(artifacts.historyContent.includes('line25'));
+	t.false(artifacts.historyContent.includes('line26'));
+	t.true(artifacts.historyContent.includes('[truncated 2 more lines]'));
+	t.is(historySummary.summary, 'line01');
+	t.deepEqual(historySummary.topItems, ['line02', 'line03', 'line04']);
+	t.true(historySummary.truncated);
+	t.false('rawPayloadRef' in historySummary);
 });
 
 test('buildToolHistoryContent strips appended notebook block from history text', (t: any) => {
@@ -247,6 +265,129 @@ test('buildToolHistoryContent preserves ordinary text outside notebook block for
 	);
 });
 
+test('buildToolHistoryArtifacts promotes oversized collections into structured summary payloads', (t: any) => {
+	const artifacts = buildToolHistoryArtifacts(
+		{
+			summary: 'Found files in repo',
+			files: Array.from({length: 8}, (_value, index) => ({
+				path: `src/file-${index}.ts`,
+			})),
+		},
+		'fallback tool text',
+	);
+
+	t.truthy(artifacts.historySummary);
+	t.truthy(artifacts.previewContent);
+	t.is(artifacts.historySummary?.summary, 'Found files in repo');
+	t.is(artifacts.historySummary?.itemCount, 8);
+	t.deepEqual(artifacts.historySummary?.topItems, [
+		'src/file-0.ts',
+		'src/file-1.ts',
+		'src/file-2.ts',
+	]);
+	t.false('rawPayloadRef' in (artifacts.historySummary || {}));
+	t.true(artifacts.historyContent.includes('"path":"src/file-0.ts"'));
+	t.false(artifacts.historyContent.includes('"itemCount":8'));
+	t.true(artifacts.previewContent?.includes('"itemCount":8'));
+});
+
+test('buildToolHistoryArtifacts honors bridge-provided sidecar summaries', (t: any) => {
+	const previewContent = JSON.stringify({
+		summary: 'Found 12 search hits',
+		status: 'success',
+		itemCount: 12,
+		topItems: ['src/a.ts', 'src/b.ts', 'src/c.ts'],
+		truncated: true,
+	});
+	const artifacts = buildToolHistoryArtifacts(
+		{
+			status: 'success',
+			result: {
+				results: Array.from({length: 12}, (_value, index) => ({
+					path: `src/file-${index}.ts`,
+				})),
+			},
+			historyContent: 'Search results compacted to top matches: src/a.ts, src/b.ts, src/c.ts',
+			previewContent,
+		},
+		'fallback tool text',
+	);
+
+	t.is(
+		artifacts.historyContent,
+		'Search results compacted to top matches: src/a.ts, src/b.ts, src/c.ts',
+	);
+	t.is(artifacts.previewContent, previewContent);
+	t.deepEqual(artifacts.historySummary, {
+		summary: 'Found 12 search hits',
+		status: 'success',
+		itemCount: 12,
+		topItems: ['src/a.ts', 'src/b.ts', 'src/c.ts'],
+		truncated: true,
+	});
+});
+
+test.serial(
+	'executeToolCall prefers bridge-provided compact sidecars for history',
+	async (t: any) => {
+		const toolPlaneKey = `tool-executor-bridge-sidecar-${++toolPlaneSequence}`;
+		const previewContent = JSON.stringify({
+			summary: 'VSearch generated research report for "SnowBridge"',
+			status: 'success',
+			itemCount: 6,
+			topItems: ['SnowBridge plugin', 'bridge contract', 'hybrid mode'],
+			truncated: true,
+		});
+		const originalExecuteTool = snowBridgeClient.executeTool;
+		registerToolExecutionBindings(toolPlaneKey, [
+			{
+				kind: 'bridge',
+				toolName: 'vcp-vsearch',
+				pluginName: 'VSearch',
+				displayName: 'VSearch',
+				commandName: 'Search',
+			},
+		]);
+
+		snowBridgeClient.executeTool = (async () => ({
+			status: 'success',
+			result: {
+				results: Array.from({length: 6}, (_value, index) => ({
+					title: `keyword-${index}`,
+					url: `https://example.com/${index}`,
+				})),
+			},
+			historyContent:
+				'VSearch generated research report for "SnowBridge"\nitemCount: 6\ntopItems:\n- SnowBridge plugin\n- bridge contract\n- hybrid mode\n[truncated raw result omitted]',
+			previewContent,
+		})) as typeof snowBridgeClient.executeTool;
+
+		try {
+			const result = await executeToolCallWithBindings(
+				{
+					id: 'bridge-sidecar-call',
+					type: 'function',
+					function: {
+						name: 'vcp-vsearch',
+						arguments: JSON.stringify({query: 'SnowBridge'}),
+					},
+				},
+				toolPlaneKey,
+			);
+
+			t.is(
+				result.historyContent,
+				'VSearch generated research report for "SnowBridge"\nitemCount: 6\ntopItems:\n- SnowBridge plugin\n- bridge contract\n- hybrid mode\n[truncated raw result omitted]',
+			);
+			t.is(result.previewContent, previewContent);
+			t.true(result.content.includes('"results"'));
+		} finally {
+			snowBridgeClient.executeTool = originalExecuteTool;
+			clearToolExecutionBindings(toolPlaneKey);
+		}
+	},
+);
+
 test.serial(
 	'team top-level tool results carry summarized history sidecar',
 	async (t: any) => {
@@ -274,9 +415,12 @@ test.serial(
 			const result = (await executeToolCall(toolCall)) as ToolResult;
 
 			t.truthy(result.historyContent);
+			t.truthy(result.previewContent);
 			t.true(result.content.includes('"members"'));
-			t.true(result.historyContent!.includes('"summary":"Team finished work"'));
+			t.false(result.historyContent!.includes('"summary":"Team finished work"'));
 			t.false(result.historyContent!.includes('"member-11"'));
+			t.true(result.previewContent!.includes('"summary":"Team finished work"'));
+			t.true(result.previewContent!.includes('"itemCount":12'));
 		} finally {
 			teamService.execute = originalExecute;
 		}

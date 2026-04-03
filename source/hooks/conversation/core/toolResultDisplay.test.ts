@@ -39,7 +39,8 @@ test('buildToolResultMessages keeps compact preview only for bridge-like tools',
 				role: 'tool',
 				tool_call_id: 'call-bridge',
 				content: '{"raw":"payload"}',
-				historyContent: 'compact bridge preview',
+				historyContent: 'model history summary',
+				previewContent: '{"summary":"compact bridge preview"}',
 				messageStatus: 'success',
 			},
 		],
@@ -57,7 +58,7 @@ test('buildToolResultMessages keeps compact preview only for bridge-like tools',
 	);
 
 	t.is(messages[0]?.toolResult, '{"raw":"payload"}');
-	t.is(messages[0]?.toolResultPreview, 'compact bridge preview');
+	t.is(messages[0]?.toolResultPreview, '{"summary":"compact bridge preview"}');
 });
 
 test('buildToolResultMessages does not create preview metadata for skill-execute strings', t => {

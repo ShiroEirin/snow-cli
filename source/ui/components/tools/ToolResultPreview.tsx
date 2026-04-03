@@ -8,6 +8,18 @@ interface ToolResultPreviewProps {
 	isSubAgentInternal?: boolean; // Whether this is a sub-agent internal tool
 }
 
+interface ToolHistorySummaryPreview {
+	summary: string;
+	status?: string;
+	asyncState?: string;
+	itemCount?: number;
+	topItems?: string[];
+	truncated?: boolean;
+	rawPayloadRef?: string; // Legacy sessions may still carry this metadata.
+}
+
+const TOOL_HISTORY_SUMMARY_MAX_LINES = 6;
+
 /**
  * Remove ANSI escape codes from text to prevent style leakage
  */
@@ -42,6 +54,80 @@ function renderPlainTextPreview(result: string, maxLines: number) {
 	);
 }
 
+function isToolHistorySummaryPreview(
+	value: unknown,
+): value is ToolHistorySummaryPreview {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		return false;
+	}
+
+	const candidate = value as Record<string, unknown>;
+	return (
+		typeof candidate['summary'] === 'string' &&
+		(candidate['rawPayloadRef'] === undefined ||
+			typeof candidate['rawPayloadRef'] === 'string')
+	);
+}
+
+function renderToolHistorySummaryPreview(
+	data: ToolHistorySummaryPreview,
+	maxLines: number,
+) {
+	const boundedMaxLines = Math.max(
+		1,
+		Math.min(maxLines, TOOL_HISTORY_SUMMARY_MAX_LINES),
+	);
+	const lines: string[] = [];
+	const appendLine = (line: string) => {
+		if (lines.length < boundedMaxLines) {
+			lines.push(line);
+		}
+	};
+
+	appendLine(data.summary);
+	if (data.itemCount !== undefined) {
+		appendLine(`items: ${data.itemCount}`);
+	}
+	if (data.status) {
+		appendLine(
+			`status: ${data.status}${data.asyncState ? ` (${data.asyncState})` : ''}`,
+		);
+	}
+
+	const topItems = Array.isArray(data.topItems)
+		? data.topItems.filter(
+				(item): item is string =>
+					typeof item === 'string' && item.trim().length > 0,
+		  )
+		: [];
+	const reservedTailLines = data.truncated ? 1 : 0;
+	const availableTopItemLines = Math.max(
+		boundedMaxLines - lines.length - reservedTailLines,
+		0,
+	);
+	for (const item of topItems.slice(0, availableTopItemLines)) {
+		appendLine(item);
+	}
+
+	const showEllipsis = data.truncated || topItems.length > availableTopItemLines;
+	if (showEllipsis && lines.length < boundedMaxLines) {
+		lines.push('…');
+	}
+
+	return (
+		<Box flexDirection="column" marginLeft={2}>
+			{lines.map((line, index) => {
+				const isLastLine = index === lines.length - 1;
+				return (
+					<Text key={index} color="gray" dimColor>
+						{isLastLine ? '└─' : '├─'} {line}
+					</Text>
+				);
+			})}
+		</Box>
+	);
+}
+
 /**
  * Display a compact preview of tool execution results
  * Shows a tree-like structure with limited content
@@ -61,6 +147,10 @@ export default function ToolResultPreview({
 	try {
 		// Try to parse JSON result
 		const data = JSON.parse(result);
+
+		if (isToolHistorySummaryPreview(data)) {
+			return renderToolHistorySummaryPreview(data, maxLines);
+		}
 
 		// Handle different tool types
 		if (toolName.startsWith('subagent-')) {

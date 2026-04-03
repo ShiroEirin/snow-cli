@@ -55,7 +55,8 @@ test('convertSessionMessagesToUI keeps compact preview for bridge-style tools', 
 			role: 'tool',
 			tool_call_id: 'call-bridge',
 			content: '{"raw":"payload"}',
-			historyContent: 'compact preview',
+			historyContent: 'model history summary',
+			previewContent: '{"summary":"compact preview"}',
 			messageStatus: 'success',
 		},
 	] as any);
@@ -65,7 +66,7 @@ test('convertSessionMessagesToUI keeps compact preview for bridge-style tools', 
 	);
 	t.truthy(toolMessage);
 	t.is(toolMessage?.toolResult, '{"raw":"payload"}');
-	t.is(toolMessage?.toolResultPreview, 'compact preview');
+	t.is(toolMessage?.toolResultPreview, '{"summary":"compact preview"}');
 });
 
 test('convertSessionMessagesToUI does not expose preview metadata for skill-execute strings', t => {

@@ -16,6 +16,11 @@ import type {SubAgentMessage} from './subAgentExecutor.js';
 import type {ConfirmationResult} from '../../ui/components/tools/ToolConfirmation.js';
 import type {ImageContent} from '../../api/types.js';
 import type {MultimodalContent} from '../../mcp/types/filesystem.types.js';
+import {
+	buildToolHistoryArtifacts,
+} from './toolHistoryArtifacts.js';
+
+export {buildToolHistoryContent} from './toolHistoryArtifacts.js';
 
 function parseToolArguments(
 	argsString: string,
@@ -86,6 +91,7 @@ export interface ToolResult {
 	role: 'tool';
 	content: string;
 	historyContent?: string; // Compact content used when writing tool results into conversation history
+	previewContent?: string; // Display-only compact preview content
 	images?: ImageContent[]; // Support multimodal content with images
 	editDiffData?: Record<string, any>; // Pre-extracted edit diff data for DiffViewer (survives token truncation)
 	messageStatus?: 'pending' | 'success' | 'error'; // Message status for UI rendering
@@ -123,198 +129,6 @@ export interface UserInteractionCallback {
 		customInput?: string;
 		cancelled?: boolean;
 	}>;
-}
-
-const TOOL_HISTORY_MAX_LINES = 24;
-const TOOL_HISTORY_MAX_CHARS = 1600;
-const TOOL_HISTORY_MAX_ARRAY_ITEMS = 5;
-const TOOL_HISTORY_MAX_DEPTH = 4;
-const NOTEBOOK_HISTORY_BLOCK_PATTERN =
-	/(?:\n\n|\n|^)={20,}\n(?:\p{Extended_Pictographic}\uFE0F?\s*)?CODE NOTEBOOKS \(Latest 10\):\n={20,}\n[\s\S]*$/u;
-const TOOL_HISTORY_OMITTED_KEYS = new Set([
-	'requestId',
-	'invocationId',
-	'toolId',
-	'originName',
-	'details',
-	'timestamp',
-]);
-
-function stripNotebookHistoryBlock(text: string): string {
-	return text.replace(NOTEBOOK_HISTORY_BLOCK_PATTERN, '');
-}
-
-function summarizeToolHistoryText(text: string): string {
-	const normalized = stripNotebookHistoryBlock(text.replace(/\r\n?/g, '\n')).trim();
-	if (!normalized) {
-		return '';
-	}
-
-	const lines = normalized.split('\n');
-	let summarized = normalized;
-
-	if (lines.length > TOOL_HISTORY_MAX_LINES) {
-		summarized =
-			lines.slice(0, TOOL_HISTORY_MAX_LINES).join('\n') +
-			`\n...[truncated ${lines.length - TOOL_HISTORY_MAX_LINES} more lines]`;
-	}
-
-	if (summarized.length > TOOL_HISTORY_MAX_CHARS) {
-		const remainingChars = summarized.length - TOOL_HISTORY_MAX_CHARS;
-		summarized =
-			summarized.slice(0, TOOL_HISTORY_MAX_CHARS) +
-			`...[truncated ${remainingChars} more chars]`;
-	}
-
-	return summarized;
-}
-
-function extractHistoryTextFromContentItems(items: MultimodalContent): string {
-	const parts: string[] = [];
-	let imageCount = 0;
-
-	for (const item of items) {
-		if (item.type === 'text' && item.text) {
-			parts.push(item.text);
-			continue;
-		}
-
-		if (item.type === 'image') {
-			imageCount++;
-		}
-	}
-
-	if (imageCount > 0) {
-		parts.push(`[${imageCount} image item${imageCount === 1 ? '' : 's'} omitted]`);
-	}
-
-	return summarizeToolHistoryText(parts.join('\n\n'));
-}
-
-function summarizeToolHistoryValue(value: any, depth = 0): any {
-	if (value === null || value === undefined) {
-		return value;
-	}
-
-	if (typeof value === 'string') {
-		return summarizeToolHistoryText(value);
-	}
-
-	if (
-		typeof value === 'number' ||
-		typeof value === 'boolean' ||
-		typeof value === 'bigint'
-	) {
-		return value;
-	}
-
-	if (depth >= TOOL_HISTORY_MAX_DEPTH) {
-		if (Array.isArray(value)) {
-			return `[Array(${value.length})]`;
-		}
-
-		if (typeof value === 'object') {
-			return `[Object(${Object.keys(value).length} keys)]`;
-		}
-	}
-
-	if (Array.isArray(value)) {
-		const summarizedItems = value
-			.slice(0, TOOL_HISTORY_MAX_ARRAY_ITEMS)
-			.map(item => summarizeToolHistoryValue(item, depth + 1));
-
-		if (value.length > TOOL_HISTORY_MAX_ARRAY_ITEMS) {
-			summarizedItems.push(
-				`[${value.length - TOOL_HISTORY_MAX_ARRAY_ITEMS} more items omitted]`,
-			);
-		}
-
-		return summarizedItems;
-	}
-
-	if (typeof value === 'object') {
-		const summarizedObject: Record<string, any> = {};
-
-		for (const [key, nestedValue] of Object.entries(value)) {
-			if (TOOL_HISTORY_OMITTED_KEYS.has(key)) {
-				continue;
-			}
-
-			if (key === 'content' && isMultimodalContent(nestedValue)) {
-				const flattenedContent = extractHistoryTextFromContentItems(nestedValue);
-				if (flattenedContent) {
-					summarizedObject[key] = flattenedContent;
-				}
-				continue;
-			}
-
-			if (
-				key === 'asyncStatus' &&
-				nestedValue &&
-				typeof nestedValue === 'object' &&
-				!Array.isArray(nestedValue)
-			) {
-				summarizedObject[key] = {
-					enabled: (nestedValue as any).enabled,
-					state: (nestedValue as any).state,
-					event: (nestedValue as any).event,
-				};
-				continue;
-			}
-
-			const summarizedValue = summarizeToolHistoryValue(nestedValue, depth + 1);
-			if (
-				summarizedValue === '' ||
-				summarizedValue === undefined ||
-				(Array.isArray(summarizedValue) && summarizedValue.length === 0)
-			) {
-				continue;
-			}
-
-			summarizedObject[key] = summarizedValue;
-		}
-
-		return summarizedObject;
-	}
-
-	return String(value);
-}
-
-export function buildToolHistoryContent(
-	result: any,
-	fallbackTextContent: string,
-): string {
-	if (isMultimodalContent(result)) {
-		return extractHistoryTextFromContentItems(result);
-	}
-
-	if (typeof result === 'string') {
-		return summarizeToolHistoryText(result);
-	}
-
-	if (result === null || result === undefined) {
-		return summarizeToolHistoryText(fallbackTextContent);
-	}
-
-	if (typeof result !== 'object') {
-		return summarizeToolHistoryText(String(result));
-	}
-
-	const summarizedValue = summarizeToolHistoryValue(result);
-	if (
-		summarizedValue &&
-		typeof summarizedValue === 'object' &&
-		!Array.isArray(summarizedValue) &&
-		Object.keys(summarizedValue).length > 0
-	) {
-		return JSON.stringify(summarizedValue);
-	}
-
-	if (Array.isArray(summarizedValue) && summarizedValue.length > 0) {
-		return JSON.stringify(summarizedValue);
-	}
-
-	return summarizeToolHistoryText(fallbackTextContent);
 }
 
 export function createTeamUserQuestionAdapter(
@@ -369,6 +183,24 @@ async function executeBridgeToolCall(options: {
 		},
 		abortSignal: options.abortSignal,
 	});
+}
+
+function extractToolResultSidecar(result: any): {
+	historyContent?: string;
+	previewContent?: string;
+} {
+	if (!result || typeof result !== 'object') {
+		return {};
+	}
+
+	return {
+		...(typeof result.historyContent === 'string' && result.historyContent.trim()
+			? {historyContent: result.historyContent}
+			: {}),
+		...(typeof result.previewContent === 'string' && result.previewContent.trim()
+			? {previewContent: result.previewContent}
+			: {}),
+	};
 }
 
 /**
@@ -561,15 +393,17 @@ export async function executeToolCall(
 						: undefined,
 					requestUserQuestion: teamUserQuestionAdapter,
 				});
+				const toolHistoryArtifacts = buildToolHistoryArtifacts(
+					teamResult,
+					JSON.stringify(teamResult),
+				);
 
 				result = {
 					tool_call_id: toolCall.id,
 					role: 'tool',
 					content: JSON.stringify(teamResult),
-					historyContent: buildToolHistoryContent(
-						teamResult,
-						JSON.stringify(teamResult),
-					),
+					historyContent: toolHistoryArtifacts.historyContent,
+					previewContent: toolHistoryArtifacts.previewContent,
 				};
 			} catch (error: any) {
 				result = {
@@ -683,15 +517,17 @@ export async function executeToolCall(
 				} else {
 					subAgentContent = JSON.stringify(subAgentResult);
 				}
+				const toolHistoryArtifacts = buildToolHistoryArtifacts(
+					subAgentResult,
+					subAgentContent,
+				);
 
 				result = {
 					tool_call_id: toolCall.id,
 					role: 'tool',
 					content: subAgentContent,
-					historyContent: buildToolHistoryContent(
-						subAgentResult,
-						subAgentContent,
-					),
+					historyContent: toolHistoryArtifacts.historyContent,
+					previewContent: toolHistoryArtifacts.previewContent,
 				};
 			} finally {
 				// Always unregister the sub-agent when it completes (success or error)
@@ -708,12 +544,17 @@ export async function executeToolCall(
 					onTokenUpdate,
 				);
 				const {textContent, images} = extractMultimodalContent(toolResult);
+				const toolHistoryArtifacts = buildToolHistoryArtifacts(
+					toolResult,
+					textContent,
+				);
 
 				result = {
 					tool_call_id: toolCall.id,
 					role: 'tool',
 					content: textContent,
-					historyContent: buildToolHistoryContent(toolResult, textContent),
+					historyContent: toolHistoryArtifacts.historyContent,
+					previewContent: toolHistoryArtifacts.previewContent,
 					images,
 				};
 				return result;
@@ -768,12 +609,23 @@ export async function executeToolCall(
 
 			// Extract multimodal content (text + images)
 			const {textContent, images} = extractMultimodalContent(toolResult);
+			const bridgeSidecar = extractToolResultSidecar(toolResult);
+			const toolHistoryArtifacts =
+				bridgeSidecar.historyContent || bridgeSidecar.previewContent
+					? {
+							historyContent:
+								bridgeSidecar.historyContent ||
+								buildToolHistoryArtifacts(toolResult, textContent).historyContent,
+							previewContent: bridgeSidecar.previewContent,
+					  }
+					: buildToolHistoryArtifacts(toolResult, textContent);
 
 			result = {
 				tool_call_id: toolCall.id,
 				role: 'tool',
 				content: textContent,
-				historyContent: buildToolHistoryContent(toolResult, textContent),
+				historyContent: toolHistoryArtifacts.historyContent,
+				previewContent: toolHistoryArtifacts.previewContent,
 				images,
 				editDiffData,
 			};
@@ -892,10 +744,12 @@ export async function executeToolCall(
 				if (interpreted.action === 'replace') {
 					result.content = interpreted.replacedContent || result.content;
 					if (typeof result.content === 'string') {
-						result.historyContent = buildToolHistoryContent(
+						const toolHistoryArtifacts = buildToolHistoryArtifacts(
 							result.content,
 							result.content,
 						);
+						result.historyContent = toolHistoryArtifacts.historyContent;
+						result.previewContent = toolHistoryArtifacts.previewContent;
 					}
 				} else if (interpreted.action === 'block') {
 					result.hookFailed = interpreted.hookFailed;

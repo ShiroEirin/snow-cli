@@ -199,6 +199,7 @@ export function convertSessionMessagesToUI(
 					toolName,
 					content: msg.content,
 					historyContent: msg.historyContent,
+					previewContent: msg.previewContent,
 					isError,
 				});
 
@@ -542,6 +543,7 @@ export function convertSessionMessagesToUI(
 				toolName,
 				content: msg.content,
 				historyContent: msg.historyContent,
+				previewContent: msg.previewContent,
 				isError,
 			});
 
