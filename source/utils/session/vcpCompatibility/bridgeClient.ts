@@ -12,8 +12,46 @@ export type BridgeToolExecutionResponse = {
 	status: string;
 	result?: unknown;
 	error?: {message?: string};
-	asyncStatus?: Record<string, unknown>;
+	asyncStatus?: BridgeAsyncStatus;
+	statusEvents?: BridgeStatusEvent[];
 	[key: string]: unknown;
+};
+
+export type BridgeAsyncStatus = {
+	enabled?: boolean;
+	state?: string;
+	event?: string;
+	taskId?: string;
+	[key: string]: unknown;
+};
+
+export type BridgeStatusEvent = {
+	type: 'vcp_tool_status';
+	requestId?: string;
+	invocationId: string;
+	toolId?: string;
+	toolName?: string;
+	originName?: string;
+	taskId?: string;
+	status?: string;
+	isAsync: boolean;
+	asyncStatus: BridgeAsyncStatus;
+	bridgeType?: string;
+	result?: unknown;
+	error?: {message?: string; [key: string]: unknown};
+	rawData: Record<string, unknown>;
+};
+
+export type BridgeManifestToolFilters = {
+	include?: string[];
+	includeExactToolNames?: string[];
+	excludeExactToolNames?: string[];
+	excludeBridgeToolIds?: string[];
+	excludePluginNames?: string[];
+};
+
+export type BridgeManifestRequestOptions = {
+	toolFilters?: BridgeManifestToolFilters;
 };
 
 type BridgePendingRequest = {
@@ -28,7 +66,7 @@ type BridgePendingRequest = {
 	) => 'continue_waiting' | void;
 };
 
-type BridgeStatusListener = (event: unknown) => void;
+export type BridgeStatusListener = (event: BridgeStatusEvent) => void;
 
 const BRIDGE_EXECUTE_TIMEOUT_MS = 120_000;
 const BRIDGE_ASYNC_EXECUTE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -37,9 +75,114 @@ const BRIDGE_MANIFEST_CACHE_MAX_ENTRIES = 100;
 const SNOW_BRIDGE_CHANNEL = 'bridge-ws';
 
 type BridgeManifestCacheEntry = {
+	connectionKey: string;
 	manifest: BridgeManifestResponse;
 	expiresAt: number;
 };
+
+type BridgePendingManifestRequest = {
+	connectionKey: string;
+	promise: Promise<BridgeManifestResponse>;
+};
+
+function normalizeUniqueStrings(values: unknown[]): string[] {
+	return Array.from(
+		new Set(
+			values
+				.map(value => String(value || '').trim())
+				.filter(Boolean),
+		),
+	).sort((left, right) => left.localeCompare(right));
+}
+
+function normalizeManifestToolFilters(
+	toolFilters?: BridgeManifestToolFilters,
+): BridgeManifestToolFilters | undefined {
+	if (!toolFilters) {
+		return undefined;
+	}
+
+	const normalized = {
+		include: normalizeUniqueStrings(toolFilters.include || []),
+		includeExactToolNames: normalizeUniqueStrings(
+			toolFilters.includeExactToolNames || [],
+		),
+		excludeExactToolNames: normalizeUniqueStrings(
+			toolFilters.excludeExactToolNames || [],
+		),
+		excludeBridgeToolIds: normalizeUniqueStrings(
+			toolFilters.excludeBridgeToolIds || [],
+		),
+		excludePluginNames: normalizeUniqueStrings(
+			toolFilters.excludePluginNames || [],
+		),
+	};
+
+	if (Object.values(normalized).every(values => values.length === 0)) {
+		return undefined;
+	}
+
+	return normalized;
+}
+
+function buildManifestCacheKey(options: {
+	connectionKey: string;
+	toolFilters?: BridgeManifestToolFilters;
+}): string {
+	return JSON.stringify({
+		connectionKey: options.connectionKey,
+		toolFilters: options.toolFilters || null,
+	});
+}
+
+function normalizeBridgeStatusEvent(
+	data: Record<string, unknown>,
+): BridgeStatusEvent | null {
+	const invocationId = String(data['invocationId'] || '').trim();
+	if (!invocationId) {
+		return null;
+	}
+
+	const asyncStatusCandidate =
+		data['asyncStatus'] && typeof data['asyncStatus'] === 'object'
+			? {...(data['asyncStatus'] as Record<string, unknown>)}
+			: {};
+	const taskId =
+		String(
+			data['taskId'] ||
+				asyncStatusCandidate['taskId'] ||
+				'',
+		).trim() || undefined;
+	const status =
+		String(
+			data['status'] ||
+				asyncStatusCandidate['state'] ||
+				'',
+		).trim() || undefined;
+	const asyncStatus: BridgeAsyncStatus = {
+		...asyncStatusCandidate,
+		...(taskId ? {taskId} : {}),
+	};
+
+	return {
+		type: 'vcp_tool_status',
+		...(data['requestId'] ? {requestId: String(data['requestId'])} : {}),
+		invocationId,
+		...(data['toolId'] ? {toolId: String(data['toolId'])} : {}),
+		...(data['toolName'] ? {toolName: String(data['toolName'])} : {}),
+		...(data['originName'] ? {originName: String(data['originName'])} : {}),
+		...(taskId ? {taskId} : {}),
+		...(status ? {status} : {}),
+		isAsync: data['async'] === true || Boolean(taskId),
+		asyncStatus,
+		...(data['bridgeType'] ? {bridgeType: String(data['bridgeType'])} : {}),
+		...(data['result'] !== undefined ? {result: data['result']} : {}),
+		...(data['error'] && typeof data['error'] === 'object'
+			? {error: data['error'] as BridgeStatusEvent['error']}
+			: {}),
+		rawData: {...data},
+	};
+}
 
 export class SnowBridgeClient {
 	private readonly debugFrames = process.env['SNOW_DEBUG_BRIDGE'] === '1';
@@ -48,7 +191,10 @@ export class SnowBridgeClient {
 	private pendingRequests = new Map<string, BridgePendingRequest>();
 	private pendingStatusListeners = new Map<string, BridgeStatusListener>();
 	private manifestCache = new Map<string, BridgeManifestCacheEntry>();
-	private pendingManifestRequests = new Map<string, Promise<BridgeManifestResponse>>();
+	private pendingManifestRequests = new Map<
+		string,
+		BridgePendingManifestRequest
+	>();
 	private activeConnectionKey = '';
 
 	private buildConnectionKey(config: Pick<
@@ -150,8 +296,17 @@ export class SnowBridgeClient {
 		}
 
 		const connectionKey = this.buildConnectionKey(config);
-		this.manifestCache.delete(connectionKey);
-		this.pendingManifestRequests.delete(connectionKey);
+		for (const [cacheKey, entry] of this.manifestCache.entries()) {
+			if (entry.connectionKey === connectionKey) {
+				this.manifestCache.delete(cacheKey);
+			}
+		}
+
+		for (const [cacheKey, entry] of this.pendingManifestRequests.entries()) {
+			if (entry.connectionKey === connectionKey) {
+				this.pendingManifestRequests.delete(cacheKey);
+			}
+		}
 	}
 
 	private touchManifestCacheEntry(
@@ -233,7 +388,10 @@ export class SnowBridgeClient {
 			const invocationId = String(data.invocationId || '');
 
 			if (envelope.type === 'vcp_tool_status' && invocationId) {
-				this.pendingStatusListeners.get(invocationId)?.(data);
+				const statusEvent = normalizeBridgeStatusEvent(data);
+				if (statusEvent) {
+					this.pendingStatusListeners.get(invocationId)?.(statusEvent);
+				}
 			}
 
 			if (!requestId) {
@@ -431,21 +589,27 @@ export class SnowBridgeClient {
 			| 'bridgeAccessToken'
 			| 'toolTransport'
 		>,
+		options?: BridgeManifestRequestOptions,
 	): Promise<BridgeManifestResponse> {
 		const connectionKey = this.buildConnectionKey(config);
+		const toolFilters = normalizeManifestToolFilters(options?.toolFilters);
+		const manifestCacheKey = buildManifestCacheKey({
+			connectionKey,
+			toolFilters,
+		});
 		const now = Date.now();
-		const cachedManifest = this.manifestCache.get(connectionKey);
+		const cachedManifest = this.manifestCache.get(manifestCacheKey);
 		if (cachedManifest && cachedManifest.expiresAt > now) {
-			this.touchManifestCacheEntry(connectionKey, cachedManifest);
+			this.touchManifestCacheEntry(manifestCacheKey, cachedManifest);
 			return cachedManifest.manifest;
 		}
 		if (cachedManifest) {
-			this.manifestCache.delete(connectionKey);
+			this.manifestCache.delete(manifestCacheKey);
 		}
 
-		const pendingManifest = this.pendingManifestRequests.get(connectionKey);
+		const pendingManifest = this.pendingManifestRequests.get(manifestCacheKey);
 		if (pendingManifest) {
-			return pendingManifest;
+			return pendingManifest.promise;
 		}
 
 		const manifestPromise = this.sendRequest<{
@@ -456,7 +620,9 @@ export class SnowBridgeClient {
 			config,
 			type: 'get_vcp_manifests',
 			expectedType: 'vcp_manifest_response',
-			payload: {},
+			payload: {
+				...(toolFilters ? {toolFilters} : {}),
+			},
 		})
 			.then(response => {
 				if (response.status !== 'success') {
@@ -468,7 +634,8 @@ export class SnowBridgeClient {
 				const manifest = {
 					plugins: response.plugins || [],
 				};
-				this.touchManifestCacheEntry(connectionKey, {
+				this.touchManifestCacheEntry(manifestCacheKey, {
+					connectionKey,
 					manifest,
 					expiresAt: Date.now() + BRIDGE_MANIFEST_CACHE_MS,
 				});
@@ -476,10 +643,13 @@ export class SnowBridgeClient {
 				return manifest;
 			})
 			.finally(() => {
-				this.pendingManifestRequests.delete(connectionKey);
+				this.pendingManifestRequests.delete(manifestCacheKey);
 			});
 
-		this.pendingManifestRequests.set(connectionKey, manifestPromise);
+		this.pendingManifestRequests.set(manifestCacheKey, {
+			connectionKey,
+			promise: manifestPromise,
+		});
 		return manifestPromise;
 	}
 
@@ -501,13 +671,21 @@ export class SnowBridgeClient {
 		const invocationId = requestId;
 		const abortMessage = `SnowBridge tool execution aborted: ${options.toolName}`;
 		let aborted = false;
+		const statusEvents: BridgeStatusEvent[] = [];
 
 		if (options.abortSignal?.aborted) {
 			throw new Error(abortMessage);
 		}
 
 		if (options.onStatus) {
-			this.pendingStatusListeners.set(invocationId, options.onStatus);
+			this.pendingStatusListeners.set(invocationId, statusEvent => {
+				statusEvents.push(statusEvent);
+				options.onStatus?.(statusEvent);
+			});
+		} else {
+			this.pendingStatusListeners.set(invocationId, statusEvent => {
+				statusEvents.push(statusEvent);
+			});
 		}
 
 		const abortHandler = () => {
@@ -585,7 +763,12 @@ export class SnowBridgeClient {
 				throw new Error(response.error?.message || 'SnowBridge tool execution failed.');
 			}
 
-			return response;
+			return statusEvents.length > 0
+				? {
+						...response,
+						statusEvents,
+				  }
+				: response;
 		} finally {
 			this.pendingStatusListeners.delete(invocationId);
 			options.abortSignal?.removeEventListener('abort', abortHandler);

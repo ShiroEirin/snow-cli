@@ -22,6 +22,8 @@ export interface ChatMessage {
 	content: string;
 	historyContent?: string; // Compact tool-result content used when projecting tool history back into model context
 	previewContent?: string; // Display-only compact preview content for replay/UI sidecars
+	toolStatusDetail?: string; // Display-only lifecycle/status sideband preserved for replay
+	toolLifecycleState?: string; // Display-only lifecycle state for async tool rendering
 	messageStatus?: 'pending' | 'success' | 'error';
 	tool_call_id?: string;
 	tool_calls?: ToolCall[];

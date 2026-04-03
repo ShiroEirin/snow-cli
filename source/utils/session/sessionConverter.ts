@@ -3,6 +3,33 @@ import type {Message} from '../../ui/components/chat/MessageList.js';
 import {formatToolCallMessage} from '../ui/messageFormatter.js';
 import {isToolNeedTwoStepDisplay} from '../config/toolDisplayConfig.js';
 import {buildToolResultView} from './toolResultView.js';
+import {buildToolLifecycleSideband} from './vcpCompatibility/toolLifecycleSideband.js';
+
+type SessionToolCall = NonNullable<ChatMessage['tool_calls']>[number];
+
+type SessionToolResultMessage = ChatMessage & {
+	role: 'tool';
+	tool_call_id: string;
+};
+
+type DiffToolArguments = {
+	oldContent?: string;
+	newContent?: string;
+	filename?: string;
+	completeOldContent?: string;
+	completeNewContent?: string;
+	contextStartLine?: number;
+	batchResults?: any[];
+	isBatch?: boolean;
+};
+
+type IndexedToolCallMeta = {
+	toolCall: SessionToolCall;
+	toolArgs: Record<string, any>;
+	toolDisplay: ReturnType<typeof formatToolCallMessage>;
+	isTimeConsuming: boolean;
+	parallelGroupId?: string;
+};
 
 /**
  * Clean thinking content by removing XML-like tags
@@ -10,6 +37,41 @@ import {buildToolResultView} from './toolResultView.js';
  */
 function cleanThinkingContent(content: string): string {
 	return content.replace(/\s*<\/?think(?:ing)?>\s*/gi, '').trim();
+}
+
+function parseToolArguments(argumentsText: string): Record<string, any> {
+	try {
+		return JSON.parse(argumentsText);
+	} catch {
+		return {};
+	}
+}
+
+function getToolStatusDetail(
+	message: Pick<ChatMessage, 'toolStatusDetail'>,
+): string | undefined {
+	return typeof message.toolStatusDetail === 'string'
+		? message.toolStatusDetail
+		: undefined;
+}
+
+function buildDisplayArgsText(toolCall: SessionToolCall): string {
+	const toolDisplay = formatToolCallMessage(toolCall);
+	if (toolCall.function.name === 'terminal-execute') {
+		const toolArgs = parseToolArguments(toolCall.function.arguments);
+		if (toolArgs['command']) {
+			return ` "${toolArgs['command']}"`;
+		}
+	}
+
+	if (toolDisplay.args.length === 0) {
+		return '';
+	}
+
+	const params = toolDisplay.args
+		.map(arg => `${arg.key}: ${arg.value}`)
+		.join(', ');
+	return params ? ` (${params})` : '';
 }
 
 /**
@@ -20,6 +82,56 @@ export function convertSessionMessagesToUI(
 	sessionMessages: ChatMessage[],
 ): Message[] {
 	const uiMessages: Message[] = [];
+	const resolvedToolCallIds = new Set(
+		sessionMessages
+			.filter(msg => msg?.role === 'tool' && msg.tool_call_id && !msg.subAgentInternal)
+			.map(msg => msg.tool_call_id as string),
+	);
+	const resolvedSubAgentToolCallIds = new Set(
+		sessionMessages
+			.filter(msg => msg?.role === 'tool' && msg.tool_call_id && msg.subAgentInternal)
+			.map(msg => msg.tool_call_id as string),
+	);
+	const indexedRegularToolCalls = new Map<string, IndexedToolCallMeta>();
+	const indexedSubAgentToolCalls = new Map<string, IndexedToolCallMeta>();
+
+	for (let index = 0; index < sessionMessages.length; index++) {
+		const message = sessionMessages[index];
+		if (
+			message?.role !== 'assistant' ||
+			!message.tool_calls ||
+			message.tool_calls.length === 0
+		) {
+			continue;
+		}
+
+		const hasMultipleTools = message.tool_calls.length > 1;
+		const hasNonTimeConsumingTool = message.tool_calls.some(
+			toolCall => !isToolNeedTwoStepDisplay(toolCall.function.name),
+		);
+		const parallelGroupId =
+			!message.subAgentInternal && hasMultipleTools && hasNonTimeConsumingTool
+				? `parallel-${index}`
+				: undefined;
+
+		for (const toolCall of message.tool_calls) {
+			const meta: IndexedToolCallMeta = {
+				toolCall,
+				toolArgs: parseToolArguments(toolCall.function.arguments),
+				toolDisplay: formatToolCallMessage(toolCall),
+				isTimeConsuming: isToolNeedTwoStepDisplay(toolCall.function.name),
+				...(!isToolNeedTwoStepDisplay(toolCall.function.name) && parallelGroupId
+					? {parallelGroupId}
+					: {}),
+			};
+
+			if (message.subAgentInternal) {
+				indexedSubAgentToolCalls.set(toolCall.id, meta);
+			} else {
+				indexedRegularToolCalls.set(toolCall.id, meta);
+			}
+		}
+	}
 
 	// Track which tool_calls have been processed
 	const processedToolCalls = new Set<string>();
@@ -72,45 +184,42 @@ export function convertSessionMessagesToUI(
 
 		// Handle sub-agent internal tool call messages
 		if (msg.subAgentInternal && msg.role === 'assistant' && msg.tool_calls) {
-			const timeConsumingTools = msg.tool_calls.filter(tc =>
-				isToolNeedTwoStepDisplay(tc.function.name),
+			const timeConsumingTools = msg.tool_calls.filter(
+				tc =>
+					isToolNeedTwoStepDisplay(tc.function.name) &&
+					!resolvedSubAgentToolCallIds.has(tc.id),
 			);
 			const quickTools = msg.tool_calls.filter(
 				tc => !isToolNeedTwoStepDisplay(tc.function.name),
 			);
+			const pendingQuickToolIds = quickTools
+				.filter(tc => !resolvedSubAgentToolCallIds.has(tc.id))
+				.map(tc => tc.id);
 
 			// Display time-consuming tools individually
 			for (const toolCall of timeConsumingTools) {
-				const toolDisplay = formatToolCallMessage(toolCall as any);
-				let toolArgs;
-				try {
-					toolArgs = JSON.parse(toolCall.function.arguments);
-				} catch (e) {
-					toolArgs = {};
-				}
-
-				// Build parameter display for terminal-execute
-				let paramDisplay = '';
-				if (toolCall.function.name === 'terminal-execute' && toolArgs.command) {
-					paramDisplay = ` "${toolArgs.command}"`;
-				} else if (toolDisplay.args.length > 0) {
-					const params = toolDisplay.args
-						.map((arg: any) => `${arg.key}: ${arg.value}`)
-						.join(', ');
-					paramDisplay = ` (${params})`;
-				}
+				const toolMeta = indexedSubAgentToolCalls.get(toolCall.id);
+				const toolDisplay = toolMeta?.toolDisplay || formatToolCallMessage(toolCall);
+				const toolArgs = toolMeta?.toolArgs || parseToolArguments(toolCall.function.arguments);
+				const paramDisplay = buildDisplayArgsText(toolCall);
 
 				uiMessages.push({
 					role: 'subagent',
-					content: `\x1b[38;2;184;122;206m⚇⚡ ${toolDisplay.toolName}${paramDisplay}\x1b[0m`,
+					content: '',
 					streaming: false,
 					toolCall: {
 						name: toolCall.function.name,
 						arguments: toolArgs,
 					},
+					toolName: toolCall.function.name,
 					toolCallId: toolCall.id,
-					toolPending: false,
+					toolPending: true,
 					messageStatus: 'pending',
+					toolStatusDetail: buildToolLifecycleSideband({
+						toolName: toolDisplay.toolName,
+						messageStatus: 'pending',
+						detail: paramDisplay ? paramDisplay.trim() : undefined,
+					}),
 					subAgentInternal: true,
 				});
 				processedToolCalls.add(toolCall.id);
@@ -129,8 +238,10 @@ export function convertSessionMessagesToUI(
 					}
 				}
 
-				const toolLines = quickTools.map((tc: any, index: number) => {
-					const display = formatToolCallMessage(tc);
+				const toolLines = quickTools.map((tc, index: number) => {
+					const display =
+						indexedSubAgentToolCalls.get(tc.id)?.toolDisplay ||
+						formatToolCallMessage(tc);
 					const isLast = index === quickTools.length - 1;
 					const prefix = isLast ? '└─' : '├─';
 
@@ -151,7 +262,7 @@ export function convertSessionMessagesToUI(
 					)}\x1b[0m`,
 					streaming: false,
 					subAgentInternal: true,
-					pendingToolIds: quickTools.map((tc: any) => tc.id),
+					pendingToolIds: pendingQuickToolIds,
 				});
 
 				for (const tc of quickTools) {
@@ -169,32 +280,12 @@ export function convertSessionMessagesToUI(
 			const isError = status === 'error';
 
 			// Find tool name from previous assistant message
-			let toolName = 'tool';
-			let isTimeConsumingTool = false;
-
-			for (let j = i - 1; j >= 0; j--) {
-				const prevMsg = sessionMessages[j];
-				if (!prevMsg) continue;
-
-				if (
-					prevMsg.role === 'assistant' &&
-					prevMsg.tool_calls &&
-					prevMsg.subAgentInternal
-				) {
-					const tc = prevMsg.tool_calls.find(t => t.id === msg.tool_call_id);
-					if (tc) {
-						toolName = tc.function.name;
-						isTimeConsumingTool = isToolNeedTwoStepDisplay(toolName);
-						break;
-					}
-				}
-			}
+			const toolMeta = indexedSubAgentToolCalls.get(msg.tool_call_id);
+			const toolName = toolMeta?.toolCall.function.name || 'tool';
+			const isTimeConsumingTool = toolMeta?.isTimeConsuming || false;
 
 			// For time-consuming tools, always show result with full details
 			if (isTimeConsumingTool) {
-				const statusIcon = isError ? '✗' : '✓';
-				// UI only shows simple failure message, detailed error is sent to AI via msg.content
-				const statusText = '';
 				const toolResultView = buildToolResultView({
 					toolName,
 					content: msg.content,
@@ -233,7 +324,12 @@ export function convertSessionMessagesToUI(
 				}
 
 				// Extract filesystem diff data
-				let fileToolData: any = undefined;
+				let fileToolData:
+					| {
+							name: string;
+							arguments: Record<string, any>;
+					  }
+					| undefined;
 				if (
 					!isError &&
 					(toolName === 'filesystem-create' || toolName === 'filesystem-edit')
@@ -283,9 +379,10 @@ export function convertSessionMessagesToUI(
 
 				uiMessages.push({
 					role: 'subagent',
-					content: `\x1b[38;2;0;186;255m⚇${statusIcon} ${toolName}\x1b[0m${statusText}`,
+					content: '',
 					streaming: false,
 					toolName: toolResultView.toolName,
+					toolCallId: msg.tool_call_id,
 					toolResult: !isError ? msg.content : undefined,
 					toolResultPreview: !isError
 						? toolResultView.previewContent
@@ -300,6 +397,11 @@ export function convertSessionMessagesToUI(
 						? fileToolData
 						: undefined,
 					messageStatus: status,
+					toolStatusDetail: buildToolLifecycleSideband({
+						toolName: toolResultView.toolName,
+						messageStatus: status,
+						detail: getToolStatusDetail(msg),
+					}),
 					subAgentInternal: true,
 				});
 			} else {
@@ -309,9 +411,15 @@ export function convertSessionMessagesToUI(
 					// UI only shows simple failure message, detailed error is sent to AI
 					uiMessages.push({
 						role: 'subagent',
-						content: `\x1b[38;2;255;100;100m⚇✗ ${toolName}\x1b[0m`,
+						content: '',
 						streaming: false,
+						toolName,
+						toolCallId: msg.tool_call_id,
 						messageStatus: 'error',
+						toolStatusDetail: buildToolLifecycleSideband({
+							toolName,
+							messageStatus: 'error',
+						}),
 						subAgentInternal: true,
 					});
 				}
@@ -339,59 +447,46 @@ export function convertSessionMessagesToUI(
 				});
 			}
 
-			// Generate parallel group ID for non-time-consuming tools
-			const hasMultipleTools = msg.tool_calls.length > 1;
-			const hasNonTimeConsumingTool = msg.tool_calls.some(
-				tc => !isToolNeedTwoStepDisplay(tc.function.name),
-			);
-			const parallelGroupId =
-				hasMultipleTools && hasNonTimeConsumingTool
-					? `parallel-${i}-${Math.random()}`
-					: undefined;
-
 			for (const toolCall of msg.tool_calls) {
 				// Skip if already processed
 				if (processedToolCalls.has(toolCall.id)) continue;
 
-				const toolDisplay = formatToolCallMessage(toolCall as any);
-				let toolArgs;
-				try {
-					toolArgs = JSON.parse(toolCall.function.arguments);
-				} catch (e) {
-					toolArgs = {};
-				}
+				const toolMeta = indexedRegularToolCalls.get(toolCall.id);
+				const toolDisplay = toolMeta?.toolDisplay || formatToolCallMessage(toolCall);
+				const toolArgs = toolMeta?.toolArgs || parseToolArguments(toolCall.function.arguments);
 
 				// Only add "in progress" message for tools that need two-step display
-				const needTwoSteps = isToolNeedTwoStepDisplay(toolCall.function.name);
-				if (needTwoSteps) {
+				const needTwoSteps = toolMeta?.isTimeConsuming ?? isToolNeedTwoStepDisplay(toolCall.function.name);
+				if (needTwoSteps && !resolvedToolCallIds.has(toolCall.id)) {
 					// Add tool call message (in progress)
 					uiMessages.push({
 						role: 'assistant',
-						content: `⚡ ${toolDisplay.toolName}`,
+						content: '',
 						streaming: false,
 						toolCall: {
 							name: toolCall.function.name,
 							arguments: toolArgs,
 						},
 						toolDisplay,
+						toolName: toolCall.function.name,
+						toolCallId: toolCall.id,
+						toolStatusDetail: buildToolLifecycleSideband({
+							toolName: toolDisplay.toolName,
+							messageStatus: 'pending',
+						}),
+						toolPending: true,
 						messageStatus: 'pending',
 					});
 				}
 
-				// Store parallel group info for this tool call
-				if (parallelGroupId && !needTwoSteps) {
-					processedToolCalls.add(toolCall.id);
-					// Mark this tool call with parallel group (will be used when processing tool results)
-					(toolCall as any).parallelGroupId = parallelGroupId;
-				} else {
-					processedToolCalls.add(toolCall.id);
-				}
+				processedToolCalls.add(toolCall.id);
 			}
 			continue;
 		}
 
 		// Handle regular tool result messages (non-subagent)
 		if (msg.role === 'tool' && msg.tool_call_id && !msg.subAgentInternal) {
+			const toolMessage = msg as SessionToolResultMessage;
 			const isRejectedWithReply = msg.content.includes(
 				'Tool execution rejected by user:',
 			);
@@ -401,34 +496,22 @@ export function convertSessionMessagesToUI(
 					? 'error'
 					: 'success');
 			const isError = status === 'error';
-			const statusIcon = isError ? '✗' : '✓';
 
 			// UI only shows simple failure message, detailed error is sent to AI via msg.content
-			let statusText = '';
+			let statusText = getToolStatusDetail(toolMessage) || '';
 			// Keep rejection reason display for user feedback (not error details)
 			if (isRejectedWithReply) {
 				// Extract rejection reason
 				const reason =
 					msg.content.split('Tool execution rejected by user:')[1]?.trim() ||
 					'';
-				statusText = reason ? `\n  └─ Rejection reason: ${reason}` : '';
+				statusText = reason ? `Rejection reason: ${reason}` : statusText;
 			}
 
-			// Find tool name and args from previous assistant message
-			let toolName = 'tool';
-			let toolArgs: any = {};
-			let editDiffData:
-				| {
-						oldContent?: string;
-						newContent?: string;
-						filename?: string;
-						completeOldContent?: string;
-						completeNewContent?: string;
-						contextStartLine?: number;
-						batchResults?: any[];
-						isBatch?: boolean;
-				  }
-				| undefined;
+			const toolMeta = indexedRegularToolCalls.get(msg.tool_call_id);
+			let toolName = toolMeta?.toolCall.function.name || 'tool';
+			let toolArgs: Record<string, any> = {...(toolMeta?.toolArgs || {})};
+			let editDiffData: DiffToolArguments | undefined;
 			let terminalResultData:
 				| {
 						stdout?: string;
@@ -438,107 +521,67 @@ export function convertSessionMessagesToUI(
 				  }
 				| undefined;
 
-			for (let j = i - 1; j >= 0; j--) {
-				const prevMsg = sessionMessages[j];
-				if (!prevMsg) continue;
-
-				if (
-					prevMsg.role === 'assistant' &&
-					prevMsg.tool_calls &&
-					!prevMsg.subAgentInternal
-				) {
-					const tc = prevMsg.tool_calls.find(t => t.id === msg.tool_call_id);
-					if (tc) {
-						toolName = tc.function.name;
-						try {
-							toolArgs = JSON.parse(tc.function.arguments);
-						} catch (e) {
-							toolArgs = {};
-						}
-
-						// Extract edit diff data
-						if (toolName === 'filesystem-edit' && !isError) {
-							try {
-								const resultData = JSON.parse(msg.content);
-								// Handle single file edit
-								if (resultData.oldContent && resultData.newContent) {
-									editDiffData = {
-										oldContent: resultData.oldContent,
-										newContent: resultData.newContent,
-										filename: resultData.filePath || toolArgs.filePath,
-										completeOldContent: resultData.completeOldContent,
-										completeNewContent: resultData.completeNewContent,
-										contextStartLine: resultData.contextStartLine,
-									};
-									toolArgs.oldContent = resultData.oldContent;
-									toolArgs.newContent = resultData.newContent;
-									toolArgs.filename = resultData.filePath || toolArgs.filePath;
-									toolArgs.completeOldContent = resultData.completeOldContent;
-									toolArgs.completeNewContent = resultData.completeNewContent;
-									toolArgs.contextStartLine = resultData.contextStartLine;
-								}
-								// Handle batch edit
-								else if (
-									resultData.results &&
-									Array.isArray(resultData.results)
-								) {
-									editDiffData = {
-										batchResults: resultData.results,
-										isBatch: true,
-									} as any;
-									toolArgs.batchResults = resultData.results;
-									toolArgs.isBatch = true;
-								}
-							} catch (e) {
-								// Ignore parse errors
-							}
-						}
-
-						// Extract terminal result data
-						if (toolName === 'terminal-execute' && !isError) {
-							try {
-								const resultData = JSON.parse(msg.content);
-								if (
-									resultData.stdout !== undefined ||
-									resultData.stderr !== undefined
-								) {
-									terminalResultData = {
-										stdout: resultData.stdout,
-										stderr: resultData.stderr,
-										exitCode: resultData.exitCode,
-										command: toolArgs.command,
-									};
-								}
-							} catch (e) {
-								// Ignore parse errors
-							}
-						}
-
-						break;
+			// Extract edit diff data
+			if (toolName === 'filesystem-edit' && !isError) {
+				try {
+					const resultData = JSON.parse(msg.content);
+					// Handle single file edit
+					if (resultData.oldContent && resultData.newContent) {
+						editDiffData = {
+							oldContent: resultData.oldContent,
+							newContent: resultData.newContent,
+							filename: resultData.filePath || toolArgs['filePath'],
+							completeOldContent: resultData.completeOldContent,
+							completeNewContent: resultData.completeNewContent,
+							contextStartLine: resultData.contextStartLine,
+						};
+						toolArgs['oldContent'] = resultData.oldContent;
+						toolArgs['newContent'] = resultData.newContent;
+						toolArgs['filename'] =
+							resultData.filePath || toolArgs['filePath'];
+						toolArgs['completeOldContent'] =
+							resultData.completeOldContent;
+						toolArgs['completeNewContent'] =
+							resultData.completeNewContent;
+						toolArgs['contextStartLine'] = resultData.contextStartLine;
 					}
+					// Handle batch edit
+					else if (resultData.results && Array.isArray(resultData.results)) {
+						editDiffData = {
+							batchResults: resultData.results,
+							isBatch: true,
+						};
+						toolArgs['batchResults'] = resultData.results;
+						toolArgs['isBatch'] = true;
+					}
+				} catch {
+					// Ignore parse errors
 				}
 			}
 
-			// Check if this tool result is part of a parallel group
-			let parallelGroupId: string | undefined;
-			for (let j = i - 1; j >= 0; j--) {
-				const prevMsg = sessionMessages[j];
-				if (!prevMsg) continue;
-
-				if (
-					prevMsg.role === 'assistant' &&
-					prevMsg.tool_calls &&
-					!prevMsg.subAgentInternal
-				) {
-					const tc = prevMsg.tool_calls.find(t => t.id === msg.tool_call_id);
-					if (tc) {
-						parallelGroupId = (tc as any).parallelGroupId;
-						break;
+			// Extract terminal result data
+			if (toolName === 'terminal-execute' && !isError) {
+				try {
+					const resultData = JSON.parse(msg.content);
+					if (
+						resultData.stdout !== undefined ||
+						resultData.stderr !== undefined
+					) {
+						terminalResultData = {
+							stdout: resultData.stdout,
+							stderr: resultData.stderr,
+							exitCode: resultData.exitCode,
+							command: toolArgs['command'],
+						};
 					}
+				} catch {
+					// Ignore parse errors
 				}
 			}
 
-			const isNonTimeConsuming = !isToolNeedTwoStepDisplay(toolName);
+			const parallelGroupId = toolMeta?.parallelGroupId;
+			const isNonTimeConsuming =
+				!(toolMeta?.isTimeConsuming ?? isToolNeedTwoStepDisplay(toolName));
 			const toolResultView = buildToolResultView({
 				toolName,
 				content: msg.content,
@@ -549,9 +592,10 @@ export function convertSessionMessagesToUI(
 
 			uiMessages.push({
 				role: 'assistant',
-				content: `${statusIcon} ${toolName}${statusText}`,
+				content: '',
 				streaming: false,
 				toolName: toolResultView.toolName,
+				toolCallId: msg.tool_call_id,
 				toolResult: !isError ? msg.content : undefined,
 				toolResultPreview: !isError ? toolResultView.previewContent : undefined,
 				toolCall:
@@ -573,8 +617,13 @@ export function convertSessionMessagesToUI(
 									name: toolName,
 									arguments: JSON.stringify(toolArgs),
 								},
-						  } as any)
+						  })
 						: undefined,
+				toolStatusDetail: buildToolLifecycleSideband({
+					toolName: toolResultView.toolName,
+					messageStatus: status,
+					detail: statusText,
+				}),
 				// Mark parallel group for non-time-consuming tools
 				parallelGroup:
 					isNonTimeConsuming && parallelGroupId ? parallelGroupId : undefined,

@@ -11,6 +11,10 @@ import {
 	coerceBridgeExecutionArguments,
 	getToolExecutionBinding,
 } from '../session/vcpCompatibility/toolExecutionBinding.js';
+import {
+	summarizeBridgeStatusPayload,
+	type BridgeStatusSummary,
+} from '../session/vcpCompatibility/bridgeStatus.js';
 
 import type {SubAgentMessage} from './subAgentExecutor.js';
 import type {ConfirmationResult} from '../../ui/components/tools/ToolConfirmation.js';
@@ -92,6 +96,8 @@ export interface ToolResult {
 	content: string;
 	historyContent?: string; // Compact content used when writing tool results into conversation history
 	previewContent?: string; // Display-only compact preview content
+	toolStatusDetail?: string; // Display-only lifecycle summary for bridge or async tools
+	toolLifecycleState?: string; // UI-only lifecycle state for async tool rendering
 	images?: ImageContent[]; // Support multimodal content with images
 	editDiffData?: Record<string, any>; // Pre-extracted edit diff data for DiffViewer (survives token truncation)
 	messageStatus?: 'pending' | 'success' | 'error'; // Message status for UI rendering
@@ -131,6 +137,11 @@ export interface UserInteractionCallback {
 	}>;
 }
 
+export type BridgeToolStatusUpdate = BridgeStatusSummary & {
+	toolCallId: string;
+	toolName: string;
+};
+
 export function createTeamUserQuestionAdapter(
 	onUserInteractionNeeded?: UserInteractionCallback,
 ) {
@@ -157,6 +168,7 @@ async function executeBridgeToolCall(options: {
 	args: Record<string, any>;
 	toolPlaneKey?: string;
 	abortSignal?: AbortSignal;
+	onStatus?: (payload: unknown) => void;
 }) {
 	const config = getOpenAiConfig();
 	const executionBinding = getToolExecutionBinding(
@@ -182,6 +194,7 @@ async function executeBridgeToolCall(options: {
 			command: executionBinding.commandName,
 		},
 		abortSignal: options.abortSignal,
+		onStatus: options.onStatus,
 	});
 }
 
@@ -304,6 +317,7 @@ export async function executeToolCall(
 	addToAlwaysApproved?: AddToAlwaysApprovedCallback,
 	onUserInteractionNeeded?: UserInteractionCallback,
 	toolSnapshotKey?: string,
+	onBridgeToolStatusUpdate?: (update: BridgeToolStatusUpdate) => void,
 ): Promise<ToolResult> {
 	let result: ToolResult | undefined;
 	let executionError: Error | null = null;
@@ -575,6 +589,19 @@ export async function executeToolCall(
 							args,
 							toolPlaneKey: toolSnapshotKey || currentSessionId,
 							abortSignal,
+							onStatus: payload => {
+								const bridgeSummary =
+									summarizeBridgeStatusPayload(payload);
+								if (!bridgeSummary) {
+									return;
+								}
+
+								onBridgeToolStatusUpdate?.({
+									...bridgeSummary,
+									toolCallId: toolCall.id,
+									toolName: toolCall.function.name,
+								});
+							},
 					  })
 					: await executeMCPTool(
 						toolCall.function.name,
@@ -619,6 +646,10 @@ export async function executeToolCall(
 							previewContent: bridgeSidecar.previewContent,
 					  }
 					: buildToolHistoryArtifacts(toolResult, textContent);
+			const bridgeSummary =
+				executionBinding.kind === 'bridge'
+					? summarizeBridgeStatusPayload(toolResult)
+					: null;
 
 			result = {
 				tool_call_id: toolCall.id,
@@ -626,6 +657,8 @@ export async function executeToolCall(
 				content: textContent,
 				historyContent: toolHistoryArtifacts.historyContent,
 				previewContent: toolHistoryArtifacts.previewContent,
+				toolStatusDetail: bridgeSummary?.detail,
+				toolLifecycleState: bridgeSummary?.state,
 				images,
 				editDiffData,
 			};
@@ -873,6 +906,7 @@ export async function executeToolCalls(
 	addToAlwaysApproved?: AddToAlwaysApprovedCallback,
 	onUserInteractionNeeded?: UserInteractionCallback,
 	toolSnapshotKey?: string,
+	onBridgeToolStatusUpdate?: (update: BridgeToolStatusUpdate) => void,
 ): Promise<ToolResult[]> {
 	// Group tool calls by their resource identifier
 	const resourceGroups = new Map<string, ToolCall[]>();
@@ -913,6 +947,7 @@ export async function executeToolCalls(
 					addToAlwaysApproved,
 					onUserInteractionNeeded,
 					toolSnapshotKey,
+					onBridgeToolStatusUpdate,
 				);
 				groupResults.push(result);
 

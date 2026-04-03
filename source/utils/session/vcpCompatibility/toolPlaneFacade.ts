@@ -5,7 +5,10 @@ import {
 	type MCPTool,
 } from '../../execution/mcpToolsManager.js';
 import type {ApiConfig} from '../../config/apiConfig.js';
-import {snowBridgeClient} from './bridgeClient.js';
+import {
+	snowBridgeClient,
+	type BridgeManifestToolFilters,
+} from './bridgeClient.js';
 import {
 	buildSessionBridgeToolSnapshot,
 	clearBridgeToolSnapshotSession,
@@ -39,6 +42,29 @@ const EMPTY_LOCAL_TOOL_PLANE: LocalToolPlane = {
 	localServicesInfo: [],
 };
 
+export function buildBridgeManifestToolFilters(options: {
+	transport: ReturnType<typeof resolveToolTransport>;
+	localTools: MCPTool[];
+}): BridgeManifestToolFilters | undefined {
+	if (options.transport !== 'hybrid' || options.localTools.length === 0) {
+		return undefined;
+	}
+
+	const excludeExactToolNames = Array.from(
+		new Set(
+			options.localTools
+				.map(tool => tool.function.name.trim())
+				.filter(Boolean),
+		),
+	).sort((left, right) => left.localeCompare(right));
+
+	return excludeExactToolNames.length > 0
+		? {
+				excludeExactToolNames,
+		  }
+		: undefined;
+}
+
 function resolveFallbackToolPlaneKey(sessionKey?: string): string {
 	return sessionKey?.trim() || DEFAULT_TOOL_PLANE_KEY;
 }
@@ -56,15 +82,28 @@ export async function prepareToolPlane(options: {
 		clearBridgeToolSnapshotSession(options.sessionKey);
 	}
 
+	const localToolsPromise = shouldLoadLocal
+		? collectAllMCPTools()
+		: Promise.resolve<MCPTool[]>([]);
+	const localServicesInfoPromise = shouldLoadLocal
+		? getMCPServicesInfo()
+		: Promise.resolve<MCPServiceTools[]>([]);
 	const bridgeSnapshotPromise = shouldLoadBridge
-		? snowBridgeClient
-				.getManifest(options.config)
+		? localToolsPromise
+				.then(localTools =>
+					snowBridgeClient.getManifest(options.config, {
+						toolFilters: buildBridgeManifestToolFilters({
+							transport,
+							localTools,
+						}),
+					}),
+				)
 				.then(manifest =>
 					buildSessionBridgeToolSnapshot(options.sessionKey, manifest),
 				)
 		: Promise.resolve<SessionBridgeToolSnapshot | undefined>(undefined);
 	const localToolPlanePromise = shouldLoadLocal
-		? Promise.all([collectAllMCPTools(), getMCPServicesInfo()]).then(
+		? Promise.all([localToolsPromise, localServicesInfoPromise]).then(
 				([localTools, localServicesInfo]): LocalToolPlane => ({
 					localTools,
 					localServicesInfo,

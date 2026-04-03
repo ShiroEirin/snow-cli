@@ -45,6 +45,11 @@ export function isToolNeedTwoStepDisplay(toolName: string): boolean {
 		return true;
 	}
 
+	// 普通 vcp-* bridge 工具也需要 pending → status 的 sideband 容器
+	if (toolName.startsWith('vcp-')) {
+		return true;
+	}
+
 	return false;
 }
 

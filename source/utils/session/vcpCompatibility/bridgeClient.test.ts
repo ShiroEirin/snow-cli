@@ -165,6 +165,49 @@ test('getManifest reuses cache across bridge and hybrid transport modes', async 
 	client.disconnect();
 });
 
+test('getManifest forwards normalized tool filters and caches by filter shape', async (t: any) => {
+	const client = new SnowBridgeClient() as any;
+	const observedPayloads: Array<Record<string, unknown>> = [];
+
+	client.sendRequest = async ({payload}: {payload: Record<string, unknown>}) => {
+		observedPayloads.push(payload);
+		return {
+			status: 'success',
+			plugins: [{name: `filtered-${observedPayloads.length}`}],
+		};
+	};
+
+	const firstManifest = await client.getManifest(bridgeConfig, {
+		toolFilters: {
+			excludeExactToolNames: ['vcp-demo-run', 'vcp-demo-run', 'filesystem-read'],
+		},
+	});
+	const sharedManifest = await client.getManifest(hybridConfig, {
+		toolFilters: {
+			excludeExactToolNames: ['filesystem-read', 'vcp-demo-run'],
+		},
+	});
+	const secondManifest = await client.getManifest(bridgeConfig, {
+		toolFilters: {
+			excludeExactToolNames: ['vcp-other-run'],
+		},
+	});
+
+	t.is(observedPayloads.length, 2);
+	t.deepEqual(observedPayloads[0], {
+		toolFilters: {
+			include: [],
+			includeExactToolNames: [],
+			excludeExactToolNames: ['filesystem-read', 'vcp-demo-run'],
+			excludeBridgeToolIds: [],
+			excludePluginNames: [],
+		},
+	});
+	t.deepEqual(firstManifest, sharedManifest);
+	t.notDeepEqual(firstManifest, secondManifest);
+	client.disconnect();
+});
+
 test('buildWebSocketUrl prefers explicit bridgeWsUrl override', (t: any) => {
 	const client = new SnowBridgeClient() as any;
 
@@ -307,5 +350,105 @@ test('executeTool preserves the bridge status envelope for upper seams', async (
 		state: 'completed',
 		event: 'result',
 	});
+	client.disconnect();
+});
+
+test('executeTool exposes structured bridge status events', async (t: any) => {
+	const client = new SnowBridgeClient() as any;
+	const observedStatusEvents: any[] = [];
+
+	client.ensureConnected = async () => {};
+	client.sendConnectedRequest = async (request: {
+		payload: Record<string, unknown>;
+	}) => {
+		client.handleMessage(
+			JSON.stringify({
+				type: 'vcp_tool_status',
+				data: {
+					requestId: request.payload['requestId'],
+					invocationId: request.payload['invocationId'],
+					toolId: 'vcp_bridge:snowbridge:demo',
+					toolName: 'DemoTool',
+					originName: 'DemoPlugin',
+					taskId: 'task-42',
+					status: 'running',
+					async: true,
+					asyncStatus: {
+						enabled: true,
+						state: 'running',
+						event: 'log',
+					},
+					bridgeType: 'log',
+					result: {
+						step: 'queued',
+					},
+				},
+			}),
+		);
+
+		return {
+			status: 'success',
+			result: {
+				ok: true,
+			},
+			asyncStatus: {
+				enabled: true,
+				state: 'completed',
+				event: 'result',
+			},
+		};
+	};
+
+	const response = await client.executeTool({
+		config: bridgeConfig,
+		toolName: 'DemoPlugin',
+		toolArgs: {query: 'SnowBridge'},
+		onStatus: (statusEvent: unknown) => {
+			observedStatusEvents.push(statusEvent);
+		},
+	});
+
+	t.is(observedStatusEvents.length, 1);
+	t.deepEqual(observedStatusEvents[0], {
+		type: 'vcp_tool_status',
+		requestId: observedStatusEvents[0].requestId,
+		invocationId: observedStatusEvents[0].invocationId,
+		toolId: 'vcp_bridge:snowbridge:demo',
+		toolName: 'DemoTool',
+		originName: 'DemoPlugin',
+		taskId: 'task-42',
+		status: 'running',
+		isAsync: true,
+		asyncStatus: {
+			enabled: true,
+			state: 'running',
+			event: 'log',
+			taskId: 'task-42',
+		},
+		bridgeType: 'log',
+		result: {
+			step: 'queued',
+		},
+		rawData: {
+			requestId: observedStatusEvents[0].requestId,
+			invocationId: observedStatusEvents[0].invocationId,
+			toolId: 'vcp_bridge:snowbridge:demo',
+			toolName: 'DemoTool',
+			originName: 'DemoPlugin',
+			taskId: 'task-42',
+			status: 'running',
+			async: true,
+			asyncStatus: {
+				enabled: true,
+				state: 'running',
+				event: 'log',
+			},
+			bridgeType: 'log',
+			result: {
+				step: 'queued',
+			},
+		},
+	});
+	t.deepEqual(response.statusEvents, observedStatusEvents);
 	client.disconnect();
 });

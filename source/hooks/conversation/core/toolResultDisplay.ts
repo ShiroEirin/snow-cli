@@ -6,6 +6,7 @@ import type {
 import {formatToolCallMessage} from '../../../utils/ui/messageFormatter.js';
 import {isToolNeedTwoStepDisplay} from '../../../utils/config/toolDisplayConfig.js';
 import {buildToolResultView} from '../../../utils/session/toolResultView.js';
+import {buildToolLifecycleSideband} from '../../../utils/session/vcpCompatibility/toolLifecycleSideband.js';
 
 /**
  * Build UI messages for tool execution results.
@@ -24,7 +25,7 @@ export function buildToolResultMessages(
 		if (!toolCall) continue;
 
 		const isError = result.content.startsWith('Error:');
-		const statusIcon = isError ? '✗' : '✓';
+		const messageStatus = isError ? 'error' : 'success';
 
 		// Sub-agent tools
 		if (toolCall.function.name.startsWith('subagent-')) {
@@ -47,10 +48,16 @@ export function buildToolResultMessages(
 
 			resultMessages.push({
 				role: 'assistant',
-				content: `${statusIcon} ${toolCall.function.name}`,
+				content: '',
 				streaming: false,
-				messageStatus: isError ? 'error' : 'success',
+				messageStatus,
 				toolName: toolResultView.toolName,
+				toolCallId: toolCall.id,
+				toolStatusDetail: buildToolLifecycleSideband({
+					toolName: toolResultView.toolName,
+					messageStatus,
+					detail: result.toolStatusDetail,
+				}),
 				toolResult: !isError ? result.content : undefined,
 				toolResultPreview: !isError ? toolResultView.previewContent : undefined,
 				subAgentUsage: usage,
@@ -75,10 +82,17 @@ export function buildToolResultMessages(
 
 		resultMessages.push({
 			role: 'assistant',
-			content: `${statusIcon} ${toolCall.function.name}`,
+			content: '',
 			streaming: false,
-			messageStatus: isError ? 'error' : 'success',
+			messageStatus,
 			toolName: toolResultView.toolName,
+			toolCallId: toolCall.id,
+			toolLifecycleState: result.toolLifecycleState,
+			toolStatusDetail: buildToolLifecycleSideband({
+				toolName: toolResultView.toolName,
+				messageStatus,
+				detail: result.toolStatusDetail,
+			}),
 			toolCall: editDiffData
 				? {name: toolCall.function.name, arguments: editDiffData}
 				: undefined,

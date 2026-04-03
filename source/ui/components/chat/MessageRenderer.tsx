@@ -18,6 +18,7 @@ import {
 	formatVcpToolResultLabel,
 	parseVcpDisplayBlocks,
 } from '../../../utils/session/vcpCompatibility/display.js';
+import {resolveToolSideband} from '../../../utils/session/vcpCompatibility/toolSideband.js';
 
 /**
  * Clean thinking content by removing XML-like tags
@@ -277,6 +278,9 @@ export default function MessageRenderer({
 			.split('\n')
 			.map((line, index) => `${index === 0 ? '└─ ' : '   '}${line || ' '}`);
 	};
+	const toolSideband = resolveToolSideband(message, {
+		fallbackContent: getDisplayContent(message.content || ''),
+	});
 
 	// Determine tool message type and color
 	let toolStatusColor: string = 'cyan';
@@ -489,6 +493,27 @@ export default function MessageRenderer({
 												message.subAgentInternal === true;
 											const isSubAgentContent =
 												message.subAgentContent === true;
+
+											if (toolSideband) {
+												const lines = toolSideband.split('\n');
+												const titleLine = lines[0] || '';
+												const treeLines = lines.slice(1);
+
+												return (
+													<>
+														<Text color={toolStatusColor}>
+															{removeAnsiCodes(titleLine)}
+														</Text>
+														{treeLines.length > 0 && (
+															<Text color={theme.colors.menuSecondary}>
+																{treeLines
+																	.map(line => removeAnsiCodes(line || ''))
+																	.join('\n')}
+															</Text>
+														)}
+													</>
+												);
+											}
 
 											if (
 												(hasToolStatus ||

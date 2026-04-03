@@ -1,5 +1,6 @@
 import {
 	executeToolCalls,
+	type BridgeToolStatusUpdate,
 	type ToolCall,
 } from '../../../utils/execution/toolExecutor.js';
 import {toolSearchService} from '../../../utils/execution/toolSearchService.js';
@@ -26,6 +27,91 @@ import type {
 } from './conversationTypes.js';
 import type {MCPTool} from '../../../utils/execution/mcpToolsManager.js';
 import type {ConfirmationResult} from '../../../ui/components/tools/ToolConfirmation.js';
+import {
+	buildToolLifecycleSideband,
+	deriveBridgeLifecycleState,
+	shouldAdvanceBridgeLifecycle,
+} from '../../../utils/session/vcpCompatibility/toolLifecycleSideband.js';
+
+function replacePendingToolMessages(
+	existingMessages: Message[],
+	resultMessages: Message[],
+): Message[] {
+	const nextMessages = [...existingMessages];
+
+	for (const resultMessage of resultMessages) {
+		if (!resultMessage.toolCallId) {
+			nextMessages.push(resultMessage);
+			continue;
+		}
+
+		let pendingIndex = -1;
+		for (let index = nextMessages.length - 1; index >= 0; index--) {
+			const message = nextMessages[index];
+			if (
+				message?.toolCallId === resultMessage.toolCallId &&
+				message.toolPending === true
+			) {
+				pendingIndex = index;
+				break;
+			}
+		}
+
+		if (pendingIndex === -1) {
+			nextMessages.push(resultMessage);
+			continue;
+		}
+
+		nextMessages[pendingIndex] = {
+			...nextMessages[pendingIndex],
+			...resultMessage,
+			toolPending: false,
+		};
+	}
+
+	return nextMessages;
+}
+
+function applyBridgeToolStatusUpdate(
+	existingMessages: Message[],
+	update: BridgeToolStatusUpdate,
+): Message[] {
+	let changed = false;
+	const nextMessages = existingMessages.map(message => {
+		if (
+			message.toolCallId !== update.toolCallId ||
+			message.toolPending !== true
+		) {
+			return message;
+		}
+
+		const nextSideband = buildToolLifecycleSideband({
+			toolName: message.toolName || update.toolName,
+			messageStatus: 'pending',
+			detail: update.detail,
+			fallbackContent: message.content,
+		});
+		const nextLifecycleState = deriveBridgeLifecycleState(update);
+		const currentLifecycleState = message.toolLifecycleState;
+		const isSameLifecycleState =
+			currentLifecycleState === nextLifecycleState;
+		const canAdvance = shouldAdvanceBridgeLifecycle(currentLifecycleState, update);
+
+		if ((!canAdvance && !isSameLifecycleState) || message.toolStatusDetail === nextSideband) {
+			return message;
+		}
+
+		changed = true;
+		return {
+			...message,
+			toolName: message.toolName || update.toolName,
+			toolLifecycleState: nextLifecycleState,
+			toolStatusDetail: nextSideband,
+		};
+	});
+
+	return changed ? nextMessages : existingMessages;
+}
 
 export async function handleToolCallRound(ctx: {
 	streamResult: StreamRoundResult;
@@ -85,6 +171,7 @@ export async function handleToolCallRound(ctx: {
 		streamingEnabled,
 		options,
 	} = ctx;
+	let userInteractionSequence = 0;
 	let {accumulatedUsage} = ctx;
 
 	const receivedToolCalls = streamResult.receivedToolCalls!;
@@ -179,11 +266,12 @@ export async function handleToolCallRound(ctx: {
 		yoloModeRef.current,
 		addToAlwaysApproved,
 		async (question: string, opts: string[], multiSelect?: boolean) => {
+			const interactionToolCallId = `askuser-${++userInteractionSequence}`;
 			if (connectionManager.isConnected()) {
 				await connectionManager.notifyUserInteractionNeeded(
 					question,
 					opts,
-					'fake-tool-call',
+					interactionToolCallId,
 					multiSelect,
 				);
 			}
@@ -191,7 +279,7 @@ export async function handleToolCallRound(ctx: {
 				question,
 				opts,
 				{
-					id: 'fake-tool-call',
+					id: interactionToolCallId,
 					type: 'function',
 					function: {name: 'askuser', arguments: '{}'},
 				},
@@ -199,6 +287,9 @@ export async function handleToolCallRound(ctx: {
 			);
 		},
 		toolSnapshotKey,
+		update => {
+			setMessages(prev => applyBridgeToolStatusUpdate(prev, update));
+		},
 	);
 
 	if (controller.signal.aborted) {
@@ -282,9 +373,9 @@ export async function handleToolCallRound(ctx: {
 			result,
 			isError ? 'error' : 'success',
 		);
-		conversationMessages.push(conversationMessage as any);
+		conversationMessages.push(conversationMessage);
 		try {
-			await saveMessage(resultToSave as any);
+			await saveMessage(resultToSave);
 		} catch (error) {
 			console.error('Failed to save tool result before compression:', error);
 		}
@@ -345,7 +436,7 @@ export async function handleToolCallRound(ctx: {
 		parallelGroupId,
 	);
 	if (resultMessages.length > 0) {
-		setMessages(prev => [...prev, ...resultMessages]);
+		setMessages(prev => replacePendingToolMessages(prev, resultMessages));
 	}
 
 	try {

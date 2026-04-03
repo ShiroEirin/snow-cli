@@ -28,6 +28,9 @@ test('buildToolResultMessages keeps raw toolResult and avoids compact preview fo
 
 	t.is(messages.length, 1);
 	t.is(messages[0]?.toolName, 'filesystem-read');
+	t.is(messages[0]?.content, '');
+	t.is(messages[0]?.toolCallId, 'call-1');
+	t.is(messages[0]?.toolStatusDetail, '✓ filesystem-read');
 	t.is(messages[0]?.toolResult, '{"content":"raw payload"}');
 	t.is(messages[0]?.toolResultPreview, undefined);
 });
@@ -59,6 +62,7 @@ test('buildToolResultMessages keeps compact preview only for bridge-like tools',
 
 	t.is(messages[0]?.toolResult, '{"raw":"payload"}');
 	t.is(messages[0]?.toolResultPreview, '{"summary":"compact bridge preview"}');
+	t.is(messages[0]?.toolStatusDetail, '✓ vcp-bridge-tool');
 });
 
 test('buildToolResultMessages does not create preview metadata for skill-execute strings', t => {
@@ -87,4 +91,37 @@ test('buildToolResultMessages does not create preview metadata for skill-execute
 
 	t.is(messages[0]?.toolResult, 'Skill execution finished');
 	t.is(messages[0]?.toolResultPreview, undefined);
+	t.is(messages[0]?.toolStatusDetail, '✓ skill-execute');
+});
+
+test('buildToolResultMessages carries bridge lifecycle detail into sideband display', t => {
+	const messages = buildToolResultMessages(
+		[
+			{
+				role: 'tool',
+				tool_call_id: 'call-async',
+				content: '{"raw":"payload"}',
+				previewContent: '{"summary":"compact preview"}',
+				toolStatusDetail: 'SnowBridge: Completed',
+				toolLifecycleState: 'completed',
+			},
+		],
+		[
+			{
+				id: 'call-async',
+				type: 'function',
+				function: {
+					name: 'vcp-bridge-tool',
+					arguments: '{"query":"hello"}',
+				},
+			},
+		],
+		undefined,
+	);
+
+	t.is(messages[0]?.toolLifecycleState, 'completed');
+	t.is(
+		messages[0]?.toolStatusDetail,
+		'✓ vcp-bridge-tool\n└─ SnowBridge: Completed',
+	);
 });

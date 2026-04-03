@@ -3,6 +3,7 @@ import {Box, Text} from 'ink';
 import {SelectedFile} from '../../../utils/core/fileUtils.js';
 import MarkdownRenderer from '../common/MarkdownRenderer.js';
 import {useI18n} from '../../../i18n/I18nContext.js';
+import {resolveToolSideband} from '../../../utils/session/vcpCompatibility/toolSideband.js';
 
 export interface Message {
 	role: 'user' | 'assistant' | 'command' | 'subagent';
@@ -38,6 +39,8 @@ export interface Message {
 	};
 	toolResult?: string; // Raw JSON string from tool execution for preview
 	toolResultPreview?: string; // Display-only compact preview, raw toolResult remains preserved
+	toolStatusDetail?: string; // Display-only lifecycle/status sideband for pending/completed tools
+	toolLifecycleState?: string; // UI-only lifecycle state for async tool rendering
 	toolCallId?: string; // Tool call ID for updating message in place
 	toolPending?: boolean; // Whether the tool is still executing
 	isExecuting?: boolean; // Whether a custom command is executing in terminal
@@ -117,6 +120,7 @@ const MessageList = memo(
 		return (
 			<Box flexDirection="column" overflow="hidden">
 				{messages.slice(-maxMessages).map((message, index) => {
+					const toolSideband = resolveToolSideband(message);
 					const iconColor =
 						message.role === 'user'
 							? message.subAgentDirected
@@ -129,6 +133,14 @@ const MessageList = memo(
 							: message.streaming
 							? (STREAM_COLORS[animationFrame] as any)
 							: 'cyan';
+					const toolTextColor =
+						message.messageStatus === 'pending'
+							? 'yellow'
+							: message.messageStatus === 'success'
+							? 'green'
+							: message.messageStatus === 'error'
+							? 'red'
+							: iconColor;
 
 					return (
 						<Box key={index}>
@@ -186,7 +198,7 @@ const MessageList = memo(
 												),
 											)}
 									</Box>
-								) : message.role === 'subagent' ? (
+								) : message.role === 'subagent' && !toolSideband ? (
 									<>
 										<Text color="magenta" dimColor>
 											└─ Sub-Agent: {message.subAgent?.agentName}
@@ -208,6 +220,18 @@ const MessageList = memo(
 													.map(line => ` ${line || ' '} `)
 													.join('\n')}
 											</Text>
+										) : toolSideband ? (
+											<Box flexDirection="column">
+												{toolSideband.split('\n').map((line, lineIndex) => (
+													<Text
+														key={lineIndex}
+														color={lineIndex === 0 ? toolTextColor : 'gray'}
+														dimColor={lineIndex > 0}
+													>
+														{line}
+													</Text>
+												))}
+											</Box>
 										) : (
 											<MarkdownRenderer content={message.content || ' '} />
 										)}

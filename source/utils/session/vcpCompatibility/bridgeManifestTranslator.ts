@@ -69,7 +69,9 @@ export function buildBridgeToolName(
 }
 
 function inferSchemaFromTypeHint(typeHint?: string): Record<string, unknown> {
-	const normalizedHint = String(typeHint || '').trim().toLowerCase();
+	const normalizedHint = String(typeHint || '')
+		.trim()
+		.toLowerCase();
 
 	if (!normalizedHint) {
 		return {
@@ -126,6 +128,11 @@ function inferSchemaFromTypeHint(typeHint?: string): Record<string, unknown> {
 	};
 }
 
+function normalizeSchemaType(type: unknown): string | undefined {
+	const normalizedType = Array.isArray(type) ? type[0] : type;
+	return typeof normalizedType === 'string' ? normalizedType : undefined;
+}
+
 function coerceDefaultValue(
 	rawDefaultValue: string | undefined,
 	type: unknown,
@@ -138,8 +145,8 @@ function coerceDefaultValue(
 	const normalizedType = Array.isArray(type)
 		? type[0]
 		: typeof type === 'string'
-			? type
-			: undefined;
+		? type
+		: undefined;
 	if (normalizedType === 'boolean') {
 		if (/^(true|false)$/i.test(normalizedDefaultValue)) {
 			return normalizedDefaultValue.toLowerCase() === 'true';
@@ -158,6 +165,173 @@ function coerceDefaultValue(
 	}
 
 	return normalizedDefaultValue.replace(/^['"`]|['"`]$/g, '');
+}
+
+function normalizeStableValueCandidate(
+	rawValue: string,
+	schemaType?: string,
+): unknown {
+	const normalizedValue = String(rawValue || '')
+		.trim()
+		.replace(/^[`'"“”‘’([{<\s]+/u, '')
+		.replace(/[`'"“”‘’)\]}>.,，。；;:：\s]+$/u, '')
+		.trim();
+	if (!normalizedValue || /\s/.test(normalizedValue)) {
+		return undefined;
+	}
+
+	if (!/^[a-z0-9_.-]+$/i.test(normalizedValue)) {
+		return undefined;
+	}
+
+	return coerceDefaultValue(normalizedValue, schemaType);
+}
+
+function extractConstValueFromHint(
+	hint: string | undefined,
+	schemaType?: string,
+): unknown {
+	const normalizedHint = String(hint || '').trim();
+	if (
+		!normalizedHint ||
+		/(?:one of|之一|选项|options?|可选值|取值|枚举值)/i.test(normalizedHint)
+	) {
+		return undefined;
+	}
+
+	const patterns = [
+		/(?:固定为|固定值(?:为)?|必须为)\s*([`'"“”‘’]?[A-Za-z0-9_.-]+[`'"“”‘’]?)/iu,
+		/(?:(?:is\s+)?fixed\s+to)\s*([`'"“”‘’]?[A-Za-z0-9_.-]+[`'"“”‘’]?)/i,
+		/(?:always|must be)\s*([`'"“”‘’][A-Za-z0-9_.-]+[`'"“”‘’])/i,
+	];
+
+	for (const pattern of patterns) {
+		const value = pattern.exec(normalizedHint)?.[1];
+		const normalizedValue =
+			typeof value === 'string'
+				? normalizeStableValueCandidate(value, schemaType)
+				: undefined;
+		if (normalizedValue !== undefined) {
+			return normalizedValue;
+		}
+	}
+
+	return undefined;
+}
+
+function parseEnumValuesFromCandidate(
+	candidate: string,
+	schemaType?: string,
+): unknown[] | undefined {
+	const normalizedCandidate = String(candidate || '')
+		.trim()
+		.replace(/[，,]\s*(?:default|默认值|默认为).*/iu, '')
+		.replace(
+			/^(?:one of|must be one of|可选值(?:为|是)?|取值(?:为|是)?|枚举值(?:为|是)?|options?(?: are|:)?|supported values?(?: are|:)?|值(?:仅可|可为|为))\s*/iu,
+			'',
+		)
+		.replace(/[。；;]+$/u, '')
+		.trim();
+	if (!normalizedCandidate) {
+		return undefined;
+	}
+
+	const rawValues = normalizedCandidate
+		.split(/\s*(?:,|，|、|\bor\b|或)\s*/iu)
+		.filter(Boolean);
+	if (rawValues.length < 2 || rawValues.length > 4) {
+		return undefined;
+	}
+
+	const values = rawValues
+		.map(value => normalizeStableValueCandidate(value, schemaType))
+		.filter(value => value !== undefined);
+	if (values.length !== rawValues.length) {
+		return undefined;
+	}
+
+	return Array.from(new Set(values));
+}
+
+function extractEnumValuesFromHint(
+	hint: string | undefined,
+	schemaType?: string,
+): unknown[] | undefined {
+	const normalizedHint = String(hint || '').trim();
+	if (!normalizedHint) {
+		return undefined;
+	}
+
+	const candidates = [
+		...Array.from(
+			normalizedHint.matchAll(
+				/(?:one of|must be one of|可选值(?:为|是)?|取值(?:为|是)?|枚举值(?:为|是)?|options?(?: are|:)?|supported values?(?: are|:)?|值(?:仅可|可为|为))\s*([^\n。；;]+)/giu,
+			),
+			match => match[1],
+		),
+		normalizedHint.split(/[\n。；;]/u, 1)[0] || '',
+	];
+
+	for (const candidate of candidates) {
+		if (!candidate) {
+			continue;
+		}
+
+		const enumValues = parseEnumValuesFromCandidate(candidate, schemaType);
+		if (enumValues) {
+			return enumValues;
+		}
+	}
+
+	return undefined;
+}
+
+function applyStableValueConstraints(
+	schema: Record<string, unknown>,
+	hints: Array<string | undefined>,
+): Record<string, unknown> {
+	const schemaType = normalizeSchemaType(schema['type']);
+	if (!schemaType) {
+		return schema;
+	}
+
+	for (const hint of hints) {
+		const constValue = extractConstValueFromHint(hint, schemaType);
+		if (constValue === undefined) {
+			continue;
+		}
+
+		if (schema['default'] !== undefined && schema['default'] !== constValue) {
+			continue;
+		}
+
+		return {
+			...schema,
+			const: constValue,
+			...(schema['default'] === undefined ? {default: constValue} : {}),
+		};
+	}
+
+	for (const hint of hints) {
+		const enumValues = extractEnumValuesFromHint(hint, schemaType);
+		if (!enumValues?.length) {
+			continue;
+		}
+
+		if (
+			schema['default'] !== undefined &&
+			!enumValues.includes(schema['default'])
+		) {
+			continue;
+		}
+
+		return {
+			...schema,
+			enum: enumValues,
+		};
+	}
+
+	return schema;
 }
 
 function isRequiredHint(value?: string): boolean {
@@ -189,20 +363,28 @@ function normalizeParameterDefinition(
 	},
 ): BridgeToolParameterDefinition {
 	const description = options?.description?.trim();
-	const inferredSchema = inferSchemaFromTypeHint(options?.typeHint || description);
+	const inferredSchema = inferSchemaFromTypeHint(
+		options?.typeHint || description,
+	);
 	const defaultValue = coerceDefaultValue(
-		extractDefaultValue([options?.typeHint, description].filter(Boolean).join(', ')),
+		extractDefaultValue(
+			[options?.typeHint, description].filter(Boolean).join(', '),
+		),
 		inferredSchema['type'],
+	);
+	const schema = applyStableValueConstraints(
+		{
+			...inferredSchema,
+			...(description ? {description} : {}),
+			...(defaultValue !== undefined ? {default: defaultValue} : {}),
+		},
+		[description, options?.typeHint],
 	);
 	return {
 		name,
 		required: options?.required ?? false,
 		source: options?.source ?? 'structured',
-		schema: {
-			...inferredSchema,
-			...(description ? {description} : {}),
-			...(defaultValue !== undefined ? {default: defaultValue} : {}),
-		},
+		schema,
 	};
 }
 
@@ -258,8 +440,8 @@ function normalizeParameterDefinitions(
 					typeof candidate.type === 'string'
 						? candidate.type
 						: typeof candidate.description === 'string'
-							? candidate.description
-							: undefined,
+						? candidate.description
+						: undefined,
 				source: 'structured',
 			}),
 		);
@@ -272,7 +454,9 @@ function shouldSkipDescriptionParameter(
 	name: string,
 	description?: string,
 ): boolean {
-	if (/^(tool_name|command\d*|commandidentifier|commandname|toolid)$/i.test(name)) {
+	if (
+		/^(tool_name|command\d*|commandidentifier|commandname|toolid)$/i.test(name)
+	) {
 		return true;
 	}
 
@@ -308,8 +492,7 @@ function extractLegacySectionHint(line: string): string | null {
 	}
 
 	const parenthesizedHint =
-		/[（(]([^)）]+)[)）]\s*[:：]?\**$/u.exec(normalizedLine)?.[1]?.trim() ||
-		'';
+		/[（(]([^)）]+)[)）]\s*[:：]?\**$/u.exec(normalizedLine)?.[1]?.trim() || '';
 	if (parenthesizedHint) {
 		return `示例提示：${parenthesizedHint.replace(/[。；;:：]+$/u, '')}。`;
 	}
@@ -318,7 +501,9 @@ function extractLegacySectionHint(line: string): string | null {
 		/[:：]\s*(.+?)\**$/u.exec(normalizedLine)?.[1]?.trim() || '';
 	if (
 		colonHint &&
-		!/(?:TOOL_REQUEST|END_TOOL_REQUEST|tool_name|「始」|「末」)/i.test(colonHint)
+		!/(?:TOOL_REQUEST|END_TOOL_REQUEST|tool_name|「始」|「末」)/i.test(
+			colonHint,
+		)
 	) {
 		return `调用提示：${colonHint.replace(/[。；;:：]+$/u, '')}。`;
 	}
@@ -376,10 +561,7 @@ function sanitizeBridgeText(text: string): string {
 
 		if (isLegacySectionStart(line)) {
 			const legacyHint = extractLegacySectionHint(line);
-			if (
-				legacyHint &&
-				!sanitizedLines.includes(legacyHint)
-			) {
+			if (legacyHint && !sanitizedLines.includes(legacyHint)) {
 				sanitizedLines.push(legacyHint);
 			}
 			skippingLegacyBlock = true;
@@ -393,11 +575,15 @@ function sanitizeBridgeText(text: string): string {
 		sanitizedLines.push(line);
 	}
 
-	return sanitizedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+	return sanitizedLines
+		.join('\n')
+		.replace(/\n{3,}/g, '\n\n')
+		.trim();
 }
 
 function hasStrictDescriptionContract(description: string): boolean {
-	const normalizedDescription = normalizeBridgeTextInput(description).toLowerCase();
+	const normalizedDescription =
+		normalizeBridgeTextInput(description).toLowerCase();
 	return (
 		/不要包含任何未列出的参数|不要包含任何其他参数|禁止包含任何其他参数/u.test(
 			normalizedDescription,
@@ -421,9 +607,10 @@ function extractParameterDefinitionsFromDescription(
 			continue;
 		}
 
-		const match = /^(?:[-*•]|\d+\.)?\s*(?:`(?<backtickName>[^`]+)`|(?<plainName>[A-Za-z_][\w.-]*))(?:\s*[（(](?<meta>[^)）]+)[)）])?\s*[:：]\s*(?<description>.+)$/.exec(
-			line,
-		);
+		const match =
+			/^(?:[-*•]|\d+\.)?\s*(?:`(?<backtickName>[^`]+)`|(?<plainName>[A-Za-z_][\w.-]*))(?:\s*[（(](?<meta>[^)）]+)[)）])?\s*[:：]\s*(?<description>.+)$/.exec(
+				line,
+			);
 		if (!match?.groups) {
 			continue;
 		}
@@ -433,11 +620,18 @@ function extractParameterDefinitionsFromDescription(
 		);
 		const parameterDescription = match.groups['description']?.trim();
 		const meta = match.groups['meta']?.trim();
-		if (!name || shouldSkipDescriptionParameter(name, [meta, parameterDescription].filter(Boolean).join(', '))) {
+		if (
+			!name ||
+			shouldSkipDescriptionParameter(
+				name,
+				[meta, parameterDescription].filter(Boolean).join(', '),
+			)
+		) {
 			continue;
 		}
 		const typeHint = [meta, parameterDescription].filter(Boolean).join(', ');
-		const required = isRequiredHint(meta) || isRequiredHint(parameterDescription);
+		const required =
+			isRequiredHint(meta) || isRequiredHint(parameterDescription);
 
 		definitions.set(
 			name,
@@ -489,7 +683,9 @@ function buildParametersSchema(
 
 	const isStrictSchema =
 		parameterDefinitions.length > 0 &&
-		(parameterDefinitions.every(parameter => parameter.source === 'structured') ||
+		(parameterDefinitions.every(
+			parameter => parameter.source === 'structured',
+		) ||
 			options?.strictDescriptionContract === true);
 
 	return {
@@ -500,7 +696,9 @@ function buildParametersSchema(
 	};
 }
 
-function resolveBridgeCommandName(command: BridgeManifestCommand): string | null {
+function resolveBridgeCommandName(
+	command: BridgeManifestCommand,
+): string | null {
 	const candidate =
 		command.commandName || command.commandIdentifier || command.command;
 	const normalizedCandidate = String(candidate || '').trim();
@@ -550,7 +748,7 @@ export function translateBridgeManifestToToolPlane(
 					? structuredParameterDefinitions
 					: extractParameterDefinitionsFromDescription(
 							command.description || '',
-						);
+					  );
 			const stringifyArgumentNames = parameterDefinitions
 				.filter(parameter => parameter.source === 'description')
 				.map(parameter => parameter.name);
