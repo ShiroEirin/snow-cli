@@ -15,8 +15,10 @@ import {
 	type SessionBridgeToolSnapshot,
 } from './toolSnapshot.js';
 import {
+	buildToolPlaneRuntimeState,
 	resolveToolRegistry,
 	resolveToolTransport,
+	type ToolPlaneRuntimeState,
 } from './toolRouteArbiter.js';
 import {
 	clearToolExecutionBindingsSession,
@@ -30,6 +32,7 @@ export type PreparedToolPlane = {
 	servicesInfo: MCPServiceTools[];
 	duplicateToolNames: string[];
 	toolPlaneKey: string;
+	runtimeState: ToolPlaneRuntimeState;
 };
 
 type LocalToolPlane = {
@@ -63,6 +66,23 @@ export function buildBridgeManifestToolFilters(options: {
 				excludeExactToolNames,
 		  }
 		: undefined;
+}
+
+export function buildPreparedToolPlaneRuntimeState(options: {
+	config: Pick<ApiConfig, 'toolTransport'>;
+	registry: Pick<ReturnType<typeof resolveToolRegistry>, 'retainedToolCounts'>;
+	localDiscoveredToolCount: number;
+	bridgeDiscoveredToolCount: number;
+	bridgeLoadFailed?: boolean;
+}): ToolPlaneRuntimeState {
+	return buildToolPlaneRuntimeState({
+		config: options.config,
+		localDiscoveredToolCount: options.localDiscoveredToolCount,
+		localRetainedToolCount: options.registry.retainedToolCounts.local,
+		bridgeDiscoveredToolCount: options.bridgeDiscoveredToolCount,
+		bridgeRetainedToolCount: options.registry.retainedToolCounts.bridge,
+		bridgeLoadFailed: options.bridgeLoadFailed,
+	});
 }
 
 function resolveFallbackToolPlaneKey(sessionKey?: string): string {
@@ -144,6 +164,14 @@ export async function prepareToolPlane(options: {
 		localServicesInfo,
 		bridgeSnapshot,
 	});
+	const runtimeState = buildPreparedToolPlaneRuntimeState({
+		config: options.config,
+		registry,
+		localDiscoveredToolCount: localTools.length,
+		bridgeDiscoveredToolCount: bridgeSnapshot?.modelTools.length || 0,
+		bridgeLoadFailed:
+			shouldLoadBridge && bridgeResult.status === 'rejected',
+	});
 	const toolPlaneKey = rotateToolExecutionBindingsSession({
 		sessionKey: options.sessionKey,
 		nextToolPlaneKey:
@@ -157,5 +185,6 @@ export async function prepareToolPlane(options: {
 		servicesInfo: registry.servicesInfo,
 		duplicateToolNames: registry.duplicateToolNames,
 		toolPlaneKey,
+		runtimeState,
 	};
 }

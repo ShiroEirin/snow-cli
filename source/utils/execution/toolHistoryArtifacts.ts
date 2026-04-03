@@ -1,5 +1,19 @@
 import type {MultimodalContent} from '../../mcp/types/filesystem.types.js';
 
+type OpenAiTextContent = {
+	type: 'text';
+	text: string;
+};
+
+type OpenAiImageUrlContent = {
+	type: 'image_url';
+	image_url?: {
+		url?: string;
+	};
+};
+
+type OpenAiToolResultContent = Array<OpenAiTextContent | OpenAiImageUrlContent>;
+
 export interface ToolHistorySummary {
 	summary: string;
 	status?: string;
@@ -154,9 +168,25 @@ function isMultimodalContent(value: any): value is MultimodalContent {
 	);
 }
 
-function extractHistoryTextFromContentItems(items: MultimodalContent): string {
+function isOpenAiToolResultContent(value: any): value is OpenAiToolResultContent {
+	return (
+		Array.isArray(value) &&
+		value.length > 0 &&
+		value.every(
+			(item: any) =>
+				item &&
+				typeof item === 'object' &&
+				(item.type === 'text' || item.type === 'image_url'),
+		)
+	);
+}
+
+function extractHistoryTextFromContentItems(
+	items: MultimodalContent | OpenAiToolResultContent,
+): string {
 	const parts: string[] = [];
 	let imageCount = 0;
+	let imageUrlCount = 0;
 
 	for (const item of items) {
 		if (item.type === 'text' && item.text) {
@@ -166,11 +196,24 @@ function extractHistoryTextFromContentItems(items: MultimodalContent): string {
 
 		if (item.type === 'image') {
 			imageCount++;
+			continue;
+		}
+
+		if (item.type === 'image_url') {
+			imageUrlCount++;
 		}
 	}
 
 	if (imageCount > 0) {
 		parts.push(`[${imageCount} image item${imageCount === 1 ? '' : 's'} omitted]`);
+	}
+
+	if (imageUrlCount > 0) {
+		parts.push(
+			`[${imageUrlCount} image URL item${
+				imageUrlCount === 1 ? '' : 's'
+			} omitted]`,
+		);
 	}
 
 	return summarizeToolHistoryText(parts.join('\n\n'));
@@ -234,7 +277,11 @@ function summarizeToolHistoryValue(value: any, depth = 0): any {
 				continue;
 			}
 
-			if (key === 'content' && isMultimodalContent(nestedValue)) {
+			if (
+				key === 'content' &&
+				(isMultimodalContent(nestedValue) ||
+					isOpenAiToolResultContent(nestedValue))
+			) {
 				const flattenedContent = extractHistoryTextFromContentItems(nestedValue);
 				if (flattenedContent) {
 					summarizedObject[key] = flattenedContent;
@@ -376,6 +423,13 @@ function extractBestSummaryText(
 		);
 	}
 
+	if (isOpenAiToolResultContent(result)) {
+		return trimSummaryText(
+			extractHistoryTextFromContentItems(result).split('\n').find(Boolean) ||
+				fallbackTextContent,
+		);
+	}
+
 	if (result && typeof result === 'object') {
 		for (const key of ['summary', 'message']) {
 			const value = (result as Record<string, any>)[key];
@@ -392,6 +446,13 @@ function extractBestSummaryText(
 		}
 
 		if (isMultimodalContent(nestedContent)) {
+			const flattened = extractHistoryTextFromContentItems(nestedContent);
+			if (flattened) {
+				return trimSummaryText(flattened.split('\n').find(Boolean) || flattened);
+			}
+		}
+
+		if (isOpenAiToolResultContent(nestedContent)) {
 			const flattened = extractHistoryTextFromContentItems(nestedContent);
 			if (flattened) {
 				return trimSummaryText(flattened.split('\n').find(Boolean) || flattened);
@@ -424,6 +485,10 @@ function extractPreviewSourceText(
 		return extractHistoryTextFromContentItems(result);
 	}
 
+	if (isOpenAiToolResultContent(result)) {
+		return extractHistoryTextFromContentItems(result);
+	}
+
 	if (result && typeof result === 'object') {
 		const nestedContent = (result as Record<string, any>)['content'];
 		if (typeof nestedContent === 'string' && nestedContent.trim()) {
@@ -431,6 +496,10 @@ function extractPreviewSourceText(
 		}
 
 		if (isMultimodalContent(nestedContent)) {
+			return extractHistoryTextFromContentItems(nestedContent);
+		}
+
+		if (isOpenAiToolResultContent(nestedContent)) {
 			return extractHistoryTextFromContentItems(nestedContent);
 		}
 
@@ -516,6 +585,8 @@ export function buildToolHistoryArtifacts(
 	let historyContent: string;
 
 	if (isMultimodalContent(result)) {
+		historyContent = extractHistoryTextFromContentItems(result);
+	} else if (isOpenAiToolResultContent(result)) {
 		historyContent = extractHistoryTextFromContentItems(result);
 	} else if (typeof result === 'string') {
 		historyContent = summarizeToolHistoryText(result);

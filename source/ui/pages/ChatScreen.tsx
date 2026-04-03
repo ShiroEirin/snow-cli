@@ -161,6 +161,10 @@ export default function ChatScreen({
 		connectionManager.setStreamingState(streamingState.streamStatus);
 	}, [streamingState.streamStatus]);
 
+	useEffect(() => {
+		streamingState.setToolPlaneRuntimeState(null);
+	}, [panelState.currentProfileName, remountKey]);
+
 	useChatScreenSessionLifecycle({
 		autoResume,
 		terminalWidth,
@@ -579,6 +583,7 @@ export default function ChatScreen({
 					elapsedSeconds={streamingState.elapsedSeconds}
 					currentModel={streamingState.currentModel}
 					compressBlockToast={streamingState.compressBlockToast}
+					toolPlaneRuntimeState={streamingState.toolPlaneRuntimeState}
 				/>
 			)}
 		</Box>

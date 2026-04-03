@@ -107,6 +107,22 @@ export default function SessionListPanel({onSelectSession, onClose}: Props) {
 		[t],
 	);
 
+	const formatSize = useCallback((sizeBytes?: number): string | null => {
+		if (typeof sizeBytes !== 'number' || sizeBytes < 0) {
+			return null;
+		}
+
+		if (sizeBytes < 1024) {
+			return `${sizeBytes} B`;
+		}
+
+		if (sizeBytes < 1024 * 1024) {
+			return `${(sizeBytes / 1024).toFixed(1)} KB`;
+		}
+
+		return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+	}, []);
+
 	useInput((input, key) => {
 		if (loading) return;
 
@@ -379,6 +395,7 @@ export default function SessionListPanel({onSelectSession, onClose}: Props) {
 							session.title || t.sessionListPanel.untitled
 						).replace(/[\r\n\t]+/g, ' ');
 						const timeStr = formatDate(session.updatedAt);
+						const sizeStr = formatSize(session.metadata?.size);
 						const truncatedLabel =
 							cleanTitle.length > 50
 								? cleanTitle.slice(0, 47) + '...'
@@ -400,6 +417,7 @@ export default function SessionListPanel({onSelectSession, onClose}: Props) {
 								<Text color="gray" dimColor>
 									{' '}
 									• {timeStr}
+									{sizeStr ? ` • ${sizeStr}` : ''}
 								</Text>
 							</Box>
 						);

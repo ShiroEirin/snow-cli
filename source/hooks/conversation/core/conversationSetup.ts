@@ -10,6 +10,7 @@ import {initializeConversationSession} from './sessionInitializer.js';
 import {buildEditorContextContent} from './editorContextBuilder.js';
 import {cleanOrphanedToolCalls} from '../utils/messageCleanup.js';
 import type {ConversationHandlerOptions} from './conversationTypes.js';
+import type {PreparedToolPlane} from '../../../utils/session/vcpCompatibility/toolPlaneFacade.js';
 
 export type PreparedConversationSetup = {
 	conversationMessages: ChatMessage[];
@@ -17,6 +18,7 @@ export type PreparedConversationSetup = {
 	discoveredToolNames: Set<string>;
 	useToolSearch: boolean;
 	toolSnapshotKey?: string;
+	toolPlaneRuntimeState: PreparedToolPlane['runtimeState'];
 };
 
 export async function prepareConversationSetup(
@@ -39,6 +41,7 @@ export async function prepareConversationSetup(
 		servicesInfo,
 		duplicateToolNames,
 		toolPlaneKey,
+		runtimeState,
 	} = await prepareToolPlane({
 		config,
 		sessionKey: currentSessionId,
@@ -74,6 +77,7 @@ export async function prepareConversationSetup(
 		discoveredToolNames,
 		useToolSearch,
 		toolSnapshotKey: toolPlaneKey,
+		toolPlaneRuntimeState: runtimeState,
 	};
 }
 

@@ -269,6 +269,7 @@ export function useMessageProcessing(props: UseChatLogicProps) {
 					getCurrentContextPercentage: () =>
 						currentContextPercentageRef.current,
 					setCurrentModel: streamingState.setCurrentModel,
+					setToolPlaneRuntimeState: streamingState.setToolPlaneRuntimeState,
 					onCompressionStatus: props.onCompressionStatus,
 					setIsAutoCompressing: streamingState.setIsAutoCompressing,
 				});
@@ -711,6 +712,7 @@ export function useMessageProcessing(props: UseChatLogicProps) {
 					getCurrentContextPercentage: () =>
 						currentContextPercentageRef.current,
 					setCurrentModel: streamingState.setCurrentModel,
+					setToolPlaneRuntimeState: streamingState.setToolPlaneRuntimeState,
 					onCompressionStatus: props.onCompressionStatus,
 					setIsAutoCompressing: streamingState.setIsAutoCompressing,
 				});

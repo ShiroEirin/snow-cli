@@ -1,6 +1,7 @@
 import test from 'ava';
 
 import {convertSessionMessagesToUI} from './sessionConverter.js';
+import {buildToolHistoryArtifacts} from '../execution/toolHistoryArtifacts.js';
 
 test('convertSessionMessagesToUI preserves raw toolResult without overriding specialized preview payloads', t => {
 	const uiMessages = convertSessionMessagesToUI([
@@ -72,6 +73,67 @@ test('convertSessionMessagesToUI keeps compact preview for bridge-style tools', 
 	t.is(toolMessage?.toolStatusDetail, '✓ vcp-bridge-tool');
 	t.is(toolMessage?.toolResult, '{"raw":"payload"}');
 	t.is(toolMessage?.toolResultPreview, '{"summary":"compact preview"}');
+});
+
+test('convertSessionMessagesToUI replays bridge image_url tool results with sanitized preview sidecar', t => {
+	const imageUrl = 'https://cdn.example.com/generated/chart.png?token=secret';
+	const rawPayload = JSON.stringify({
+		status: 'success',
+		result: {
+			content: [
+				{
+					type: 'text',
+					text: 'Generated chart preview.',
+				},
+				{
+					type: 'image_url',
+					image_url: {url: imageUrl},
+				},
+			],
+		},
+	});
+	const artifacts = buildToolHistoryArtifacts(JSON.parse(rawPayload), rawPayload);
+	const uiMessages = convertSessionMessagesToUI([
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{
+					id: 'call-bridge-image',
+					type: 'function',
+					function: {
+						name: 'vcp-bridge-tool',
+						arguments: '{"query":"chart"}',
+					},
+				},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'call-bridge-image',
+			content: rawPayload,
+			historyContent: artifacts.historyContent,
+			previewContent: artifacts.previewContent,
+			messageStatus: 'success',
+		},
+	] as any);
+
+	const toolMessage = uiMessages.find(
+		message => message.toolName === 'vcp-bridge-tool',
+	);
+	t.truthy(toolMessage);
+	t.is(toolMessage?.toolResult, rawPayload);
+	t.true(toolMessage?.toolResultPreview?.includes('"summary"') || false);
+	t.true(
+		toolMessage?.toolResultPreview?.includes(
+			'"Generated chart preview."',
+		) || false,
+	);
+	t.true(
+		toolMessage?.toolResultPreview?.includes('[1 image URL item omitted]') ||
+			false,
+	);
+	t.false(toolMessage?.toolResultPreview?.includes(imageUrl) || false);
 });
 
 test('convertSessionMessagesToUI does not expose preview metadata for skill-execute strings', t => {

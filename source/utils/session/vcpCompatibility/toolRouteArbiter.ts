@@ -12,6 +12,46 @@ export type ResolvedToolRegistry = {
 	servicesInfo: MCPServiceTools[];
 	duplicateToolNames: string[];
 	executionBindings: ToolExecutionBinding[];
+	retainedToolCounts: {
+		local: number;
+		bridge: number;
+	};
+};
+
+export type EffectiveToolPlane = ToolTransport | 'none';
+
+export type ToolPlaneRuntimeReasonCode =
+	| 'configured'
+	| 'bridge_manifest_failed'
+	| 'bridge_tools_shadowed'
+	| 'bridge_tools_unavailable'
+	| 'local_tools_unavailable'
+	| 'no_tools_available';
+
+export type ToolPlaneRuntimeSnapshot = {
+	configuredTransport: ToolTransport;
+	effectiveTransport: EffectiveToolPlane;
+	local: {
+		requested: boolean;
+		discoveredToolCount: number;
+		retainedToolCount: number;
+		active: boolean;
+	};
+	bridge: {
+		requested: boolean;
+		discoveredToolCount: number;
+		retainedToolCount: number;
+		active: boolean;
+	};
+};
+
+export type ToolPlaneRuntimeReasonSidecar = {
+	reasonCode: ToolPlaneRuntimeReasonCode;
+};
+
+export type ToolPlaneRuntimeState = {
+	snapshot: ToolPlaneRuntimeSnapshot;
+	sidecar: ToolPlaneRuntimeReasonSidecar;
 };
 
 function projectBridgeToolsToRegistryTools(
@@ -43,6 +83,7 @@ function isRetainedServiceTool(options: {
 
 function dedupeRegistryTools(
 	sources: Array<{
+		plane: 'local' | 'bridge';
 		tools: MCPTool[];
 		servicesInfo: MCPServiceTools[];
 		executionBindings: ToolExecutionBinding[];
@@ -53,6 +94,10 @@ function dedupeRegistryTools(
 	const resolvedTools: MCPTool[] = [];
 	const resolvedServices = new Map<string, MCPServiceTools>();
 	const resolvedBindings = new Map<string, ToolExecutionBinding>();
+	const retainedToolCounts = {
+		local: 0,
+		bridge: 0,
+	};
 
 	for (const source of sources) {
 		const retainedToolNames = new Set<string>();
@@ -66,6 +111,7 @@ function dedupeRegistryTools(
 
 			seenToolNames.add(toolName);
 			retainedToolNames.add(toolName);
+			retainedToolCounts[source.plane] += 1;
 			resolvedTools.push(tool);
 		}
 
@@ -105,6 +151,7 @@ function dedupeRegistryTools(
 		servicesInfo: Array.from(resolvedServices.values()),
 		duplicateToolNames: Array.from(duplicateToolNames).sort(),
 		executionBindings: Array.from(resolvedBindings.values()),
+		retainedToolCounts,
 	};
 }
 
@@ -156,6 +203,7 @@ export function resolveToolRegistry(options: {
 		case 'bridge':
 			return dedupeRegistryTools([
 				{
+					plane: 'bridge',
 					tools: bridgeTools,
 					servicesInfo: bridgeServicesInfo,
 					executionBindings: bridgeBindings,
@@ -164,11 +212,13 @@ export function resolveToolRegistry(options: {
 		case 'hybrid':
 			return dedupeRegistryTools([
 				{
+					plane: 'local',
 					tools: options.localTools,
 					servicesInfo: options.localServicesInfo,
 					executionBindings: localBindings,
 				},
 				{
+					plane: 'bridge',
 					tools: bridgeTools,
 					servicesInfo: bridgeServicesInfo,
 					executionBindings: bridgeBindings,
@@ -178,10 +228,89 @@ export function resolveToolRegistry(options: {
 		default:
 			return dedupeRegistryTools([
 				{
+					plane: 'local',
 					tools: options.localTools,
 					servicesInfo: options.localServicesInfo,
 					executionBindings: localBindings,
 				},
 			]);
 	}
+}
+
+export function buildToolPlaneRuntimeState(options: {
+	config: Pick<ApiConfig, 'toolTransport'>;
+	localDiscoveredToolCount: number;
+	localRetainedToolCount: number;
+	bridgeDiscoveredToolCount: number;
+	bridgeRetainedToolCount: number;
+	bridgeLoadFailed?: boolean;
+}): ToolPlaneRuntimeState {
+	const configuredTransport = resolveToolTransport(options.config);
+	const localRequested = shouldIncludeLocalTools(options.config);
+	const bridgeRequested = shouldIncludeBridgeTools(options.config);
+	const localActive = localRequested && options.localRetainedToolCount > 0;
+	const bridgeActive = bridgeRequested && options.bridgeRetainedToolCount > 0;
+
+	let effectiveTransport: EffectiveToolPlane;
+	if (localActive && bridgeActive) {
+		effectiveTransport = 'hybrid';
+	} else if (bridgeActive) {
+		effectiveTransport = 'bridge';
+	} else if (localActive) {
+		effectiveTransport = 'local';
+	} else {
+		effectiveTransport = 'none';
+	}
+
+	let reasonCode: ToolPlaneRuntimeReasonCode = 'configured';
+	if (effectiveTransport === 'none') {
+		reasonCode = 'no_tools_available';
+	} else if (
+		configuredTransport === 'hybrid' &&
+		effectiveTransport === 'local'
+	) {
+		if (options.bridgeLoadFailed) {
+			reasonCode = 'bridge_manifest_failed';
+		} else if (
+			options.bridgeDiscoveredToolCount > 0 &&
+			options.bridgeRetainedToolCount === 0
+		) {
+			reasonCode = 'bridge_tools_shadowed';
+		} else {
+			reasonCode = 'bridge_tools_unavailable';
+		}
+	} else if (
+		configuredTransport === 'hybrid' &&
+		effectiveTransport === 'bridge'
+	) {
+		reasonCode = 'local_tools_unavailable';
+	}
+
+	return {
+		snapshot: {
+			configuredTransport,
+			effectiveTransport,
+			local: {
+				requested: localRequested,
+				discoveredToolCount: localRequested
+					? options.localDiscoveredToolCount
+					: 0,
+				retainedToolCount: localRequested ? options.localRetainedToolCount : 0,
+				active: localActive,
+			},
+			bridge: {
+				requested: bridgeRequested,
+				discoveredToolCount: bridgeRequested
+					? options.bridgeDiscoveredToolCount
+					: 0,
+				retainedToolCount: bridgeRequested
+					? options.bridgeRetainedToolCount
+					: 0,
+				active: bridgeActive,
+			},
+		},
+		sidecar: {
+			reasonCode,
+		},
+	};
 }

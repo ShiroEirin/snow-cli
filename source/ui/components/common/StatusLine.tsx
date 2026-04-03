@@ -12,6 +12,7 @@ import {
 	loadProfile,
 	getActiveProfileName,
 } from '../../../utils/config/configManager.js';
+import type {PreparedToolPlane} from '../../../utils/session/vcpCompatibility/toolPlaneFacade.js';
 import {useStatusLineHookItems} from './statusline/useStatusLineHooks.js';
 import {buildVcpToolPlaneIndicator} from './statusline/vcpToolPlane.js';
 import type {
@@ -24,6 +25,8 @@ import type {
 	StatusLineFileUpdateNotification,
 	VSCodeConnectionStatus,
 } from './statusline/types.js';
+
+type ToolPlaneRuntimeState = PreparedToolPlane['runtimeState'];
 
 const MEMORY_REFRESH_INTERVAL_MS = 5000;
 const PROCESS_MEMORY_COMMAND_TIMEOUT_MS = 1500;
@@ -239,6 +242,7 @@ type Props = {
 
 	// 自动压缩禁止中断提示
 	compressBlockToast?: string | null;
+	toolPlaneRuntimeState?: ToolPlaneRuntimeState | null;
 };
 
 function calculateContextPercentage(
@@ -302,6 +306,7 @@ export default function StatusLine({
 	copyStatusMessage,
 	currentProfileName,
 	compressBlockToast,
+	toolPlaneRuntimeState,
 }: Props) {
 	const {t, language} = useI18n();
 	const {theme} = useTheme();
@@ -416,6 +421,7 @@ export default function StatusLine({
 					toolResultTokenLimit: cfg?.toolResultTokenLimit,
 					streamingDisplay: cfg?.streamingDisplay,
 				},
+				toolPlane: toolPlaneRuntimeState,
 				compression: {
 					blockToast: compressBlockToast,
 				},
@@ -440,6 +446,7 @@ export default function StatusLine({
 		simpleMode,
 		t.chatScreen.gitBranch,
 		toolSearchDisabled,
+		toolPlaneRuntimeState,
 		hybridCompressEnabled,
 		teamMode,
 		vscodeConnectionStatus,
@@ -454,6 +461,7 @@ export default function StatusLine({
 				{
 					backendMode: profileConfig?.snowcfg.backendMode,
 					toolTransport: profileConfig?.snowcfg.toolTransport,
+					runtimeState: toolPlaneRuntimeState,
 				},
 				{
 					label: t.configScreen.toolTransport,
@@ -465,6 +473,7 @@ export default function StatusLine({
 		[
 			profileConfig?.snowcfg.backendMode,
 			profileConfig?.snowcfg.toolTransport,
+			toolPlaneRuntimeState,
 			t.configScreen.toolTransport,
 			t.configScreen.toolTransportBridge,
 			t.configScreen.toolTransportHybrid,

@@ -1,4 +1,7 @@
 import type {Language} from '../../../../utils/config/languageConfig.js';
+import type {PreparedToolPlane} from '../../../../utils/session/vcpCompatibility/toolPlaneFacade.js';
+
+type ToolPlaneRuntimeState = PreparedToolPlane['runtimeState'];
 
 export type VSCodeConnectionStatus =
 	| 'disconnected'
@@ -133,6 +136,7 @@ export interface StatusLineSystemState {
 		toolResultTokenLimit?: number;
 		streamingDisplay?: boolean;
 	};
+	toolPlane?: ToolPlaneRuntimeState | null;
 	compression: {
 		blockToast?: string | null;
 	};

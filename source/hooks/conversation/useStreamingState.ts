@@ -1,5 +1,8 @@
 import {useState, useEffect} from 'react';
 import type {UsageInfo} from '../../api/chat.js';
+import type {PreparedToolPlane} from '../../utils/session/vcpCompatibility/toolPlaneFacade.js';
+
+type ToolPlaneRuntimeState = PreparedToolPlane['runtimeState'];
 
 export type RetryStatus = {
 	isRetrying: boolean;
@@ -68,6 +71,8 @@ export function useStreamingState() {
 	const [codebaseSearchStatus, setCodebaseSearchStatus] =
 		useState<CodebaseSearchStatus | null>(null);
 	const [currentModel, setCurrentModel] = useState<string | null>(null);
+	const [toolPlaneRuntimeState, setToolPlaneRuntimeState] =
+		useState<ToolPlaneRuntimeState | null>(null);
 	const [isAutoCompressing, setIsAutoCompressing] = useState(false);
 	const [compressBlockToast, setCompressBlockToast] = useState<string | null>(
 		null,
@@ -187,6 +192,8 @@ export function useStreamingState() {
 		setCodebaseSearchStatus,
 		currentModel,
 		setCurrentModel,
+		toolPlaneRuntimeState,
+		setToolPlaneRuntimeState,
 		isAutoCompressing,
 		setIsAutoCompressing,
 		compressBlockToast,

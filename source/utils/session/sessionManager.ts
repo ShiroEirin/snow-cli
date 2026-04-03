@@ -43,16 +43,66 @@ export interface SessionListItem {
 	createdAt: number;
 	updatedAt: number;
 	messageCount: number;
+	metadata?: SessionListMetadataProjection;
 	projectPath?: string; // 项目路径
 	projectId?: string; // 项目ID
 	compressedFrom?: string; // 如果是压缩产生的会话，记录来源会话ID
 	compressedAt?: number; // 压缩时间戳
 }
 
+export interface SessionListMetadataProjection {
+	mtime: number;
+	size: number;
+	messageCount: number;
+}
+
 export interface PaginatedSessionList {
 	sessions: SessionListItem[];
 	total: number;
 	hasMore: boolean;
+}
+
+export function buildSessionListMetadataProjection(
+	messageCount: number,
+	fileStats?: {
+		mtimeMs: number;
+		size: number;
+	},
+): SessionListMetadataProjection | undefined {
+	if (!fileStats) {
+		return undefined;
+	}
+
+	return {
+		mtime: Math.max(0, Math.round(fileStats.mtimeMs)),
+		size: Math.max(0, fileStats.size),
+		messageCount: Math.max(0, messageCount),
+	};
+}
+
+export function createSessionListItem(
+	session: Session,
+	fileStats?: {
+		mtimeMs: number;
+		size: number;
+	},
+): SessionListItem {
+	return {
+		id: session.id,
+		title: session.title,
+		summary: session.summary,
+		createdAt: session.createdAt,
+		updatedAt: session.updatedAt,
+		messageCount: session.messageCount,
+		metadata: buildSessionListMetadataProjection(
+			session.messageCount,
+			fileStats,
+		),
+		projectPath: session.projectPath,
+		projectId: session.projectId,
+		compressedFrom: session.compressedFrom,
+		compressedAt: session.compressedAt,
+	};
 }
 
 class SessionManager {
@@ -566,7 +616,10 @@ class SessionManager {
 		seenIds: Set<string>,
 	): Promise<void> {
 		try {
-			const data = await fs.readFile(filePath, 'utf-8');
+			const [fileStats, data] = await Promise.all([
+				fs.stat(filePath),
+				fs.readFile(filePath, 'utf-8'),
+			]);
 			const session: Session = JSON.parse(data);
 
 			// 跳过已在新格式中存在的会话
@@ -586,16 +639,8 @@ class SessionManager {
 			}
 
 			sessions.push({
-				id: session.id,
+				...createSessionListItem(session, fileStats),
 				title: this.cleanTitle(session.title),
-				summary: session.summary,
-				createdAt: session.createdAt,
-				updatedAt: session.updatedAt,
-				messageCount: session.messageCount,
-				projectPath: session.projectPath,
-				projectId: session.projectId,
-				compressedFrom: session.compressedFrom,
-				compressedAt: session.compressedAt,
 			});
 			seenIds.add(session.id);
 		} catch (error) {
@@ -667,20 +712,15 @@ class SessionManager {
 				if (file.endsWith('.json')) {
 					try {
 						const sessionPath = path.join(dirPath, file);
-						const data = await fs.readFile(sessionPath, 'utf-8');
+						const [fileStats, data] = await Promise.all([
+							fs.stat(sessionPath),
+							fs.readFile(sessionPath, 'utf-8'),
+						]);
 						const session: Session = JSON.parse(data);
 
 						sessions.push({
-							id: session.id,
+							...createSessionListItem(session, fileStats),
 							title: this.cleanTitle(session.title),
-							summary: session.summary,
-							createdAt: session.createdAt,
-							updatedAt: session.updatedAt,
-							messageCount: session.messageCount,
-							projectPath: session.projectPath,
-							projectId: session.projectId,
-							compressedFrom: session.compressedFrom,
-							compressedAt: session.compressedAt,
 						});
 					} catch (error) {
 						// Skip invalid session files
@@ -1114,10 +1154,17 @@ class SessionManager {
 
 			if (interpreted.action === 'warn') {
 				logger.warn(interpreted.warningMessage || '');
-				return {shouldContinue: true, warningMessage: interpreted.warningMessage};
+				return {
+					shouldContinue: true,
+					warningMessage: interpreted.warningMessage,
+				};
 			}
 			if (interpreted.action === 'block') {
-				logger.error(`onSessionStart hook failed: ${JSON.stringify(interpreted.errorDetails)}`);
+				logger.error(
+					`onSessionStart hook failed: ${JSON.stringify(
+						interpreted.errorDetails,
+					)}`,
+				);
 				return {shouldContinue: false, errorDetails: interpreted.errorDetails};
 			}
 			return {shouldContinue: true};

@@ -327,6 +327,46 @@ test('buildToolHistoryArtifacts honors bridge-provided sidecar summaries', (t: a
 	});
 });
 
+test('buildToolHistoryArtifacts omits image_url payloads from history sidecar', (t: any) => {
+	const imageUrl = 'https://cdn.example.com/generated/chart.png?token=secret';
+	const artifacts = buildToolHistoryArtifacts(
+		{
+			status: 'success',
+			result: {
+				content: [
+					{
+						type: 'text',
+						text: 'Generated chart preview.',
+					},
+					{
+						type: 'image_url',
+						image_url: {url: imageUrl},
+					},
+				],
+			},
+		},
+		JSON.stringify({
+			status: 'success',
+			result: {
+				content: [
+					{
+						type: 'text',
+						text: 'Generated chart preview.',
+					},
+					{
+						type: 'image_url',
+						image_url: {url: imageUrl},
+					},
+				],
+			},
+		}),
+	);
+
+	t.true(artifacts.historyContent.includes('Generated chart preview.'));
+	t.true(artifacts.historyContent.includes('[1 image URL item omitted]'));
+	t.false(artifacts.historyContent.includes(imageUrl));
+});
+
 test.serial(
 	'executeToolCall prefers bridge-provided compact sidecars for history',
 	async (t: any) => {
@@ -381,6 +421,70 @@ test.serial(
 			);
 			t.is(result.previewContent, previewContent);
 			t.true(result.content.includes('"results"'));
+		} finally {
+			snowBridgeClient.executeTool = originalExecuteTool;
+			clearToolExecutionBindings(toolPlaneKey);
+		}
+	},
+);
+
+test.serial(
+	'executeToolCall keeps raw bridge image_url result while history sidecar omits url noise',
+	async (t: any) => {
+		const toolPlaneKey = `tool-executor-bridge-image-url-${++toolPlaneSequence}`;
+		const imageUrl = 'https://cdn.example.com/generated/chart.png?token=secret';
+		const originalExecuteTool = snowBridgeClient.executeTool;
+		registerToolExecutionBindings(toolPlaneKey, [
+			{
+				kind: 'bridge',
+				toolName: 'vcp-vision-preview',
+				pluginName: 'VisionPreview',
+				displayName: 'VisionPreview',
+				commandName: 'Preview',
+			},
+		]);
+
+		snowBridgeClient.executeTool = (async () => ({
+			status: 'success',
+			result: {
+				content: [
+					{
+						type: 'text',
+						text: 'Generated chart preview.',
+					},
+					{
+						type: 'image_url',
+						image_url: {url: imageUrl},
+					},
+				],
+			},
+		})) as typeof snowBridgeClient.executeTool;
+
+		try {
+			const result = await executeToolCallWithBindings(
+				{
+					id: 'bridge-image-url-call',
+					type: 'function',
+					function: {
+						name: 'vcp-vision-preview',
+						arguments: JSON.stringify({query: 'chart'}),
+					},
+				},
+				toolPlaneKey,
+			);
+
+			t.true(result.content.includes(imageUrl));
+			t.true(result.historyContent?.includes('Generated chart preview.') || false);
+			t.true(
+				result.historyContent?.includes('[1 image URL item omitted]') || false,
+			);
+			t.false(result.historyContent?.includes(imageUrl) || false);
+			t.truthy(result.previewContent);
+			t.true(result.previewContent?.includes('"summary"') || false);
+			t.true(
+				result.previewContent?.includes('[1 image URL item omitted]') || false,
+			);
+			t.false(result.previewContent?.includes(imageUrl) || false);
 		} finally {
 			snowBridgeClient.executeTool = originalExecuteTool;
 			clearToolExecutionBindings(toolPlaneKey);

@@ -136,6 +136,7 @@ export async function handleConversationWithTools(
 		discoveredToolNames,
 		useToolSearch,
 		toolSnapshotKey,
+		toolPlaneRuntimeState,
 	} = await prepareConversationSetup({
 		planMode: options.planMode,
 		vulnerabilityHuntingMode: options.vulnerabilityHuntingMode,
@@ -164,6 +165,7 @@ export async function handleConversationWithTools(
 		: config.advancedModel || 'gpt-5';
 
 	options.setCurrentModel?.(model);
+	options.setToolPlaneRuntimeState?.(toolPlaneRuntimeState);
 
 	let accumulatedUsage: ConversationUsage | null = null;
 	const sessionApprovedTools = new Set<string>();

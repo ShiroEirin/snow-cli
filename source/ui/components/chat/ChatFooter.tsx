@@ -13,6 +13,9 @@ import type {TodoItem} from '../../../mcp/types/todo.types.js';
 import {sessionManager} from '../../../utils/session/sessionManager.js';
 import {todoEvents} from '../../../utils/events/todoEvents.js';
 import {connectionManager} from '../../../utils/connection/ConnectionManager.js';
+import type {PreparedToolPlane} from '../../../utils/session/vcpCompatibility/toolPlaneFacade.js';
+
+type ToolPlaneRuntimeState = PreparedToolPlane['runtimeState'];
 
 const ReviewCommitPanel = lazy(() => import('../panels/ReviewCommitPanel.js'));
 import type {ReviewCommitSelection} from '../panels/ReviewCommitPanel.js';
@@ -155,6 +158,7 @@ type ChatFooterProps = {
 	elapsedSeconds: number;
 	currentModel?: string | null;
 	compressBlockToast?: string | null;
+	toolPlaneRuntimeState?: ToolPlaneRuntimeState | null;
 };
 
 const ChatFooter = React.memo(function ChatFooter(props: ChatFooterProps) {
@@ -348,6 +352,7 @@ const ChatFooter = React.memo(function ChatFooter(props: ChatFooterProps) {
 						copyStatusMessage={copyStatusMessage}
 						currentProfileName={props.currentProfileName}
 						compressBlockToast={props.compressBlockToast}
+						toolPlaneRuntimeState={props.toolPlaneRuntimeState}
 					/>
 
 					{props.isCompressing && (

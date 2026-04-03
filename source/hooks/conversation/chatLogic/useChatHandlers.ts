@@ -89,6 +89,7 @@ export function useChatHandlers(
 				stdout.write(ansiEscapes.clearTerminal);
 				setPendingMessages([]);
 				streamingState.setIsStreaming(false);
+				streamingState.setToolPlaneRuntimeState(null);
 				setMessages([]);
 				setRemountKey(prev => prev + 1);
 
@@ -349,6 +350,7 @@ Please provide your review in a clear, structured format.`;
 
 			sessionManager.clearCurrentSession();
 			clearSavedMessages();
+			streamingState.setToolPlaneRuntimeState(null);
 			setMessages([]);
 			setRemountKey(prev => prev + 1);
 			streamingState.setContextUsage(null);

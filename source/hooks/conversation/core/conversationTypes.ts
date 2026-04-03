@@ -2,6 +2,9 @@ import type {ConfirmationResult} from '../../../ui/components/tools/ToolConfirma
 import type {CompressionStatus} from '../../../ui/components/compression/CompressionStatus.js';
 import type {Message} from '../../../ui/components/chat/MessageList.js';
 import type {ToolCall} from '../../../utils/execution/toolExecutor.js';
+import type {PreparedToolPlane} from '../../../utils/session/vcpCompatibility/toolPlaneFacade.js';
+
+type ToolPlaneRuntimeState = PreparedToolPlane['runtimeState'];
 
 export type UserQuestionResult = {
 	selected: string | string[];
@@ -78,10 +81,14 @@ export type ConversationHandlerOptions = {
 	setCurrentModel?: React.Dispatch<React.SetStateAction<string | null>>;
 	onCompressionStatus?: (status: CompressionStatus | null) => void;
 	setIsAutoCompressing?: (value: boolean) => void;
+	setToolPlaneRuntimeState?: React.Dispatch<
+		React.SetStateAction<ToolPlaneRuntimeState | null>
+	>;
 };
 
 export type ConversationToolContext = {
 	toolSnapshotKey?: string;
+	toolPlaneRuntimeState?: ToolPlaneRuntimeState;
 };
 
 export type TokenEncoder = {
