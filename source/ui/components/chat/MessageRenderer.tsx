@@ -649,30 +649,30 @@ export default function MessageRenderer({
 												/>
 											</Box>
 										)}
-								{message.toolCall &&
-									message.toolCall.name === 'filesystem-edit' &&
-									message.toolCall.arguments.oldContent &&
-									message.toolCall.arguments.newContent && (
-										<Box marginTop={1}>
-											<DiffViewer
-												oldContent={message.toolCall.arguments.oldContent}
-												newContent={message.toolCall.arguments.newContent}
-												filename={message.toolCall.arguments.filename}
-												completeOldContent={
-													message.toolCall.arguments.completeOldContent
-												}
-												completeNewContent={
-													message.toolCall.arguments.completeNewContent
-												}
-												startLineNumber={
-													message.toolCall.arguments.contextStartLine
-												}
-											/>
-										</Box>
-									)}
-								{/* Show batch edit results */}
-								{message.toolCall &&
-									message.toolCall.name === 'filesystem-edit' &&
+									{message.toolCall &&
+										message.toolCall.name === 'filesystem-edit' &&
+										message.toolCall.arguments.oldContent &&
+										message.toolCall.arguments.newContent && (
+											<Box marginTop={1}>
+												<DiffViewer
+													oldContent={message.toolCall.arguments.oldContent}
+													newContent={message.toolCall.arguments.newContent}
+													filename={message.toolCall.arguments.filename}
+													completeOldContent={
+														message.toolCall.arguments.completeOldContent
+													}
+													completeNewContent={
+														message.toolCall.arguments.completeNewContent
+													}
+													startLineNumber={
+														message.toolCall.arguments.contextStartLine
+													}
+												/>
+											</Box>
+										)}
+									{/* Show batch edit results */}
+									{message.toolCall &&
+										message.toolCall.name === 'filesystem-edit' &&
 										message.toolCall.arguments.isBatch &&
 										message.toolCall.arguments.batchResults &&
 										Array.isArray(message.toolCall.arguments.batchResults) && (
@@ -723,25 +723,33 @@ export default function MessageRenderer({
 											message.toolCall &&
 											(message.toolCall.arguments?.oldContent ||
 												message.toolCall.arguments?.batchResults)
-										) && (
-											<ToolResultPreview
-												toolName={
-													(message.content || '')
-														.replace(/^✓\s*/, '') // Remove leading ✓
-														.replace(/^⚇✓\s*/, '') // Remove leading ⚇✓
-														.replace(/.*⚇✓\s*/, '') // Remove any prefix before ⚇✓
-														.replace(/\x1b\[[0-9;]*m/g, '') // Remove ANSI color codes
-														.split('\n')[0]
-														?.trim() || ''
-												}
-												result={message.toolResult}
-												maxLines={5}
-												isSubAgentInternal={
-													message.role === 'subagent' ||
-													message.subAgentInternal === true
-												}
-											/>
-										)}
+										) &&
+										(() => {
+											const resolvedToolName =
+												message.toolName ||
+												(message.content || '')
+													.replace(/^✓\s*/, '')
+													.replace(/^⚇✓\s*/, '')
+													.replace(/.*⚇✓\s*/, '')
+													.replace(/\x1b\[[0-9;]*m/g, '')
+													.split('\n')[0]
+													?.trim() ||
+												'';
+											const previewResult =
+												message.toolResultPreview ?? message.toolResult;
+
+											return (
+												<ToolResultPreview
+													toolName={resolvedToolName}
+													result={previewResult}
+													maxLines={5}
+													isSubAgentInternal={
+														message.role === 'subagent' ||
+														message.subAgentInternal === true
+													}
+												/>
+											);
+										})()}
 
 									{message.files && message.files.length > 0 && (
 										<Box flexDirection="column">

@@ -1,6 +1,7 @@
 import process from 'node:process';
 import os from 'node:os';
 import net from 'node:net';
+import {createRequire} from 'node:module';
 import {spawn, spawnSync} from 'node:child_process';
 import {
 	copyFileSync,
@@ -12,7 +13,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from 'node:fs';
-import {dirname, isAbsolute, join, resolve} from 'node:path';
+import {basename, dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
 const VALID_MODES = new Set(['local', 'bridge', 'hybrid']);
@@ -26,6 +27,7 @@ const OPTIONAL_SNOW_FILES = [
 const REQUEST_TIMEOUT_MS = 180000;
 const HEALTH_TIMEOUT_MS = 30000;
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const PROJECT_REQUIRE = createRequire(import.meta.url);
 const DEFAULT_SUITE = 'core';
 const DEFAULT_BASE_CONFIG = {
 	snowcfg: {
@@ -137,25 +139,146 @@ function buildCoreModeScenarios(expectedContent) {
 	};
 }
 
-function buildSubagentModeScenarios(expectedContent) {
+export function buildSubagentModeScenarios(expectedContent) {
 	return {
 		local: [
 			{
 				name: 'subagent-explore',
 				buildPrompt: filePath =>
-					`Call exactly the tool \`subagent-agent_explore\` with a prompt that tells the sub-agent to use \`filesystem-read\` on \`${filePath}\` and return only the first line. After the tool returns, reply with the first line only.`,
+					`Call exactly the tool \`subagent-agent_explore\` with a prompt that tells the sub-agent to use \`filesystem-read\` on \`${filePath}\` and return only the first line. After the tool returns, reply with exactly that first line and nothing else.`,
 				expectedTool: 'subagent-agent_explore',
 				expectedAssistantIncludes: expectedContent,
+				validateMessages: ({messages, previousMessageCount, scenario}) => {
+					const collectedToolCalls = collectToolCalls(messages);
+					const topLevelToolCalls = collectedToolCalls.filter(
+						entry => !messages[entry.messageIndex]?.subAgentInternal,
+					);
+					const topLevelSubagentCalls = topLevelToolCalls.filter(
+						entry =>
+							entry.toolCall.function.name === 'subagent-agent_explore',
+					);
+					if (topLevelSubagentCalls.length !== 1) {
+						throw new Error(
+							`Expected exactly one top-level "subagent-agent_explore" tool call, but found ${topLevelSubagentCalls.length}.`,
+						);
+					}
+
+					if (topLevelToolCalls.length !== 1) {
+						throw new Error(
+							'Subagent scenario unexpectedly recorded extra top-level tool calls.',
+						);
+					}
+
+					const subagentToolResultMessage = messages.find(
+						message =>
+							message.tool_call_id === topLevelSubagentCalls[0]?.toolCall.id,
+					);
+					if (!subagentToolResultMessage?.content) {
+						throw new Error(
+							'Expected tool result for "subagent-agent_explore" was not recorded in session history.',
+						);
+					}
+
+					let parsedSubagentResult;
+					try {
+						parsedSubagentResult = JSON.parse(
+							String(subagentToolResultMessage.content),
+						);
+					} catch {
+						throw new Error(
+							'Tool result for "subagent-agent_explore" was not valid JSON.',
+						);
+					}
+
+					if (parsedSubagentResult?.success !== true) {
+						throw new Error(
+							`Subagent tool returned non-success payload: ${subagentToolResultMessage.content}`,
+						);
+					}
+
+					const subagentResultText = extractFirstComparableLine(
+						parsedSubagentResult?.result,
+					);
+					if (
+						subagentResultText !==
+						normalizeComparableText(scenario.expectedAssistantIncludes)
+					) {
+						throw new Error(
+							'Subagent tool result did not exactly match the expected final answer text.',
+						);
+					}
+
+					const internalFilesystemCalls = collectedToolCalls.filter(
+						entry =>
+							Boolean(messages[entry.messageIndex]?.subAgentInternal) &&
+							entry.toolCall.function.name === 'filesystem-read',
+					);
+					if (internalFilesystemCalls.length === 0) {
+						throw new Error(
+							'Expected sub-agent internal "filesystem-read" tool call was not recorded in session history.',
+						);
+					}
+
+					const matchedInternalFilesystemCall = internalFilesystemCalls.find(entry =>
+						toolCallTargetsProbePath(
+							entry.toolCall,
+							scenario.expectedProbePath,
+							scenario.expectedProbeRoot,
+						),
+					);
+					if (!matchedInternalFilesystemCall) {
+						throw new Error(
+							'Expected sub-agent internal "filesystem-read" tool call did not target the probe file.',
+						);
+					}
+
+					const internalToolResultMessage = messages.find(
+						message =>
+							message.tool_call_id === matchedInternalFilesystemCall.toolCall.id,
+					);
+					if (!internalToolResultMessage?.content) {
+						throw new Error(
+							'Expected tool result for sub-agent internal "filesystem-read" was not recorded in session history.',
+						);
+					}
+
+					const internalReadFirstLine = extractFirstComparableLine(
+						extractToolResultComparableValue(internalToolResultMessage.content),
+					);
+					if (
+						internalReadFirstLine !==
+						normalizeComparableText(scenario.expectedAssistantIncludes)
+					) {
+						throw new Error(
+							'Sub-agent internal "filesystem-read" result did not match the expected first line.',
+						);
+					}
+
+					const finalAssistantContent = extractFinalAssistantContent({
+						messages,
+						expectedAssistantIncludes: scenario.expectedAssistantIncludes,
+						expectedTool: scenario.expectedTool,
+					});
+					return {
+						scenario: scenario.name,
+						expectedTool: scenario.expectedTool,
+						toolCall: topLevelSubagentCalls[0]?.toolCall,
+						toolResultPreview: subagentResultText.slice(0, 240),
+						finalAssistantPreview: finalAssistantContent.slice(0, 240),
+						messageCount: previousMessageCount + messages.length,
+					};
+				},
 			},
 		],
 	};
 }
 
-function buildTeamModeScenarios(expectedContent) {
+export function buildTeamModeScenarios(expectedContent) {
 	return {
 		local: [
 			{
 				name: 'team-runtime',
+				expectedTool: 'team-spawn_teammate',
 				buildPrompt: filePath =>
 					[
 						'You are validating Agent Team mode in this git repository.',
@@ -171,7 +294,9 @@ function buildTeamModeScenarios(expectedContent) {
 					].join(' '),
 				expectedAssistantIncludes: expectedContent,
 				validateMessages: ({messages, previousMessageCount, scenario}) => {
-					const collectedToolCalls = collectToolCalls(messages);
+					const collectedToolCalls = collectToolCalls(messages).filter(
+						entry => !messages[entry.messageIndex]?.subAgentInternal,
+					);
 					const expectedSequence = [
 						'team-spawn_teammate',
 						'team-wait_for_teammates',
@@ -180,7 +305,7 @@ function buildTeamModeScenarios(expectedContent) {
 						'team-cleanup_team',
 						'filesystem-read',
 					];
-					assertToolCallSequence(collectedToolCalls, expectedSequence);
+					assertExactToolCallSequence(collectedToolCalls, expectedSequence);
 					for (const entry of collectedToolCalls) {
 						if (expectedSequence.includes(entry.toolCall.function.name)) {
 							const toolResultMessage = messages.find(
@@ -235,6 +360,14 @@ function getModeScenarios(options) {
 
 function resolvePathFrom(baseDir, candidate) {
 	return isAbsolute(candidate) ? resolve(candidate) : resolve(baseDir, candidate);
+}
+
+function isPathWithinRoot(rootDir, candidatePath) {
+	const relativePath = relative(resolve(rootDir), resolve(candidatePath));
+	return (
+		relativePath === '' ||
+		(!relativePath.startsWith('..') && !isAbsolute(relativePath))
+	);
 }
 
 function readJsonFile(filePath) {
@@ -309,9 +442,22 @@ export function resolveRuntimeWorkDir(options = {}) {
 	return anchoredProjectRoot;
 }
 
-export function resolveReadTarget(workDir, probeFile) {
+export function resolveReadTarget(workDir, probeFile, options = {}) {
+	const {restrictToWorkDir = false, targetLabel = 'probe target'} = options;
 	if (probeFile) {
-		const explicitTarget = join(workDir, probeFile);
+		if (restrictToWorkDir && isAbsolute(probeFile)) {
+			throw new Error(
+				`Explicit ${targetLabel} must stay within the repository: absolute paths are not allowed (${probeFile})`,
+			);
+		}
+
+		const explicitTarget = resolvePathFrom(workDir, probeFile);
+		if (restrictToWorkDir && !isPathWithinRoot(workDir, explicitTarget)) {
+			throw new Error(
+				`Explicit ${targetLabel} must stay within the repository: ${probeFile}`,
+			);
+		}
+
 		if (!existsSync(explicitTarget)) {
 			throw new Error(
 				`Unable to resolve explicit probe target (${probeFile}) from runtime work dir: ${workDir}`,
@@ -333,19 +479,116 @@ export function resolveReadTarget(workDir, probeFile) {
 	);
 }
 
-function assertGitRepository(repoPath) {
+function isGitRepository(repoPath) {
 	const result = spawnSync(
 		'git',
 		['-C', repoPath, 'rev-parse', '--is-inside-work-tree'],
 		{encoding: 'utf8'},
 	);
-	if (result.status !== 0) {
-		throw new Error(`Team blackbox requires a Git repository work dir: ${repoPath}`);
+
+	return result.status === 0;
+}
+
+function resolveTeamProbeRelativePath(
+	sourceProbePath,
+	explicitProbeFile,
+	sourceWorkDir,
+) {
+	if (explicitProbeFile) {
+		return relative(sourceWorkDir, sourceProbePath).replaceAll('\\', '/');
 	}
+
+	const normalizedProbePath = sourceProbePath.replaceAll('\\', '/');
+	const matchedFallback = LOCAL_READ_PROBE.fallbacks.find(relativePath =>
+		normalizedProbePath.endsWith(relativePath.replaceAll('\\', '/')),
+	);
+	if (matchedFallback) {
+		return matchedFallback.replaceAll('\\', '/');
+	}
+
+	return basename(sourceProbePath);
+}
+
+function createTeamTemplateRepo(options) {
+	const {sourceWorkDir, tempRoot, probeFile} = options;
+	const sourceProbePath = resolveReadTarget(sourceWorkDir, probeFile, {
+		restrictToWorkDir: true,
+		targetLabel: 'team probe file',
+	});
+	const relativeProbePath = resolveTeamProbeRelativePath(
+		sourceProbePath,
+		probeFile,
+		sourceWorkDir,
+	);
+	const templateRepo = join(tempRoot, 'team-template-repo');
+	const templateProbePath = join(templateRepo, relativeProbePath);
+
+	mkdirSync(dirname(templateProbePath), {recursive: true});
+	copyFileSync(sourceProbePath, templateProbePath);
+	writeFileSync(
+		join(templateRepo, 'README.md'),
+		'# Snow team blackbox fixture\n',
+		'utf8',
+	);
+
+	const initResult = spawnSync('git', ['init', '--quiet', templateRepo], {
+		encoding: 'utf8',
+	});
+	if (initResult.status !== 0) {
+		throw new Error(
+			[
+				`Failed to initialize team fixture repository: ${templateRepo}`,
+				initResult.stderr?.trim(),
+			]
+				.filter(Boolean)
+				.join('\n'),
+		);
+	}
+
+	spawnSync('git', ['-C', templateRepo, 'config', 'user.name', 'Snow Blackbox'], {
+		encoding: 'utf8',
+	});
+	spawnSync(
+		'git',
+		['-C', templateRepo, 'config', 'user.email', 'snow-blackbox@example.local'],
+		{encoding: 'utf8'},
+	);
+
+	const addResult = spawnSync('git', ['-C', templateRepo, 'add', '.'], {
+		encoding: 'utf8',
+	});
+	if (addResult.status !== 0) {
+		throw new Error(
+			[
+				`Failed to stage team fixture repository: ${templateRepo}`,
+				addResult.stderr?.trim(),
+			]
+				.filter(Boolean)
+				.join('\n'),
+		);
+	}
+
+	const commitResult = spawnSync(
+		'git',
+		['-C', templateRepo, 'commit', '--quiet', '-m', 'Add team probe fixture'],
+		{encoding: 'utf8'},
+	);
+	if (commitResult.status !== 0) {
+		throw new Error(
+			[
+				`Failed to commit team fixture repository: ${templateRepo}`,
+				commitResult.stderr?.trim(),
+			]
+				.filter(Boolean)
+				.join('\n'),
+		);
+	}
+
+	return templateRepo;
 }
 
 function prepareScenarioWorkDir(options) {
-	const {suite, workDir, tempRoot} = options;
+	const {suite, workDir, tempRoot, probeFile} = options;
 	if (suite !== 'team') {
 		return {
 			runtimeWorkDir: workDir,
@@ -353,17 +596,23 @@ function prepareScenarioWorkDir(options) {
 		};
 	}
 
-	assertGitRepository(workDir);
+	const templateRepo = isGitRepository(workDir)
+		? workDir
+		: createTeamTemplateRepo({
+				sourceWorkDir: workDir,
+				tempRoot,
+				probeFile,
+			});
 	const runtimeWorkDir = join(tempRoot, 'team-workspace');
 	const cloneResult = spawnSync(
 		'git',
-		['clone', '--quiet', '--no-local', workDir, runtimeWorkDir],
+		['clone', '--quiet', '--no-local', templateRepo, runtimeWorkDir],
 		{encoding: 'utf8'},
 	);
 	if (cloneResult.status !== 0) {
 		throw new Error(
 			[
-				`Failed to clone team blackbox workspace from ${workDir}.`,
+				`Failed to clone team blackbox workspace from ${templateRepo}.`,
 				cloneResult.stderr?.trim(),
 			]
 				.filter(Boolean)
@@ -392,12 +641,22 @@ function prepareScenarioWorkDir(options) {
 
 	return {
 		runtimeWorkDir,
-		templateRepo: workDir,
+		templateRepo,
 	};
 }
 
-function resolveCliEntrypoint() {
-	const bundleEntry = join(PROJECT_ROOT, 'bundle', 'cli.mjs');
+function resolveTsNodeLoader(projectRoot = PROJECT_ROOT) {
+	return PROJECT_REQUIRE.resolve('ts-node/esm/transpile-only', {
+		paths: [projectRoot],
+	});
+}
+
+export function resolveCliEntrypoint(options = {}) {
+	const {
+		projectRoot = PROJECT_ROOT,
+		resolveLoader = resolveTsNodeLoader,
+	} = options;
+	const bundleEntry = join(projectRoot, 'bundle', 'cli.mjs');
 	if (existsSync(bundleEntry)) {
 		return {
 			command: process.execPath,
@@ -406,7 +665,7 @@ function resolveCliEntrypoint() {
 		};
 	}
 
-	const distEntry = join(PROJECT_ROOT, 'dist', 'cli.js');
+	const distEntry = join(projectRoot, 'dist', 'cli.js');
 	if (existsSync(distEntry)) {
 		return {
 			command: process.execPath,
@@ -415,12 +674,13 @@ function resolveCliEntrypoint() {
 		};
 	}
 
-	const sourceEntry = join(PROJECT_ROOT, 'source', 'cli.tsx');
+	const sourceEntry = join(projectRoot, 'source', 'cli.tsx');
 	if (existsSync(sourceEntry)) {
+		const loaderPath = resolveLoader(projectRoot);
 		return {
 			command: process.execPath,
-			args: ['--loader=ts-node/esm/transpile-only', sourceEntry],
-			label: 'source/cli.tsx via ts-node/esm/transpile-only',
+			args: ['--loader', pathToFileURL(loaderPath).href, sourceEntry],
+			label: `source/cli.tsx via ${loaderPath}`,
 		};
 	}
 
@@ -610,12 +870,16 @@ export function loadBaseConfig(options = {}) {
 	};
 }
 
-function resolveModes(snowConfig, requestedModes) {
+export function resolveModes(snowConfig, requestedModes) {
 	if (requestedModes.length > 0) {
 		return Array.from(new Set(requestedModes));
 	}
 
-	if (snowConfig.bridgeVcpKey?.trim()) {
+	const hasBridgeWsUrl =
+		typeof snowConfig.bridgeWsUrl === 'string' &&
+		snowConfig.bridgeWsUrl.trim().length > 0;
+
+	if (hasBridgeWsUrl || snowConfig.bridgeVcpKey?.trim()) {
 		return ['local', 'bridge', 'hybrid'];
 	}
 
@@ -1058,6 +1322,96 @@ function assertToolCallSequence(collectedToolCalls, expectedSequence) {
 	);
 }
 
+function assertExactToolCallSequence(collectedToolCalls, expectedSequence) {
+	const actualSequence = collectedToolCalls.map(entry => entry.toolCall.function.name);
+	if (actualSequence.length !== expectedSequence.length) {
+		throw new Error(
+			`Unexpected top-level tool call count for team scenario: expected ${expectedSequence.length}, got ${actualSequence.length}.`,
+		);
+	}
+
+	for (let index = 0; index < expectedSequence.length; index += 1) {
+		if (actualSequence[index] !== expectedSequence[index]) {
+			throw new Error(
+				`Unexpected top-level tool call order for team scenario: expected ${expectedSequence.join(' -> ')}, got ${actualSequence.join(' -> ')}.`,
+			);
+		}
+	}
+}
+
+function tryParseJson(value) {
+	if (typeof value !== 'string' || value.trim().length === 0) {
+		return null;
+	}
+
+	try {
+		return JSON.parse(value);
+	} catch {
+		return null;
+	}
+}
+
+function extractFirstComparableLine(value) {
+	const firstLine = normalizeComparableText(
+		String(value || '').trim().split(/\r?\n/, 1)[0] || '',
+	);
+	return firstLine.replace(/^\d+:[^→]+→/, '').trim();
+}
+
+function extractToolResultComparableValue(rawContent) {
+	const parsedContent = tryParseJson(String(rawContent || ''));
+	if (typeof parsedContent?.content === 'string') {
+		return parsedContent.content;
+	}
+
+	return String(rawContent || '');
+}
+
+function toolCallTargetsProbePath(
+	toolCall,
+	expectedProbePath,
+	expectedProbeRoot,
+) {
+	if (!expectedProbePath) {
+		return true;
+	}
+
+	const parsedArguments = tryParseJson(String(toolCall?.function?.arguments || ''));
+	if (!parsedArguments || typeof parsedArguments !== 'object') {
+		return false;
+	}
+
+	const candidatePaths = [
+		parsedArguments.filePath,
+		parsedArguments.path,
+		parsedArguments.targetFile,
+		parsedArguments.targetPath,
+		parsedArguments.file,
+	]
+		.filter(value => typeof value === 'string')
+		.map(value => normalizeComparablePath(value, expectedProbeRoot));
+
+	const normalizedExpectedProbePath = normalizeComparablePath(expectedProbePath);
+	return candidatePaths.includes(normalizedExpectedProbePath);
+}
+
+function normalizeComparablePath(value, baseDir) {
+	const normalizedValue = normalizeComparableText(String(value || '').trim());
+	if (!normalizedValue) {
+		return '';
+	}
+
+	if (isAbsolute(normalizedValue)) {
+		return normalizedValue;
+	}
+
+	if (!baseDir) {
+		return normalizedValue;
+	}
+
+	return normalizeComparableText(resolve(baseDir, normalizedValue));
+}
+
 function extractFinalAssistantContent(options) {
 	const {messages, expectedAssistantIncludes, expectedTool} = options;
 	const finalAssistantMessage = messages
@@ -1065,6 +1419,10 @@ function extractFinalAssistantContent(options) {
 		.reverse()
 		.find(message => {
 			if (message?.role !== 'assistant') {
+				return false;
+			}
+
+			if (message?.subAgentInternal || message?.subAgentContent) {
 				return false;
 			}
 
@@ -1332,9 +1690,13 @@ async function runMode(options) {
 		suite,
 		workDir,
 		tempRoot,
+		probeFile,
 	});
 	const runtimeWorkDir = preparedWorkDir.runtimeWorkDir;
-	const readTarget = resolveReadTarget(runtimeWorkDir, probeFile);
+	const readTarget = resolveReadTarget(runtimeWorkDir, probeFile, {
+		restrictToWorkDir: suite === 'team',
+		targetLabel: 'team probe file',
+	});
 	const modeScenarios = getModeScenarios({
 		suite,
 		probeExpected,
@@ -1360,7 +1722,7 @@ async function runMode(options) {
 			runtimeWorkDir,
 		],
 		{
-			cwd: PROJECT_ROOT,
+			cwd: runtimeWorkDir,
 			env: {
 				...process.env,
 				FORCE_COLOR: '0',
@@ -1394,6 +1756,8 @@ async function runMode(options) {
 			prompt: suiteScenarios[0].buildPrompt
 				? suiteScenarios[0].buildPrompt(readTarget)
 				: suiteScenarios[0].prompt,
+			expectedProbePath: readTarget,
+			expectedProbeRoot: runtimeWorkDir,
 		};
 		const sessionStartIndex = eventStream.events.length;
 		await postJson(`${baseUrl}/message`, {
@@ -1427,6 +1791,8 @@ async function runMode(options) {
 			const resolvedScenario = {
 				...scenario,
 				prompt: scenario.buildPrompt ? scenario.buildPrompt(readTarget) : scenario.prompt,
+				expectedProbePath: readTarget,
+				expectedProbeRoot: runtimeWorkDir,
 			};
 			const scenarioResult = await runScenario(
 				baseUrl,

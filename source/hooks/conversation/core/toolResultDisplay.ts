@@ -1,7 +1,11 @@
 import type {Message} from '../../../ui/components/chat/MessageList.js';
-import type {ToolCall, ToolResult} from '../../../utils/execution/toolExecutor.js';
+import type {
+	ToolCall,
+	ToolResult,
+} from '../../../utils/execution/toolExecutor.js';
 import {formatToolCallMessage} from '../../../utils/ui/messageFormatter.js';
 import {isToolNeedTwoStepDisplay} from '../../../utils/config/toolDisplayConfig.js';
+import {buildToolResultView} from '../../../utils/session/toolResultView.js';
 
 /**
  * Build UI messages for tool execution results.
@@ -24,6 +28,12 @@ export function buildToolResultMessages(
 
 		// Sub-agent tools
 		if (toolCall.function.name.startsWith('subagent-')) {
+			const toolResultView = buildToolResultView({
+				toolName: toolCall.function.name,
+				content: result.content,
+				historyContent: result.historyContent,
+				isError,
+			});
 			let usage: any = undefined;
 			if (!isError) {
 				try {
@@ -39,7 +49,9 @@ export function buildToolResultMessages(
 				content: `${statusIcon} ${toolCall.function.name}`,
 				streaming: false,
 				messageStatus: isError ? 'error' : 'success',
+				toolName: toolResultView.toolName,
 				toolResult: !isError ? result.content : undefined,
+				toolResultPreview: !isError ? toolResultView.previewContent : undefined,
 				subAgentUsage: usage,
 			});
 			continue;
@@ -52,17 +64,25 @@ export function buildToolResultMessages(
 		const isNonTimeConsuming = !isToolNeedTwoStepDisplay(
 			toolCall.function.name,
 		);
+		const toolResultView = buildToolResultView({
+			toolName: toolCall.function.name,
+			content: result.content,
+			historyContent: result.historyContent,
+			isError,
+		});
 
 		resultMessages.push({
 			role: 'assistant',
 			content: `${statusIcon} ${toolCall.function.name}`,
 			streaming: false,
 			messageStatus: isError ? 'error' : 'success',
+			toolName: toolResultView.toolName,
 			toolCall: editDiffData
 				? {name: toolCall.function.name, arguments: editDiffData}
 				: undefined,
 			toolDisplay: isNonTimeConsuming ? toolDisplay : undefined,
 			toolResult: !isError ? result.content : undefined,
+			toolResultPreview: !isError ? toolResultView.previewContent : undefined,
 			parallelGroup: parallelGroupId,
 		});
 	}
@@ -74,9 +94,7 @@ function extractEditDiffData(
 	toolCall: ToolCall,
 	result: ToolResult,
 ): Record<string, any> | undefined {
-	if (
-		toolCall.function.name !== 'filesystem-edit'
-	) {
+	if (toolCall.function.name !== 'filesystem-edit') {
 		return undefined;
 	}
 

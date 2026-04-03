@@ -3,6 +3,7 @@ import test from 'ava';
 import {
 	isDirectTextInputField,
 	isEscapeClosableEditingField,
+	isSelectField,
 	shouldShowBridgeCredentialFields,
 	shouldShowToolTransportField,
 } from './types.js';
@@ -14,6 +15,11 @@ test('bridge config fields are treated as direct text inputs', t => {
 	t.true(isDirectTextInputField('bridgeVcpKey'));
 	t.true(isDirectTextInputField('bridgeAccessToken'));
 	t.false(isDirectTextInputField('toolTransport'));
+});
+
+test('bridgeWsUrl is not treated as a select field', t => {
+	t.false(isSelectField('bridgeWsUrl'));
+	t.true(isDirectTextInputField('bridgeWsUrl'));
 });
 
 test('editing escape contract covers select and direct text fields only', t => {

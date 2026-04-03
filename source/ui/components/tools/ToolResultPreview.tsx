@@ -15,6 +15,33 @@ function removeAnsiCodes(text: string): string {
 	return text.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
+function renderPlainTextPreview(result: string, maxLines: number) {
+	const normalizedText = removeAnsiCodes(String(result || '')).trim();
+	if (!normalizedText) {
+		return null;
+	}
+
+	const lines = normalizedText.split('\n');
+	const previewLines = lines.slice(0, maxLines);
+	const isTruncated = lines.length > maxLines;
+
+	return (
+		<Box flexDirection="column" marginLeft={2}>
+			{previewLines.map((line, index) => (
+				<Text key={index} color="gray" dimColor>
+					{index === previewLines.length - 1 && !isTruncated ? '└─' : '├─'}{' '}
+					{line || ' '}
+				</Text>
+			))}
+			{isTruncated && (
+				<Text color="gray" dimColor>
+					└─ …
+				</Text>
+			)}
+		</Box>
+	);
+}
+
 /**
  * Display a compact preview of tool execution results
  * Shows a tree-like structure with limited content
@@ -25,6 +52,12 @@ export default function ToolResultPreview({
 	maxLines = 5,
 	isSubAgentInternal = false,
 }: ToolResultPreviewProps) {
+	if (toolName === 'skill-execute') {
+		// skill-execute often returns plain strings; those are already reflected in
+		// the main message content and should not produce an extra preview block.
+		return null;
+	}
+
 	try {
 		// Try to parse JSON result
 		const data = JSON.parse(result);
@@ -50,17 +83,12 @@ export default function ToolResultPreview({
 			return renderTodoPreview(toolName, data, maxLines);
 		} else if (toolName === 'ide-get_diagnostics') {
 			return renderIdeDiagnosticsPreview(data);
-		} else if (toolName === 'skill-execute') {
-			// skill-execute returns a string message, no preview needed
-			// (the skill content is displayed elsewhere)
-			return null;
 		} else {
 			// Generic preview for unknown tools
 			return renderGenericPreview(data, maxLines);
 		}
 	} catch {
-		// If not JSON or parsing fails, return null (no preview)
-		return null;
+		return renderPlainTextPreview(result, maxLines);
 	}
 }
 

@@ -2,6 +2,7 @@ import type {ChatMessage} from '../../api/chat.js';
 import type {Message} from '../../ui/components/chat/MessageList.js';
 import {formatToolCallMessage} from '../ui/messageFormatter.js';
 import {isToolNeedTwoStepDisplay} from '../config/toolDisplayConfig.js';
+import {buildToolResultView} from './toolResultView.js';
 
 /**
  * Clean thinking content by removing XML-like tags
@@ -194,6 +195,12 @@ export function convertSessionMessagesToUI(
 				const statusIcon = isError ? '✗' : '✓';
 				// UI only shows simple failure message, detailed error is sent to AI via msg.content
 				const statusText = '';
+				const toolResultView = buildToolResultView({
+					toolName,
+					content: msg.content,
+					historyContent: msg.historyContent,
+					isError,
+				});
 
 				let terminalResultData:
 					| {
@@ -228,8 +235,7 @@ export function convertSessionMessagesToUI(
 				let fileToolData: any = undefined;
 				if (
 					!isError &&
-					(toolName === 'filesystem-create' ||
-						toolName === 'filesystem-edit')
+					(toolName === 'filesystem-create' || toolName === 'filesystem-edit')
 				) {
 					try {
 						const resultData = JSON.parse(msg.content);
@@ -278,7 +284,11 @@ export function convertSessionMessagesToUI(
 					role: 'subagent',
 					content: `\x1b[38;2;0;186;255m⚇${statusIcon} ${toolName}\x1b[0m${statusText}`,
 					streaming: false,
+					toolName: toolResultView.toolName,
 					toolResult: !isError ? msg.content : undefined,
+					toolResultPreview: !isError
+						? toolResultView.previewContent
+						: undefined,
 					terminalResult: terminalResultData,
 					toolCall: terminalResultData
 						? {
@@ -446,10 +456,7 @@ export function convertSessionMessagesToUI(
 						}
 
 						// Extract edit diff data
-						if (
-							(toolName === 'filesystem-edit') &&
-							!isError
-						) {
+						if (toolName === 'filesystem-edit' && !isError) {
 							try {
 								const resultData = JSON.parse(msg.content);
 								// Handle single file edit
@@ -531,12 +538,20 @@ export function convertSessionMessagesToUI(
 			}
 
 			const isNonTimeConsuming = !isToolNeedTwoStepDisplay(toolName);
+			const toolResultView = buildToolResultView({
+				toolName,
+				content: msg.content,
+				historyContent: msg.historyContent,
+				isError,
+			});
 
 			uiMessages.push({
 				role: 'assistant',
 				content: `${statusIcon} ${toolName}${statusText}`,
 				streaming: false,
+				toolName: toolResultView.toolName,
 				toolResult: !isError ? msg.content : undefined,
+				toolResultPreview: !isError ? toolResultView.previewContent : undefined,
 				toolCall:
 					editDiffData || terminalResultData
 						? {

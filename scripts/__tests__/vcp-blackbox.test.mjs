@@ -3,11 +3,16 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import {mkdirSync, mkdtempSync, writeFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
 
 import {
+	buildSubagentModeScenarios,
+	buildTeamModeScenarios,
 	extractScenarioResultFromSession,
 	loadBaseConfig,
 	parseArguments,
+	resolveCliEntrypoint,
+	resolveModes,
 	resolveReadTarget,
 	resolveRuntimeWorkDir,
 	validateBridgeSearchToolResult,
@@ -81,6 +86,30 @@ test('resolveReadTarget honors an explicit probe file', () => {
 	);
 });
 
+test('resolveReadTarget keeps team probe files inside the repository', () => {
+	const workDir = mkdtempSync(join(os.tmpdir(), 'vcp-blackbox-team-probe-'));
+	const outsideProbe = join(workDir, '..', 'outside.py');
+	writeFileSync(resolve(outsideProbe), 'print("outside")', 'utf8');
+
+	assert.throws(
+		() =>
+			resolveReadTarget(workDir, '../outside.py', {
+				restrictToWorkDir: true,
+				targetLabel: 'team probe file',
+			}),
+		/must stay within the repository/,
+	);
+
+	assert.throws(
+		() =>
+			resolveReadTarget(workDir, resolve(outsideProbe), {
+				restrictToWorkDir: true,
+				targetLabel: 'team probe file',
+			}),
+		/absolute paths are not allowed/,
+	);
+});
+
 test('parseArguments accepts suite and probe options', () => {
 	const options = parseArguments([
 		'--suite',
@@ -97,6 +126,576 @@ test('parseArguments accepts suite and probe options', () => {
 	assert.deepEqual(options.modes, ['local']);
 	assert.equal(options.probeFile, 'main.py');
 	assert.equal(options.probeExpected, 'import tkinter as tk');
+});
+
+test('subagent scenario validation accepts a clean internal filesystem-read path', () => {
+	const scenario = buildSubagentModeScenarios('import tkinter as tk').local[0];
+	scenario.expectedProbePath = 'D:/repo/main.py';
+	scenario.expectedProbeRoot = 'D:/repo';
+	const result = scenario.validateMessages({
+		messages: [
+			{
+				role: 'assistant',
+				tool_calls: [
+					{
+						id: 'subagent-call',
+						function: {
+							name: 'subagent-agent_explore',
+							arguments: '{"prompt":"read the file"}',
+						},
+					},
+				],
+			},
+			{
+				role: 'assistant',
+				subAgentInternal: true,
+				tool_calls: [
+					{
+						id: 'internal-read',
+						function: {
+							name: 'filesystem-read',
+							arguments: '{"filePath":"D:/repo/main.py"}',
+						},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'internal-read',
+				content: '{"content":"import tkinter as tk"}',
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'subagent-call',
+				content: '{"success":true,"result":"import tkinter as tk"}',
+			},
+			{
+				role: 'assistant',
+				content: 'import tkinter as tk',
+			},
+		],
+		previousMessageCount: 0,
+		scenario,
+	});
+
+	assert.equal(result.expectedTool, 'subagent-agent_explore');
+	assert.equal(result.finalAssistantPreview, 'import tkinter as tk');
+	assert.equal(result.toolResultPreview, 'import tkinter as tk');
+});
+
+test('subagent scenario validation rejects leaked top-level filesystem-read fallback', () => {
+	const scenario = buildSubagentModeScenarios('import tkinter as tk').local[0];
+	scenario.expectedProbePath = 'D:/repo/main.py';
+	scenario.expectedProbeRoot = 'D:/repo';
+
+	assert.throws(
+		() =>
+			scenario.validateMessages({
+				messages: [
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'subagent-call',
+								function: {
+									name: 'subagent-agent_explore',
+									arguments: '{"prompt":"read the file"}',
+								},
+							},
+						],
+					},
+					{
+						role: 'assistant',
+						subAgentInternal: true,
+						tool_calls: [
+							{
+								id: 'internal-read',
+								function: {
+									name: 'filesystem-read',
+									arguments: '{"filePath":"D:/repo/main.py"}',
+								},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'internal-read',
+						content: '{"content":"import tkinter as tk"}',
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'subagent-call',
+						content: '{"success":true,"result":"not the expected answer"}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'main-read',
+								function: {
+									name: 'filesystem-read',
+									arguments: '{"filePath":"D:/repo/main.py"}',
+								},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'main-read',
+						content: '{"content":"import tkinter as tk"}',
+					},
+					{
+						role: 'assistant',
+						content: 'import tkinter as tk',
+					},
+				],
+				previousMessageCount: 0,
+				scenario,
+			}),
+		/extra top-level tool calls/,
+	);
+});
+
+test('subagent scenario validation rejects an internal filesystem-read on the wrong path', () => {
+	const scenario = buildSubagentModeScenarios('import tkinter as tk').local[0];
+	scenario.expectedProbePath = 'D:/repo/main.py';
+	scenario.expectedProbeRoot = 'D:/repo';
+
+	assert.throws(
+		() =>
+			scenario.validateMessages({
+				messages: [
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'subagent-call',
+								function: {
+									name: 'subagent-agent_explore',
+									arguments: '{"prompt":"read the file"}',
+								},
+							},
+						],
+					},
+					{
+						role: 'assistant',
+						subAgentInternal: true,
+						tool_calls: [
+							{
+								id: 'internal-read',
+								function: {
+									name: 'filesystem-read',
+									arguments: '{"filePath":"D:/repo/other.py"}',
+								},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'internal-read',
+						content: '{"content":"import tkinter as tk"}',
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'subagent-call',
+						content: '{"success":true,"result":"import tkinter as tk"}',
+					},
+					{
+						role: 'assistant',
+						content: 'import tkinter as tk',
+					},
+				],
+				previousMessageCount: 0,
+				scenario,
+			}),
+		/did not target the probe file/,
+	);
+});
+
+test('subagent scenario validation rejects an internal filesystem-read with the wrong first line', () => {
+	const scenario = buildSubagentModeScenarios('import tkinter as tk').local[0];
+	scenario.expectedProbePath = 'D:/repo/main.py';
+	scenario.expectedProbeRoot = 'D:/repo';
+
+	assert.throws(
+		() =>
+			scenario.validateMessages({
+				messages: [
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'subagent-call',
+								function: {
+									name: 'subagent-agent_explore',
+									arguments: '{"prompt":"read the file"}',
+								},
+							},
+						],
+					},
+					{
+						role: 'assistant',
+						subAgentInternal: true,
+						tool_calls: [
+							{
+								id: 'internal-read',
+								function: {
+									name: 'filesystem-read',
+									arguments: '{"filePath":"D:/repo/main.py"}',
+								},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'internal-read',
+						content: '{"content":"print(123)"}',
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'subagent-call',
+						content: '{"success":true,"result":"import tkinter as tk"}',
+					},
+					{
+						role: 'assistant',
+						content: 'import tkinter as tk',
+					},
+				],
+				previousMessageCount: 0,
+				scenario,
+			}),
+		/did not match the expected first line/,
+	);
+});
+
+test('subagent scenario validation accepts a relative probe path inside the same workdir', () => {
+	const scenario = buildSubagentModeScenarios('import tkinter as tk').local[0];
+	scenario.expectedProbePath = 'D:/repo/main.py';
+	scenario.expectedProbeRoot = 'D:/repo';
+
+	const result = scenario.validateMessages({
+		messages: [
+			{
+				role: 'assistant',
+				tool_calls: [
+					{
+						id: 'subagent-call',
+						function: {
+							name: 'subagent-agent_explore',
+							arguments: '{"prompt":"read the file"}',
+						},
+					},
+				],
+			},
+			{
+				role: 'assistant',
+				subAgentInternal: true,
+				tool_calls: [
+					{
+						id: 'internal-read',
+						function: {
+							name: 'filesystem-read',
+							arguments: '{"filePath":"main.py"}',
+						},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'internal-read',
+				content: '{"content":"1:7b→import tkinter as tk"}',
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'subagent-call',
+				content: '{"success":true,"result":"import tkinter as tk"}',
+			},
+			{
+				role: 'assistant',
+				content: 'import tkinter as tk',
+			},
+		],
+		previousMessageCount: 0,
+		scenario,
+	});
+
+	assert.equal(result.finalAssistantPreview, 'import tkinter as tk');
+});
+
+test('resolveModes enables bridge coverage when bridgeWsUrl is configured', () => {
+	assert.deepEqual(
+		resolveModes(
+			{
+				bridgeWsUrl: 'wss://bridge.example.com/vcp-distributed-server/VCP_Key=Snow',
+			},
+			[],
+		),
+		['local', 'bridge', 'hybrid'],
+	);
+});
+
+test('team scenarios expose a top-level expectedTool for timeout reporting', () => {
+	const scenario = buildTeamModeScenarios('#!/usr/bin/env node').local[0];
+
+	assert.equal(scenario.expectedTool, 'team-spawn_teammate');
+});
+
+test('team scenario validation ignores sub-agent internal tool calls', () => {
+	const scenario = buildTeamModeScenarios('import tkinter as tk').local[0];
+	const result = scenario.validateMessages({
+		messages: [
+			{
+				role: 'assistant',
+				tool_calls: [
+					{
+						id: 'team-spawn',
+						function: {name: 'team-spawn_teammate', arguments: '{}'},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'team-spawn',
+				content: '{"success":true}',
+			},
+			{
+				role: 'assistant',
+				tool_calls: [
+					{
+						id: 'team-wait',
+						function: {name: 'team-wait_for_teammates', arguments: '{}'},
+					},
+				],
+			},
+			{
+				role: 'assistant',
+				subAgentInternal: true,
+				tool_calls: [
+					{
+						id: 'subagent-read',
+						function: {name: 'filesystem-read', arguments: '{}'},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'team-wait',
+				content: '{"success":true}',
+			},
+			{
+				role: 'assistant',
+				tool_calls: [
+					{
+						id: 'team-shutdown',
+						function: {name: 'team-shutdown_teammate', arguments: '{}'},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'team-shutdown',
+				content: '{"success":true}',
+			},
+			{
+				role: 'assistant',
+				tool_calls: [
+					{
+						id: 'team-merge',
+						function: {name: 'team-merge_all_teammate_work', arguments: '{}'},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'team-merge',
+				content: '{"success":true}',
+			},
+			{
+				role: 'assistant',
+				tool_calls: [
+					{
+						id: 'team-cleanup',
+						function: {name: 'team-cleanup_team', arguments: '{}'},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'team-cleanup',
+				content: '{"success":true}',
+			},
+			{
+				role: 'assistant',
+				tool_calls: [
+					{
+						id: 'main-read',
+						function: {name: 'filesystem-read', arguments: '{}'},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'main-read',
+				content: '{"content":"import tkinter as tk"}',
+			},
+			{
+				role: 'assistant',
+				content: 'import tkinter as tk',
+			},
+		],
+		previousMessageCount: 0,
+		scenario,
+	});
+
+	assert.equal(result.expectedTool, 'team-spawn_teammate');
+	assert.equal(result.finalAssistantPreview, 'import tkinter as tk');
+});
+
+test('team scenario validation rejects unexpected extra top-level tool calls', () => {
+	const scenario = buildTeamModeScenarios('import tkinter as tk').local[0];
+
+	assert.throws(
+		() =>
+			scenario.validateMessages({
+				messages: [
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'pre-read',
+								function: {name: 'filesystem-read', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'pre-read',
+						content: '{"content":"import tkinter as tk"}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-spawn',
+								function: {name: 'team-spawn_teammate', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-spawn',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-wait',
+								function: {name: 'team-wait_for_teammates', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-wait',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-shutdown',
+								function: {name: 'team-shutdown_teammate', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-shutdown',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-merge',
+								function: {name: 'team-merge_all_teammate_work', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-merge',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-cleanup',
+								function: {name: 'team-cleanup_team', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-cleanup',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'main-read',
+								function: {name: 'filesystem-read', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'main-read',
+						content: '{"content":"import tkinter as tk"}',
+					},
+					{
+						role: 'assistant',
+						content: 'import tkinter as tk',
+					},
+				],
+				previousMessageCount: 0,
+				scenario,
+			}),
+		/Unexpected top-level tool call count/,
+	);
+});
+
+test('resolveCliEntrypoint resolves the ts-node loader from the project root', () => {
+	const projectRoot = mkdtempSync(join(os.tmpdir(), 'vcp-blackbox-entrypoint-'));
+	const sourceDir = join(projectRoot, 'source');
+	const loaderPath = join(
+		projectRoot,
+		'node_modules',
+		'ts-node',
+		'esm',
+		'transpile-only.mjs',
+	);
+	mkdirSync(sourceDir, {recursive: true});
+	mkdirSync(join(projectRoot, 'node_modules', 'ts-node', 'esm'), {
+		recursive: true,
+	});
+	writeFileSync(join(sourceDir, 'cli.tsx'), 'console.log("snow");\n', 'utf8');
+	writeFileSync(loaderPath, 'export {};\n', 'utf8');
+
+	const entrypoint = resolveCliEntrypoint({
+		projectRoot,
+		resolveLoader: () => loaderPath,
+	});
+
+	assert.deepEqual(entrypoint.args, [
+		'--loader',
+		pathToFileURL(loaderPath).href,
+		join(projectRoot, 'source', 'cli.tsx'),
+	]);
+	assert.match(entrypoint.label, /source\/cli\.tsx via /);
 });
 
 test('extractScenarioResultFromSession requires a final assistant reply', () => {
@@ -137,6 +736,56 @@ test('extractScenarioResultFromSession requires a final assistant reply', () => 
 	});
 
 	assert.equal(result.finalAssistantPreview, '#!/usr/bin/env node');
+});
+
+test('extractScenarioResultFromSession ignores hidden sub-agent assistant messages', () => {
+	const scenario = {
+		name: 'filesystem-read',
+		expectedTool: 'filesystem-read',
+		expectedToolResultIncludes: '#!/usr/bin/env node',
+		expectedAssistantIncludes: 'visible final answer',
+	};
+
+	const result = extractScenarioResultFromSession({
+		messages: [
+			{
+				role: 'assistant',
+				content: '',
+				tool_calls: [
+					{
+						id: 'call-1',
+						function: {
+							name: 'filesystem-read',
+							arguments: '{"path":"source/cli.tsx"}',
+						},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'call-1',
+				content: JSON.stringify({content: '#!/usr/bin/env node\nimport x'}),
+			},
+			{
+				role: 'assistant',
+				subAgentInternal: true,
+				content: '#!/usr/bin/env node',
+			},
+			{
+				role: 'assistant',
+				subAgentContent: true,
+				content: '#!/usr/bin/env node',
+			},
+			{
+				role: 'assistant',
+				content: 'visible final answer',
+			},
+		],
+		scenario,
+		previousMessageCount: 0,
+	});
+
+	assert.equal(result.finalAssistantPreview, 'visible final answer');
 });
 
 test('extractScenarioResultFromSession rejects missing final assistant reply', () => {

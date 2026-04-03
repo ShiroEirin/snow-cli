@@ -31,11 +31,13 @@ export interface Message {
 		name: string;
 		arguments: any;
 	};
+	toolName?: string;
 	toolDisplay?: {
 		toolName: string;
 		args: Array<{key: string; value: string; isLast: boolean}>;
 	};
 	toolResult?: string; // Raw JSON string from tool execution for preview
+	toolResultPreview?: string; // Display-only compact preview, raw toolResult remains preserved
 	toolCallId?: string; // Tool call ID for updating message in place
 	toolPending?: boolean; // Whether the tool is still executing
 	isExecuting?: boolean; // Whether a custom command is executing in terminal

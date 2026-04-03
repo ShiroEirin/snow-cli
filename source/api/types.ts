@@ -20,6 +20,7 @@ export interface ToolCall {
 export interface ChatMessage {
 	role: 'system' | 'user' | 'assistant' | 'tool';
 	content: string;
+	historyContent?: string; // Compact tool-result preview content used by replay/display sidecars
 	messageStatus?: 'pending' | 'success' | 'error';
 	tool_call_id?: string;
 	tool_calls?: ToolCall[];

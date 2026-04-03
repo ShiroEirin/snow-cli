@@ -100,7 +100,6 @@ export const SELECT_FIELDS: ConfigField[] = [
 	'enableVcpTimeBridge',
 	'backendMode',
 	'toolTransport',
-	'bridgeWsUrl',
 	'systemPromptId',
 	'customHeadersSchemeId',
 	'advancedModel',
