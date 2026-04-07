@@ -122,6 +122,128 @@ test('keep missing-index parallel tool calls isolated by id and order', (t: any)
 	t.is(toolCalls[1]!.function.arguments, '{"filePath":"D:/repo/b.txt"}');
 });
 
+test('skip ambiguous missing-id multi-tool deltas instead of concatenating tool names', (t: any) => {
+	const toolCallsBuffer: Record<number, any> = {};
+	const toolCallIndexById = new Map<string, number>();
+
+	applyStreamingToolCallDelta(
+		toolCallsBuffer,
+		toolCallIndexById,
+		{
+			id: 'tool-1',
+			function: {name: 'filesystem-read'},
+		},
+		0,
+		2,
+	);
+	applyStreamingToolCallDelta(
+		toolCallsBuffer,
+		toolCallIndexById,
+		{
+			id: 'tool-2',
+			function: {name: 'terminal-execute'},
+		},
+		1,
+		2,
+	);
+
+	applyStreamingToolCallDelta(
+		toolCallsBuffer,
+		toolCallIndexById,
+		{
+			function: {name: 'terminal-execute'},
+		},
+		0,
+		2,
+	);
+
+	const toolCalls = finalizeStreamingToolCalls(toolCallsBuffer);
+
+	t.deepEqual(
+		toolCalls.map((toolCall: any) => toolCall.function.name),
+		['filesystem-read', 'terminal-execute'],
+	);
+});
+
+test('remap conflicting missing-index tool name delta to the uniquely matching buffered tool', (t: any) => {
+	const toolCallsBuffer: Record<number, any> = {};
+	const toolCallIndexById = new Map<string, number>();
+
+	applyStreamingToolCallDelta(
+		toolCallsBuffer,
+		toolCallIndexById,
+		{
+			function: {name: 'filesystem-read'},
+		},
+		0,
+		2,
+	);
+	applyStreamingToolCallDelta(
+		toolCallsBuffer,
+		toolCallIndexById,
+		{
+			function: {name: 'todo-get'},
+		},
+		1,
+		2,
+	);
+	applyStreamingToolCallDelta(
+		toolCallsBuffer,
+		toolCallIndexById,
+		{
+			function: {name: 'todo-get'},
+		},
+		0,
+		2,
+	);
+	applyStreamingToolCallDelta(
+		toolCallsBuffer,
+		toolCallIndexById,
+		{
+			function: {arguments: '{}'},
+		},
+		1,
+		2,
+	);
+
+	const toolCalls = finalizeStreamingToolCalls(toolCallsBuffer);
+
+	t.deepEqual(
+		toolCalls.map((toolCall: any) => ({
+			name: toolCall.function.name,
+			arguments: toolCall.function.arguments,
+		})),
+		[
+			{
+				name: 'filesystem-read',
+				arguments: '{}',
+			},
+			{
+				name: 'todo-get',
+				arguments: '{}',
+			},
+		],
+	);
+});
+
+test('drop multi-tool argument deltas that arrive before any stable identity', (t: any) => {
+	const toolCallsBuffer: Record<number, any> = {};
+	const toolCallIndexById = new Map<string, number>();
+
+	const deltaText = applyStreamingToolCallDelta(
+		toolCallsBuffer,
+		toolCallIndexById,
+		{
+			function: {arguments: '{"filePath":"D:/repo/a.txt"}'},
+		},
+		0,
+		2,
+	);
+
+	t.is(deltaText, '');
+	t.deepEqual(finalizeStreamingToolCalls(toolCallsBuffer), []);
+});
+
 test('finalize streaming tool calls repairs malformed json arguments', (t: any) => {
 	const toolCalls = finalizeStreamingToolCalls({
 		0: {
@@ -144,4 +266,19 @@ test('finalize streaming tool calls repairs malformed json arguments', (t: any) 
 			},
 		},
 	]);
+});
+
+test('drop streaming tool calls with unrecoverable malformed json arguments', (t: any) => {
+	const toolCalls = finalizeStreamingToolCalls({
+		0: {
+			id: 'tool-1',
+			type: 'function',
+			function: {
+				name: 'filesystem-read',
+				arguments: '{"filePath":"D:/repo/a.txt"}{"command":"pwd"}',
+			},
+		},
+	});
+
+	t.deepEqual(toolCalls, []);
 });

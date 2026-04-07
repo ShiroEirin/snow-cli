@@ -272,3 +272,94 @@ test('rotate bridge snapshots per session turn with fresh translated output', (t
 		['vcp-codesearcher-searchcode'],
 	);
 });
+
+test('bridge snapshots keep manifest metadata on the seam', (t: any) => {
+	const snapshot = buildBridgeToolSnapshot('session-a', {
+		revision: 'rev-100',
+		reloadedAt: '2026-04-04T10:01:02.000Z',
+		plugins: [
+			{
+				name: 'FileOperator',
+				displayName: 'FileOperator',
+				description: 'File operations',
+				requiresApproval: true,
+				approvalTimeoutMs: 30_000,
+				bridgeCommands: [
+					{
+						commandName: 'ReadFile',
+						description: 'Read a file.',
+						parameters: [],
+					},
+				],
+			},
+		],
+	});
+
+	t.deepEqual(snapshot.metadata, {
+		revision: 'rev-100',
+		reloadedAt: '2026-04-04T10:01:02.000Z',
+	});
+	t.deepEqual(snapshot.modelTools[0]?.metadata, {
+		revision: 'rev-100',
+		reloadedAt: '2026-04-04T10:01:02.000Z',
+		requiresApproval: true,
+		approvalTimeoutMs: 30_000,
+	});
+});
+
+test('session bridge snapshot key is revision aware', (t: any) => {
+	const firstSnapshot = buildSessionBridgeToolSnapshot('chat-session', {
+		revision: 'rev-a',
+		plugins: [
+			{
+				name: 'FileOperator',
+				displayName: 'FileOperator',
+				description: 'File operations',
+				bridgeCommands: [
+					{
+						commandName: 'ReadFile',
+						description: 'Read a file.',
+						parameters: [],
+					},
+				],
+			},
+		],
+	});
+	const repeatedSnapshot = buildSessionBridgeToolSnapshot('chat-session', {
+		revision: 'rev-a',
+		plugins: [
+			{
+				name: 'FileOperator',
+				displayName: 'FileOperator',
+				description: 'File operations',
+				bridgeCommands: [
+					{
+						commandName: 'ReadFile',
+						description: 'Read a file.',
+						parameters: [],
+					},
+				],
+			},
+		],
+	});
+	const nextRevisionSnapshot = buildSessionBridgeToolSnapshot('chat-session', {
+		revision: 'rev-b',
+		plugins: [
+			{
+				name: 'FileOperator',
+				displayName: 'FileOperator',
+				description: 'File operations',
+				bridgeCommands: [
+					{
+						commandName: 'ReadFile',
+						description: 'Read a file.',
+						parameters: [],
+					},
+				],
+			},
+		],
+	});
+
+	t.is(firstSnapshot.snapshotKey, repeatedSnapshot.snapshotKey);
+	t.not(firstSnapshot.snapshotKey, nextRevisionSnapshot.snapshotKey);
+});

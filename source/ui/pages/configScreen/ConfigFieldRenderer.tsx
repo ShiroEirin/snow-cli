@@ -56,6 +56,8 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 		setBridgeVcpKey,
 		bridgeAccessToken,
 		setBridgeAccessToken,
+		bridgeToolProfile,
+		setBridgeToolProfile,
 		requestMethodOptions,
 		systemPromptId,
 		activeSystemPromptIds,
@@ -342,6 +344,34 @@ export default function ConfigFieldRenderer({field, state}: Props) {
 								{bridgeAccessToken
 									? '*'.repeat(Math.min(bridgeAccessToken.length, 20))
 									: t.configScreen.notSet}
+							</Text>
+						</Box>
+					)}
+				</Box>
+			);
+
+		case 'bridgeToolProfile':
+			return (
+				<Box key={field} flexDirection="column">
+					<Text color={activeColor}>
+						{activeIndicator}
+						{t.configScreen.bridgeToolProfile}
+					</Text>
+					{isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<TextInput
+								value={bridgeToolProfile}
+								onChange={value =>
+									setBridgeToolProfile(stripFocusArtifacts(value))
+								}
+								placeholder="default"
+							/>
+						</Box>
+					)}
+					{!isCurrentlyEditing && (
+						<Box marginLeft={3}>
+							<Text color={theme.colors.menuSecondary}>
+								{bridgeToolProfile || t.configScreen.notSet}
 							</Text>
 						</Box>
 					)}

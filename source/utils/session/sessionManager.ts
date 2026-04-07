@@ -62,6 +62,104 @@ export interface PaginatedSessionList {
 	hasMore: boolean;
 }
 
+function normalizeSearchValue(value: string): string {
+	return value
+		.toLowerCase()
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+function tokenizeSearchQuery(searchQuery?: string): string[] {
+	const normalizedQuery = normalizeSearchValue(searchQuery || '');
+	if (!normalizedQuery) {
+		return [];
+	}
+
+	return normalizedQuery.split(' ').filter(Boolean);
+}
+
+function buildSessionDateSearchFields(timestamp: number): string[] {
+	if (!Number.isFinite(timestamp) || timestamp <= 0) {
+		return [];
+	}
+
+	const date = new Date(timestamp);
+	if (Number.isNaN(date.getTime())) {
+		return [];
+	}
+
+	const year = String(date.getFullYear());
+	const month = String(date.getMonth() + 1).padStart(2, '0');
+	const day = String(date.getDate()).padStart(2, '0');
+
+	return [
+		`${year}-${month}-${day}`,
+		`${year}/${month}/${day}`,
+		`${year}-${month}`,
+		date.toLocaleDateString('en-US', {
+			year: 'numeric',
+			month: 'short',
+			day: 'numeric',
+		}),
+		date.toLocaleDateString('zh-CN', {
+			year: 'numeric',
+			month: 'long',
+			day: 'numeric',
+		}),
+	]
+		.map(field => normalizeSearchValue(field))
+		.filter(Boolean);
+}
+
+function matchesSearchTokens(
+	fields: string[],
+	searchQuery?: string,
+): boolean {
+	const tokens = tokenizeSearchQuery(searchQuery);
+	if (tokens.length === 0) {
+		return true;
+	}
+
+	const haystack = fields
+		.map(field => normalizeSearchValue(field))
+		.filter(Boolean)
+		.join('\n');
+	return tokens.every(token => haystack.includes(token));
+}
+
+export function matchesSessionQuickSearch(
+	session: Pick<
+		SessionListItem,
+		'id' | 'title' | 'summary' | 'createdAt' | 'updatedAt'
+	>,
+	searchQuery?: string,
+): boolean {
+	return matchesSearchTokens(
+		[
+			session.id,
+			session.title,
+			session.summary,
+			...buildSessionDateSearchFields(session.createdAt),
+			...buildSessionDateSearchFields(session.updatedAt),
+		],
+		searchQuery,
+	);
+}
+
+export function matchesSessionContentSearch(
+	session: Pick<Session, 'messages'>,
+	searchQuery?: string,
+): boolean {
+	return matchesSearchTokens(
+		session.messages.flatMap(message => [
+			message.content,
+			message.historyContent || '',
+			message.previewContent || '',
+		]),
+		searchQuery,
+	);
+}
+
 export function buildSessionListMetadataProjection(
 	messageCount: number,
 	fileStats?: {
@@ -667,21 +765,40 @@ class SessionManager {
 			allSessions = await this.listSessions();
 		}
 
-		const normalizedQuery = searchQuery?.toLowerCase().trim();
-		const matchesQuery = (session: SessionListItem): boolean => {
-			if (!normalizedQuery) return true;
-			const titleMatch = session.title.toLowerCase().includes(normalizedQuery);
-			const summaryMatch = session.summary
-				?.toLowerCase()
-				.includes(normalizedQuery);
-			const idMatch = session.id.toLowerCase().includes(normalizedQuery);
-			return titleMatch || summaryMatch || idMatch;
-		};
+		const searchTokens = tokenizeSearchQuery(searchQuery);
+		let filtered = allSessions;
+		if (searchTokens.length > 0) {
+			const matchedSessionIds = new Set<string>();
+			const quickMatchedSessions = allSessions.filter(session => {
+				const matched = matchesSessionQuickSearch(session, searchQuery);
+				if (matched) {
+					matchedSessionIds.add(session.id);
+				}
 
-		// 过滤和分页
-		const filtered = normalizedQuery
-			? allSessions.filter(matchesQuery)
-			: allSessions;
+				return matched;
+			});
+			const contentSearchCandidates = allSessions.filter(
+				session => !matchedSessionIds.has(session.id),
+			);
+			const contentSearchResults = await Promise.all(
+				contentSearchCandidates.map(async session => {
+					const persistedSession = await this.loadSessionFromDisk(session.id);
+					return persistedSession &&
+						matchesSessionContentSearch(persistedSession, searchQuery)
+						? session
+						: null;
+				}),
+			);
+			const contentMatchedSessions = contentSearchResults.filter(
+				(session): session is SessionListItem => session !== null,
+			);
+			for (const session of contentMatchedSessions) {
+				matchedSessionIds.add(session.id);
+			}
+
+			filtered = [...quickMatchedSessions, ...contentMatchedSessions];
+		}
+
 		const total = filtered.length;
 		const startIndex = page * pageSize;
 		const endIndex = startIndex + pageSize;

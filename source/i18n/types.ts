@@ -171,6 +171,7 @@ export type TranslationKeys = {
 		bridgeWsUrl: string;
 		bridgeVcpKey: string;
 		bridgeAccessToken: string;
+		bridgeToolProfile: string;
 		anthropicBeta: string;
 		anthropicCacheTTL: string;
 		anthropicCacheTTL5m: string;

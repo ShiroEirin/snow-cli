@@ -20,6 +20,7 @@ import {
 import {snowBridgeClient} from '../session/vcpCompatibility/bridgeClient.js';
 import {lineHash} from '../../mcp/utils/filesystem/hashline.utils.js';
 import {teamService} from '../../mcp/team.js';
+import {subAgentService} from '../../mcp/subagent.js';
 
 let toolPlaneSequence = 0;
 
@@ -105,6 +106,34 @@ test('invalid concatenated tool arguments fail instead of truncating payload', a
 			'Error: Invalid tool arguments JSON for filesystem-read. Refusing to execute a malformed payload.',
 		),
 	);
+});
+
+test.serial('subagent tools reject empty prompt arguments before execution starts', async (t: any) => {
+	const originalExecute = subAgentService.execute;
+	let executeCalled = false;
+	subAgentService.execute = (async () => {
+		executeCalled = true;
+		throw new Error('subAgentService.execute should not run for empty prompts');
+	}) as typeof subAgentService.execute;
+
+	try {
+		const toolCall: ToolCall = {
+			id: 'subagent-empty-prompt',
+			type: 'function',
+			function: {
+				name: 'subagent-agent_explore',
+				arguments: '{}',
+			},
+		};
+
+		const result = await executeToolCall(toolCall);
+
+		t.false(executeCalled);
+		t.is(result.tool_call_id, 'subagent-empty-prompt');
+		t.is(result.content, 'Error: Sub-agent prompt is required');
+	} finally {
+		subAgentService.execute = originalExecute;
+	}
 });
 
 test('buildToolHistoryArtifacts split model history from UI preview summaries', (t: any) => {
@@ -485,6 +514,135 @@ test.serial(
 				result.previewContent?.includes('[1 image URL item omitted]') || false,
 			);
 			t.false(result.previewContent?.includes(imageUrl) || false);
+		} finally {
+			snowBridgeClient.executeTool = originalExecuteTool;
+			clearToolExecutionBindings(toolPlaneKey);
+		}
+	},
+);
+
+test.serial(
+	'executeToolCall normalizes final bridge ingress envelopes into completed tool results',
+	async (t: any) => {
+		const toolPlaneKey = `tool-executor-bridge-final-ingress-${++toolPlaneSequence}`;
+		const originalExecuteTool = snowBridgeClient.executeTool;
+		registerToolExecutionBindings(toolPlaneKey, [
+			{
+				kind: 'bridge',
+				toolName: 'vcp-async-bridge-tool',
+				pluginName: 'AsyncBridgeTool',
+				displayName: 'AsyncBridgeTool',
+				commandName: 'Run',
+			},
+		]);
+
+		snowBridgeClient.executeTool = (async () => ({
+			status: 'accepted',
+			asyncStatus: {
+				enabled: true,
+				state: 'accepted',
+				event: 'lifecycle',
+				taskId: 'task-99',
+			},
+			final: {
+				status: 'final',
+				result: {
+					ok: true,
+					taskId: 'task-99',
+				},
+				asyncStatus: {
+					enabled: true,
+					state: 'final',
+					event: 'final',
+					taskId: 'task-99',
+				},
+				historyContent: 'Task 99 completed with final payload',
+				previewContent: '{"summary":"task finished"}',
+			},
+		})) as typeof snowBridgeClient.executeTool;
+
+		try {
+			const result = await executeToolCallWithBindings(
+				{
+					id: 'bridge-final-ingress-call',
+					type: 'function',
+					function: {
+						name: 'vcp-async-bridge-tool',
+						arguments: JSON.stringify({query: 'SnowBridge'}),
+					},
+				},
+				toolPlaneKey,
+			);
+
+			t.true(result.content.includes('"status":"success"'));
+			t.true(result.content.includes('"ok":true'));
+			t.false(result.content.includes('"final":'));
+			t.is(result.toolLifecycleState, 'completed');
+			t.is(result.toolStatusDetail, 'SnowBridge: Completed (Result)');
+			t.is(result.historyContent, 'Task 99 completed with final payload');
+		} finally {
+			snowBridgeClient.executeTool = originalExecuteTool;
+			clearToolExecutionBindings(toolPlaneKey);
+		}
+	},
+);
+
+test.serial(
+	'executeToolCall normalizes final bridge ingress envelopes into error tool results',
+	async (t: any) => {
+		const toolPlaneKey = `tool-executor-bridge-final-error-${++toolPlaneSequence}`;
+		const originalExecuteTool = snowBridgeClient.executeTool;
+		registerToolExecutionBindings(toolPlaneKey, [
+			{
+				kind: 'bridge',
+				toolName: 'vcp-async-bridge-tool',
+				pluginName: 'AsyncBridgeTool',
+				displayName: 'AsyncBridgeTool',
+				commandName: 'Run',
+			},
+		]);
+
+		snowBridgeClient.executeTool = (async () => ({
+			status: 'accepted',
+			asyncStatus: {
+				enabled: true,
+				state: 'accepted',
+				event: 'lifecycle',
+				taskId: 'task-100',
+			},
+			final: {
+				status: 'final',
+				error: {
+					message: 'bridge task failed',
+				},
+				asyncStatus: {
+					enabled: true,
+					state: 'error',
+					event: 'final',
+					taskId: 'task-100',
+				},
+				historyContent: 'Task 100 failed with final payload',
+			},
+		})) as typeof snowBridgeClient.executeTool;
+
+		try {
+			const result = await executeToolCallWithBindings(
+				{
+					id: 'bridge-final-error-call',
+					type: 'function',
+					function: {
+						name: 'vcp-async-bridge-tool',
+						arguments: JSON.stringify({query: 'SnowBridge'}),
+					},
+				},
+				toolPlaneKey,
+			);
+
+			t.true(result.content.includes('"status":"error"'));
+			t.true(result.content.includes('bridge task failed'));
+			t.is(result.toolLifecycleState, 'error');
+			t.is(result.toolStatusDetail, 'SnowBridge: Error (Result)');
+			t.is(result.historyContent, 'Task 100 failed with final payload');
 		} finally {
 			snowBridgeClient.executeTool = originalExecuteTool;
 			clearToolExecutionBindings(toolPlaneKey);

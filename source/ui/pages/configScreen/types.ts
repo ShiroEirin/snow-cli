@@ -15,6 +15,7 @@ export type ConfigField =
 	| 'bridgeWsUrl'
 	| 'bridgeVcpKey'
 	| 'bridgeAccessToken'
+	| 'bridgeToolProfile'
 	| 'systemPromptId'
 	| 'customHeadersSchemeId'
 	| 'anthropicBeta'
@@ -120,10 +121,21 @@ export const TEXT_INPUT_FIELDS: ConfigField[] = [
 	'bridgeWsUrl',
 	'bridgeVcpKey',
 	'bridgeAccessToken',
+	'bridgeToolProfile',
+];
+
+export const BRIDGE_CREDENTIAL_FIELDS: ConfigField[] = [
+	'bridgeWsUrl',
+	'bridgeVcpKey',
+	'bridgeAccessToken',
+	'bridgeToolProfile',
 ];
 
 export const isDirectTextInputField = (field: ConfigField) =>
 	TEXT_INPUT_FIELDS.includes(field);
+
+export const isBridgeCredentialField = (field: ConfigField) =>
+	BRIDGE_CREDENTIAL_FIELDS.includes(field);
 
 export const isEscapeClosableEditingField = (field: ConfigField) =>
 	isSelectField(field) || isDirectTextInputField(field);

@@ -43,8 +43,8 @@ export function useChatScreenModes({enableYolo, enablePlan}: Options) {
 	const [toolSearchDisabled, setToolSearchDisabled] = useState(
 		() => !getToolSearchEnabled(),
 	);
-	const [hybridCompressEnabled, setHybridCompressEnabled] = useState(
-		() => getHybridCompressEnabled(),
+	const [hybridCompressEnabled, setHybridCompressEnabled] = useState(() =>
+		getHybridCompressEnabled(),
 	);
 	const [teamMode, setTeamMode] = useState(() => getTeamMode());
 	const [simpleMode, setSimpleMode] = useState(() => getSimpleMode());
@@ -52,6 +52,8 @@ export function useChatScreenModes({enableYolo, enablePlan}: Options) {
 		const config = getOpenAiConfig();
 		return config.showThinking !== false;
 	});
+	const [thinkingPanelExpanded, setThinkingPanelExpanded] = useState(true);
+	const [toolPanelExpanded, setToolPanelExpanded] = useState(true);
 
 	useEffect(() => {
 		persistYoloMode(yoloMode);
@@ -117,5 +119,9 @@ export function useChatScreenModes({enableYolo, enablePlan}: Options) {
 		setTeamMode,
 		simpleMode,
 		showThinking,
+		thinkingPanelExpanded,
+		setThinkingPanelExpanded,
+		toolPanelExpanded,
+		setToolPanelExpanded,
 	};
 }

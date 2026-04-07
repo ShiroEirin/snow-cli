@@ -15,7 +15,11 @@ export type SessionLeaseStoreOptions = {
 	now?: () => number;
 };
 
+const PROCESS_EXIT_EVENTS = ['beforeExit', 'exit', 'SIGINT', 'SIGTERM', 'SIGBREAK'] as const;
+
 export class SessionLeaseStore<T> {
+	private static readonly activeStores = new Set<SessionLeaseStore<unknown>>();
+	private static processHooksInstalled = false;
 	private readonly defaultKey: string;
 	private readonly ttlMs: number;
 	private readonly sweepIntervalMs: number;
@@ -23,9 +27,12 @@ export class SessionLeaseStore<T> {
 	private readonly resources = new Map<string, LeaseRecord<T>>();
 	private readonly sessions = new Map<string, SessionLinkRecord>();
 	private readonly sweepTimer: NodeJS.Timeout | null;
+	private isDisposed = false;
 	private nextSweepAt = Number.POSITIVE_INFINITY;
 
 	constructor(options: SessionLeaseStoreOptions) {
+		SessionLeaseStore.installProcessHooks();
+		SessionLeaseStore.activeStores.add(this as SessionLeaseStore<unknown>);
 		this.defaultKey = options.defaultKey;
 		this.ttlMs = options.ttlMs;
 		this.sweepIntervalMs = options.sweepIntervalMs;
@@ -45,6 +52,12 @@ export class SessionLeaseStore<T> {
 	}
 
 	dispose(): void {
+		if (this.isDisposed) {
+			return;
+		}
+
+		this.isDisposed = true;
+		SessionLeaseStore.activeStores.delete(this as SessionLeaseStore<unknown>);
 		if (this.sweepTimer) {
 			clearInterval(this.sweepTimer);
 		}
@@ -213,4 +226,27 @@ export class SessionLeaseStore<T> {
 			expiresAt: this.now() + this.ttlMs,
 		};
 	}
+
+	private static installProcessHooks(): void {
+		if (SessionLeaseStore.processHooksInstalled) {
+			return;
+		}
+
+		SessionLeaseStore.processHooksInstalled = true;
+		for (const eventName of PROCESS_EXIT_EVENTS) {
+			process.once(eventName, () => {
+				disposeAllSessionLeaseStores();
+			});
+		}
+	}
+
+	static disposeAllActiveStores(): void {
+		for (const store of Array.from(SessionLeaseStore.activeStores)) {
+			store.dispose();
+		}
+	}
+}
+
+export function disposeAllSessionLeaseStores(): void {
+	SessionLeaseStore.disposeAllActiveStores();
 }

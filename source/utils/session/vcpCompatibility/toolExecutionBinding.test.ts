@@ -8,6 +8,7 @@ import {
 	clearToolExecutionBindingsSession,
 	filterToolExecutionBindings,
 	getToolExecutionBinding,
+	normalizeBridgeArgumentAliases,
 	rotateToolExecutionBindingsSession,
 } from './toolExecutionBinding.js';
 import {DEFAULT_TOOL_PLANE_KEY} from './constants.js';
@@ -16,7 +17,11 @@ test.afterEach(() => {
 	clearToolExecutionBindings(DEFAULT_TOOL_PLANE_KEY);
 	clearToolExecutionBindings('plane-a');
 	clearToolExecutionBindings('plane-b');
+	clearToolExecutionBindings('design-plane');
+	clearToolExecutionBindings('review-plane');
 	clearToolExecutionBindingsSession('chat-session');
+	clearToolExecutionBindingsSession('design-session');
+	clearToolExecutionBindingsSession('review-session');
 });
 
 test('resolve execution binding from explicit tool plane key', (t: any) => {
@@ -101,6 +106,131 @@ test('drop stale session fallback after explicit plane cleanup', (t: any) => {
 	);
 });
 
+test('resolve latest registered binding when teammate worktree rewrite has no explicit plane key', (t: any) => {
+	rotateToolExecutionBindingsSession({
+		sessionKey: 'chat-session',
+		nextToolPlaneKey: 'plane-b',
+		bindings: [
+			{
+				kind: 'bridge',
+				toolName: 'vcp-imagecomposer-editimage',
+				pluginName: 'ImageComposer',
+				displayName: 'ImageComposer',
+				commandName: 'EditImage',
+				stringifyArgumentNames: [],
+				argumentBindings: [
+					{
+						name: 'imageUrl',
+						aliases: ['fileUrl'],
+						fileUrlCompatible: true,
+					},
+				],
+			},
+		],
+	});
+
+	t.deepEqual(
+		getToolExecutionBinding('vcp-imagecomposer-editimage'),
+		{
+			kind: 'bridge',
+			toolName: 'vcp-imagecomposer-editimage',
+			pluginName: 'ImageComposer',
+			displayName: 'ImageComposer',
+			commandName: 'EditImage',
+			stringifyArgumentNames: [],
+			argumentBindings: [
+				{
+					name: 'imageUrl',
+					aliases: ['fileUrl'],
+					fileUrlCompatible: true,
+				},
+			],
+		},
+	);
+});
+
+test('keep session-scoped bindings isolated across multiple planes for the same tool name', (t: any) => {
+	rotateToolExecutionBindingsSession({
+		sessionKey: 'design-session',
+		nextToolPlaneKey: 'design-plane',
+		bindings: [
+			{
+				kind: 'bridge',
+				toolName: 'vcp-imagecomposer-editimage',
+				pluginName: 'ImageComposer',
+				displayName: 'ImageComposer',
+				commandName: 'EditImage',
+				stringifyArgumentNames: [],
+				argumentBindings: [
+					{
+						name: 'imageUrl',
+						aliases: ['fileUrl'],
+						fileUrlCompatible: true,
+					},
+				],
+			},
+		],
+	});
+	rotateToolExecutionBindingsSession({
+		sessionKey: 'review-session',
+		nextToolPlaneKey: 'review-plane',
+		bindings: [
+			{
+				kind: 'bridge',
+				toolName: 'vcp-imagecomposer-editimage',
+				pluginName: 'ImageComposer',
+				displayName: 'ImageComposer',
+				commandName: 'EditImage',
+				stringifyArgumentNames: [],
+				argumentBindings: [
+					{
+						name: 'sourceUrl',
+						aliases: ['path'],
+						fileUrlCompatible: true,
+					},
+				],
+			},
+		],
+	});
+
+	t.deepEqual(
+		getToolExecutionBinding('vcp-imagecomposer-editimage', 'design-session'),
+		{
+			kind: 'bridge',
+			toolName: 'vcp-imagecomposer-editimage',
+			pluginName: 'ImageComposer',
+			displayName: 'ImageComposer',
+			commandName: 'EditImage',
+			stringifyArgumentNames: [],
+			argumentBindings: [
+				{
+					name: 'imageUrl',
+					aliases: ['fileUrl'],
+					fileUrlCompatible: true,
+				},
+			],
+		},
+	);
+	t.deepEqual(
+		getToolExecutionBinding('vcp-imagecomposer-editimage', 'review-session'),
+		{
+			kind: 'bridge',
+			toolName: 'vcp-imagecomposer-editimage',
+			pluginName: 'ImageComposer',
+			displayName: 'ImageComposer',
+			commandName: 'EditImage',
+			stringifyArgumentNames: [],
+			argumentBindings: [
+				{
+					name: 'sourceUrl',
+					aliases: ['path'],
+					fileUrlCompatible: true,
+				},
+			],
+		},
+	);
+});
+
 test('filter execution bindings down to the retained tool plane', (t: any) => {
 	rotateToolExecutionBindingsSession({
 		sessionKey: 'chat-session',
@@ -181,4 +311,136 @@ test('leave structured bridge arguments untouched when no stringify contract exi
 	});
 
 	t.deepEqual(normalizedArgs, originalArgs);
+});
+
+test('normalize bridge argument aliases and local file paths before execution', (t: any) => {
+	const normalizedArgs = coerceBridgeExecutionArguments(
+		{
+			fileUrl: 'H:/repo/assets/cover.png',
+			prompt: 'make it brighter',
+		},
+		{
+			kind: 'bridge',
+			toolName: 'vcp-imagecomposer-editimage',
+			pluginName: 'ImageComposer',
+			displayName: 'ImageComposer',
+			commandName: 'EditImage',
+			stringifyArgumentNames: [],
+			argumentBindings: [
+				{
+					name: 'imageUrl',
+					aliases: ['fileUrl', 'image_path'],
+					fileUrlCompatible: true,
+				},
+			],
+		},
+	);
+
+	t.false('fileUrl' in normalizedArgs);
+	t.is(normalizedArgs['imageUrl'], 'file:///H:/repo/assets/cover.png');
+	t.is(normalizedArgs['prompt'], 'make it brighter');
+});
+
+test('normalize bridge argument aliases without coercing file-url compatible values yet', (t: any) => {
+	const normalizedArgs = normalizeBridgeArgumentAliases(
+		{
+			fileUrl: 'assets/cover.png',
+			prompt: 'make it brighter',
+		},
+		{
+			kind: 'bridge',
+			toolName: 'vcp-imagecomposer-editimage',
+			pluginName: 'ImageComposer',
+			displayName: 'ImageComposer',
+			commandName: 'EditImage',
+			stringifyArgumentNames: [],
+			argumentBindings: [
+				{
+					name: 'imageUrl',
+					aliases: ['fileUrl', 'image_path'],
+					fileUrlCompatible: true,
+				},
+			],
+		},
+	);
+
+	t.false('fileUrl' in normalizedArgs);
+	t.is(normalizedArgs['imageUrl'], 'assets/cover.png');
+	t.is(normalizedArgs['prompt'], 'make it brighter');
+});
+
+test('apply alias normalization before description-derived stringify coercion', (t: any) => {
+	const normalizedArgs = coerceBridgeExecutionArguments(
+		{
+			image_path: './fixtures/demo.png',
+			options: {
+				mode: 'fast',
+			},
+		},
+		{
+			kind: 'bridge',
+			toolName: 'vcp-imagecomposer-editimage',
+			pluginName: 'ImageComposer',
+			displayName: 'ImageComposer',
+			commandName: 'EditImage',
+			stringifyArgumentNames: ['options'],
+			argumentBindings: [
+				{
+					name: 'imageUrl',
+					aliases: ['image_path'],
+					fileUrlCompatible: true,
+				},
+			],
+		},
+	);
+
+	t.is(
+		normalizedArgs['imageUrl'],
+		'file:///H:/github/VCP/snow-cli/fixtures/demo.png',
+	);
+	t.is(normalizedArgs['options'], '{"mode":"fast"}');
+});
+
+test('normalize nested file-url compatible objects without rewriting unrelated nested strings', (t: any) => {
+	const normalizedArgs = coerceBridgeExecutionArguments(
+		{
+			payload: {
+				imageUrl: './fixtures/demo.png',
+				prompt: 'keep.colors.warm',
+				items: [
+					{
+						filePath: '../assets/reference.png',
+						label: 'reference.image',
+					},
+				],
+			},
+		},
+		{
+			kind: 'bridge',
+			toolName: 'vcp-imagecomposer-editimage',
+			pluginName: 'ImageComposer',
+			displayName: 'ImageComposer',
+			commandName: 'EditImage',
+			stringifyArgumentNames: [],
+			argumentBindings: [
+				{
+					name: 'payload',
+					fileUrlCompatible: true,
+				},
+			],
+		},
+	);
+
+	t.deepEqual(normalizedArgs, {
+		payload: {
+			imageUrl: 'file:///H:/github/VCP/snow-cli/fixtures/demo.png',
+			prompt: 'keep.colors.warm',
+			items: [
+				{
+					filePath: 'file:///H:/github/VCP/assets/reference.png',
+					label: 'reference.image',
+				},
+			],
+		},
+	});
 });

@@ -5,6 +5,7 @@ const test = anyTest as any;
 import {
 	formatSubAgentUserQuestionResult,
 	isToolAllowedForSubAgent,
+	shouldUseSubAgentToolPlane,
 } from './subAgentExecutor.js';
 
 test('allow built-in tools by exact and prefix match', (t: any) => {
@@ -52,6 +53,30 @@ test('subagent askuser successful responses keep structured payload', (t: any) =
 			answer: 'yes: ship it',
 			selected: 'yes',
 			customInput: 'ship it',
+		}),
+	);
+});
+
+test('subagent tool plane stays disabled for vcp local-tools mode', (t: any) => {
+	t.false(
+		shouldUseSubAgentToolPlane({
+			backendMode: 'vcp',
+			toolTransport: 'local',
+		}),
+	);
+});
+
+test('subagent tool plane stays enabled for bridge and hybrid modes', (t: any) => {
+	t.true(
+		shouldUseSubAgentToolPlane({
+			backendMode: 'vcp',
+			toolTransport: 'bridge',
+		}),
+	);
+	t.true(
+		shouldUseSubAgentToolPlane({
+			backendMode: 'vcp',
+			toolTransport: 'hybrid',
 		}),
 	);
 });

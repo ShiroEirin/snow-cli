@@ -28,7 +28,9 @@ import {
 import {useI18n} from '../../../i18n/index.js';
 import {useTheme} from '../../contexts/ThemeContext.js';
 import {
+	BRIDGE_CREDENTIAL_FIELDS,
 	type ConfigField,
+	isBridgeCredentialField,
 	type ProfileMode,
 	type RequestMethodOption,
 	MAX_VISIBLE_FIELDS,
@@ -63,6 +65,7 @@ export function useConfigState() {
 	const [bridgeWsUrl, setBridgeWsUrl] = useState('');
 	const [bridgeVcpKey, setBridgeVcpKey] = useState('');
 	const [bridgeAccessToken, setBridgeAccessToken] = useState('');
+	const [bridgeToolProfile, setBridgeToolProfile] = useState('');
 	const [systemPromptId, setSystemPromptId] = useState<
 		string | string[] | undefined
 	>(undefined);
@@ -155,6 +158,50 @@ export function useConfigState() {
 		},
 	];
 
+	const buildCurrentSnowConfigDraft = () =>
+		buildSnowConfigDraft({
+			baseUrl,
+			apiKey,
+			requestMethod,
+			enableVcpTimeBridge,
+			backendMode,
+			toolTransport,
+			bridgeWsUrl,
+			bridgeVcpKey,
+			bridgeAccessToken,
+			bridgeToolProfile,
+			systemPromptId,
+			customHeadersSchemeId,
+			anthropicBeta,
+			anthropicCacheTTL,
+			enableAutoCompress,
+			autoCompressThreshold,
+			showThinking,
+			streamingDisplay,
+			thinking: thinkingEnabled
+				? thinkingMode === 'adaptive'
+					? {type: 'adaptive' as const, effort: thinkingEffort}
+					: {type: 'enabled' as const, budget_tokens: thinkingBudgetTokens}
+				: undefined,
+			geminiThinking: geminiThinkingEnabled
+				? {enabled: true, budget: geminiThinkingBudget}
+				: undefined,
+			responsesReasoning: {
+				enabled: responsesReasoningEnabled,
+				effort: responsesReasoningEffort,
+			},
+			responsesVerbosity,
+			responsesFastMode,
+			anthropicSpeed,
+			advancedModel,
+			basicModel,
+			maxContextTokens,
+			maxTokens,
+			streamIdleTimeoutSec,
+			toolResultTokenLimit,
+			editSimilarityThreshold,
+		});
+
 	const getAllFields = (): ConfigField[] => {
 		const showToolTransport = shouldShowToolTransportField(backendMode);
 		const showBridgeCredentials = shouldShowBridgeCredentialFields(
@@ -169,13 +216,7 @@ export function useConfigState() {
 			'enableVcpTimeBridge',
 			'backendMode',
 			...(showToolTransport ? (['toolTransport'] as ConfigField[]) : []),
-			...(showBridgeCredentials
-				? ([
-						'bridgeWsUrl',
-						'bridgeVcpKey',
-						'bridgeAccessToken',
-				  ] as ConfigField[])
-				: []),
+			...(showBridgeCredentials ? BRIDGE_CREDENTIAL_FIELDS : []),
 			'systemPromptId',
 			'customHeadersSchemeId',
 			'enableAutoCompress',
@@ -305,12 +346,7 @@ export function useConfigState() {
 			backendMode,
 			toolTransport,
 		);
-		if (
-			!bridgeFieldsVisible &&
-			(currentField === 'bridgeWsUrl' ||
-				currentField === 'bridgeVcpKey' ||
-				currentField === 'bridgeAccessToken')
-		) {
+		if (!bridgeFieldsVisible && isBridgeCredentialField(currentField)) {
 			setCurrentField('systemPromptId');
 		}
 	}, [backendMode, toolTransport, currentField]);
@@ -343,6 +379,7 @@ export function useConfigState() {
 		setBridgeWsUrl(config.bridgeWsUrl || '');
 		setBridgeVcpKey(config.bridgeVcpKey || '');
 		setBridgeAccessToken(config.bridgeAccessToken || '');
+		setBridgeToolProfile(config.bridgeToolProfile || '');
 		setSystemPromptId(config.systemPromptId);
 		setCustomHeadersSchemeId(config.customHeadersSchemeId);
 		setAnthropicBeta(config.anthropicBeta || false);
@@ -404,6 +441,7 @@ export function useConfigState() {
 			bridgeWsUrl,
 			bridgeVcpKey,
 			bridgeAccessToken,
+			bridgeToolProfile,
 		};
 		await updateOpenAiConfig(tempConfig);
 
@@ -440,6 +478,7 @@ export function useConfigState() {
 		if (currentField === 'baseUrl') return baseUrl;
 		if (currentField === 'apiKey') return apiKey;
 		if (currentField === 'bridgeWsUrl') return bridgeWsUrl;
+		if (currentField === 'bridgeToolProfile') return bridgeToolProfile;
 		if (currentField === 'advancedModel') return advancedModel;
 		if (currentField === 'basicModel') return basicModel;
 		if (currentField === 'maxContextTokens') return maxContextTokens.toString();
@@ -608,47 +647,7 @@ export function useConfigState() {
 		}
 
 		try {
-			const currentConfig = buildSnowConfigDraft({
-				baseUrl,
-				apiKey,
-				requestMethod,
-				enableVcpTimeBridge,
-				backendMode,
-				toolTransport,
-				bridgeWsUrl,
-				bridgeVcpKey,
-				bridgeAccessToken,
-				systemPromptId,
-				customHeadersSchemeId,
-				anthropicBeta,
-				anthropicCacheTTL,
-				enableAutoCompress,
-				autoCompressThreshold,
-				showThinking,
-				streamingDisplay,
-				thinking: thinkingEnabled
-					? thinkingMode === 'adaptive'
-						? {type: 'adaptive' as const, effort: thinkingEffort}
-						: {type: 'enabled' as const, budget_tokens: thinkingBudgetTokens}
-					: undefined,
-				geminiThinking: geminiThinkingEnabled
-					? {enabled: true, budget: geminiThinkingBudget}
-					: undefined,
-				responsesReasoning: {
-					enabled: responsesReasoningEnabled,
-					effort: responsesReasoningEffort,
-				},
-				responsesVerbosity,
-				responsesFastMode,
-				anthropicSpeed,
-				advancedModel,
-				basicModel,
-				maxContextTokens,
-				maxTokens,
-				streamIdleTimeoutSec,
-				toolResultTokenLimit,
-				editSimilarityThreshold,
-			});
+			const currentConfig = buildCurrentSnowConfigDraft();
 			createProfile(cleaned, currentConfig);
 			switchProfile(cleaned);
 			loadProfilesAndConfig();
@@ -754,6 +753,7 @@ export function useConfigState() {
 			bridgeWsUrl,
 			bridgeVcpKey,
 			bridgeAccessToken,
+			bridgeToolProfile,
 		});
 		if (validationErrors.length === 0) {
 			const config: Partial<ApiConfig> = {
@@ -766,6 +766,7 @@ export function useConfigState() {
 				bridgeWsUrl,
 				bridgeVcpKey,
 				bridgeAccessToken,
+				bridgeToolProfile,
 				systemPromptId,
 				customHeadersSchemeId,
 				anthropicBeta,
@@ -819,50 +820,7 @@ export function useConfigState() {
 			await updateOpenAiConfig(config);
 
 			try {
-				const fullConfig = buildSnowConfigDraft({
-					baseUrl,
-					apiKey,
-				requestMethod,
-				enableVcpTimeBridge,
-				backendMode,
-				toolTransport,
-				bridgeWsUrl,
-				bridgeVcpKey,
-				bridgeAccessToken,
-					systemPromptId,
-					customHeadersSchemeId,
-					anthropicBeta,
-					anthropicCacheTTL,
-					enableAutoCompress,
-					autoCompressThreshold,
-					showThinking,
-					streamingDisplay,
-					thinking: thinkingEnabled
-						? thinkingMode === 'adaptive'
-							? {type: 'adaptive' as const, effort: thinkingEffort}
-							: {
-									type: 'enabled' as const,
-									budget_tokens: thinkingBudgetTokens,
-							  }
-						: undefined,
-					geminiThinking: geminiThinkingEnabled
-						? {enabled: true, budget: geminiThinkingBudget}
-						: undefined,
-					responsesReasoning: {
-						enabled: responsesReasoningEnabled,
-						effort: responsesReasoningEffort,
-					},
-					responsesVerbosity,
-					responsesFastMode,
-					anthropicSpeed,
-					advancedModel,
-					basicModel,
-					maxContextTokens,
-					maxTokens,
-					streamIdleTimeoutSec,
-					toolResultTokenLimit,
-					editSimilarityThreshold,
-				});
+				const fullConfig = buildCurrentSnowConfigDraft();
 				saveProfile(activeProfile, fullConfig);
 			} catch (err) {
 				console.error('Failed to save profile:', err);
@@ -911,6 +869,8 @@ export function useConfigState() {
 		setBridgeVcpKey,
 		bridgeAccessToken,
 		setBridgeAccessToken,
+		bridgeToolProfile,
+		setBridgeToolProfile,
 		systemPromptId,
 		setSystemPromptId,
 		customHeadersSchemeId,

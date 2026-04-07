@@ -36,6 +36,7 @@ export interface ApiConfig {
 	bridgeWsUrl?: string;
 	bridgeVcpKey?: string;
 	bridgeAccessToken?: string;
+	bridgeToolProfile?: string;
 	advancedModel?: string;
 	basicModel?: string;
 	maxContextTokens?: number;

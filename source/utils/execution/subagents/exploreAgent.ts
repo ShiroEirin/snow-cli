@@ -81,6 +81,10 @@ You are a specialized code exploration agent focused on rapidly understanding co
 - Focus on answering "where" and "how" questions about code`,
 	tools: [
 		'filesystem-read',
+		'readfile',
+		'listdirectory',
+		'listalloweddirectories',
+		'searchcode',
 		'ace-find_definition',
 		'ace-find_references',
 		'ace-semantic_search',

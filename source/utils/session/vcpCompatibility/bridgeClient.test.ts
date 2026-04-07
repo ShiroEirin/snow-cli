@@ -92,25 +92,46 @@ test('executeTool does not dispatch after aborting during connection setup', asy
 
 test('getManifest evicts expired cache entries before reloading', async (t: any) => {
 	const client = new SnowBridgeClient() as any;
-	const connectionKey = client.buildConnectionKey(bridgeConfig);
 	let sendCount = 0;
 
-	client.manifestCache.set(connectionKey, {
-		manifest: {plugins: [{name: 'expired'}]},
-		expiresAt: Date.now() - 1,
-	});
 	client.sendRequest = async () => {
 		sendCount += 1;
 		return {
 			status: 'success',
-			plugins: [{name: 'fresh'}],
+			plugins: [
+				{
+					name: `fresh-${sendCount}`,
+					displayName: `Fresh ${sendCount}`,
+					description: 'Fresh manifest plugin.',
+					bridgeCommands: [],
+				},
+			],
 		};
 	};
 
+	await client.getManifest(bridgeConfig);
+	const cacheKey = Array.from(client.manifestCache.keys())[0];
+	client.manifestCache.set(cacheKey, {
+		...client.manifestCache.get(cacheKey),
+		connectionKey: client.buildConnectionKey(bridgeConfig),
+		manifest: {plugins: [{name: 'expired'}]},
+		expiresAt: Date.now() - 1,
+		refreshAfter: Date.now() - 1,
+	});
+
 	const manifest = await client.getManifest(bridgeConfig);
 
-	t.is(sendCount, 1);
-	t.deepEqual(manifest, {plugins: [{name: 'fresh'}]});
+	t.is(sendCount, 2);
+	t.deepEqual(manifest, {
+		plugins: [
+			{
+				name: 'fresh-2',
+				displayName: 'Fresh 2',
+				description: 'Fresh manifest plugin.',
+				bridgeCommands: [],
+			},
+		],
+	});
 	t.is(client.manifestCache.size, 1);
 	client.disconnect();
 });
@@ -197,6 +218,7 @@ test('getManifest forwards normalized tool filters and caches by filter shape', 
 	t.deepEqual(observedPayloads[0], {
 		toolFilters: {
 			include: [],
+			profileName: '',
 			includeExactToolNames: [],
 			excludeExactToolNames: ['filesystem-read', 'vcp-demo-run'],
 			excludeBridgeToolIds: [],
@@ -205,6 +227,81 @@ test('getManifest forwards normalized tool filters and caches by filter shape', 
 	});
 	t.deepEqual(firstManifest, sharedManifest);
 	t.notDeepEqual(firstManifest, secondManifest);
+	client.disconnect();
+});
+
+test('getManifest forwards profile-aware bridge filters', async (t: any) => {
+	const client = new SnowBridgeClient() as any;
+	const observedPayloads: Array<Record<string, unknown>> = [];
+
+	client.sendRequest = async ({payload}: {payload: Record<string, unknown>}) => {
+		observedPayloads.push(payload);
+		return {
+			status: 'success',
+			plugins: [{name: 'profiled-manifest'}],
+		};
+	};
+
+	await client.getManifest(bridgeConfig, {
+		toolFilters: {
+			profileName: 'writer-mode',
+		},
+	});
+
+	t.deepEqual(observedPayloads[0], {
+		toolFilters: {
+			include: [],
+			profileName: 'writer-mode',
+			includeExactToolNames: [],
+			excludeExactToolNames: [],
+			excludeBridgeToolIds: [],
+			excludePluginNames: [],
+		},
+	});
+	client.disconnect();
+});
+
+test('queueManifestRefresh logs failures and evicts stale cache entries', async (t: any) => {
+	const client = new SnowBridgeClient() as any;
+	const connectionKey = client.buildConnectionKey(bridgeConfig);
+	const manifestCacheKey = JSON.stringify({
+		connectionKey,
+		toolFilters: null,
+	});
+	const warningMessages: string[] = [];
+	const originalWarn = console.warn;
+
+	client.manifestCache.set(manifestCacheKey, {
+		connectionKey,
+		manifest: {plugins: [{name: 'stale-manifest'}]},
+		expiresAt: Date.now() + 30_000,
+		refreshAfter: Date.now() - 1,
+	});
+	client.loadManifest = async () => {
+		throw new Error('refresh timeout');
+	};
+	console.warn = (message?: unknown) => {
+		warningMessages.push(String(message || ''));
+	};
+
+	try {
+		client.queueManifestRefresh({
+			config: bridgeConfig,
+			connectionKey,
+			manifestCacheKey,
+		});
+		await Promise.resolve();
+		await Promise.resolve();
+	} finally {
+		console.warn = originalWarn;
+	}
+
+	t.false(client.manifestCache.has(manifestCacheKey));
+	t.true(
+		warningMessages.some(message =>
+			message.includes('Background manifest refresh failed'),
+		),
+	);
 	client.disconnect();
 });
 
@@ -450,5 +547,84 @@ test('executeTool exposes structured bridge status events', async (t: any) => {
 		},
 	});
 	t.deepEqual(response.statusEvents, observedStatusEvents);
+	client.disconnect();
+});
+
+test('getManifest normalizes metadata sidecars from SnowBridge responses', async (t: any) => {
+	const client = new SnowBridgeClient() as any;
+
+	client.sendRequest = async () => ({
+		status: 'success',
+		revision: 'rev-bridge-1',
+		reloadedAt: '2026-04-04T10:10:00.000Z',
+		plugins: [
+			{
+				name: 'FileOperator',
+				displayName: 'FileOperator',
+				description: 'File tools.',
+				requiresApproval: true,
+				approvalTimeoutMs: 60_000,
+				bridgeCommands: [
+					{
+						commandName: 'ReadFile',
+						description: 'Read file.',
+						parameters: [],
+					},
+				],
+			},
+		],
+	});
+
+	const manifest = await client.getManifest(bridgeConfig);
+
+	t.deepEqual(manifest.metadata, {
+		revision: 'rev-bridge-1',
+		reloadedAt: '2026-04-04T10:10:00.000Z',
+	});
+	t.deepEqual(manifest.plugins[0]?.metadata, {
+		requiresApproval: true,
+		approvalTimeoutMs: 60_000,
+	});
+	client.disconnect();
+});
+
+test('getManifest revalidates metadata-aware cache entries before ttl expiry', async (t: any) => {
+	const client = new SnowBridgeClient() as any;
+	const responses = [
+		{
+			status: 'success',
+			revision: 'rev-1',
+			plugins: [{name: 'rev-1-plugin', displayName: 'rev-1', description: '', bridgeCommands: []}],
+		},
+		{
+			status: 'success',
+			revision: 'rev-2',
+			plugins: [{name: 'rev-2-plugin', displayName: 'rev-2', description: '', bridgeCommands: []}],
+		},
+	];
+	let sendCount = 0;
+
+	client.sendRequest = async () => {
+		const response = responses[Math.min(sendCount, responses.length - 1)];
+		sendCount += 1;
+		return response;
+	};
+
+	const firstManifest = await client.getManifest(bridgeConfig);
+	const cacheKey = Array.from(client.manifestCache.keys())[0];
+	const cachedEntry = client.manifestCache.get(cacheKey);
+	t.truthy(cachedEntry);
+
+	cachedEntry.refreshAfter = Date.now() - 1;
+	const cachedManifest = await client.getManifest(bridgeConfig);
+	await new Promise(resolve => {
+		setTimeout(resolve, 0);
+	});
+	const refreshedManifest = await client.getManifest(bridgeConfig);
+
+	t.is(sendCount, 2);
+	t.is(firstManifest.metadata?.revision, 'rev-1');
+	t.is(cachedManifest.metadata?.revision, 'rev-1');
+	t.is(refreshedManifest.metadata?.revision, 'rev-2');
 	client.disconnect();
 });

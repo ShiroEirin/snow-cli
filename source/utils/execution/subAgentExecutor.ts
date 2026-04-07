@@ -1,3 +1,4 @@
+import {collectAllMCPTools} from './mcpToolsManager.js';
 import {getOpenAiConfig} from '../config/apiConfig.js';
 import {sessionManager} from '../session/sessionManager.js';
 import {unifiedHooksExecutor} from './unifiedHooksExecutor.js';
@@ -23,6 +24,8 @@ import {
 } from './subAgentToolInterceptor.js';
 import {checkAndApproveTools, executeMcpTools} from './subAgentToolApproval.js';
 import {emitSubAgentMessage} from './subAgentTypes.js';
+import {compressionCoordinator} from '../core/compressionCoordinator.js';
+import type {MCPTool} from './mcpToolsManager.js';
 import type {
 	SubAgentExecutionContext,
 	SubAgentMessage,
@@ -91,6 +94,13 @@ export function formatSubAgentUserQuestionResult(
 	});
 }
 
+export function shouldUseSubAgentToolPlane(config: {
+	backendMode?: string;
+	toolTransport?: string;
+}): boolean {
+	return config.backendMode === 'vcp' && config.toolTransport !== 'local';
+}
+
 /**
  * 执行子智能体作为工具
  */
@@ -109,6 +119,9 @@ export async function executeSubAgent(
 ): Promise<SubAgentResult> {
 	const toolPlaneSessionKey =
 		instanceId || `subagent-${agentId}-${Date.now()}`;
+	const rootConfig = getOpenAiConfig();
+	const useDedicatedToolPlane = shouldUseSubAgentToolPlane(rootConfig);
+	let shouldCleanupDedicatedPlane = false;
 
 	try {
 		// 1. Resolve agent
@@ -117,12 +130,30 @@ export async function executeSubAgent(
 			return {success: false, result: '', error: resolveError};
 		}
 
-		// 2. Prepare VCP-aware tool plane, then filter for this sub-agent
-		const preparedToolPlane = await prepareToolPlane({
-			config: getOpenAiConfig(),
-			sessionKey: toolPlaneSessionKey,
-		});
-		const allowedTools = filterAllowedTools(agent, preparedToolPlane.tools);
+		// 2. Filter tools. Only bridge / hybrid sub-agents need a dedicated tool plane.
+		let allowedTools: MCPTool[];
+		let subAgentToolPlaneKey: string | undefined;
+		if (useDedicatedToolPlane) {
+			const preparedToolPlane = await prepareToolPlane({
+				config: rootConfig,
+				sessionKey: toolPlaneSessionKey,
+			});
+			allowedTools = filterAllowedTools(agent, preparedToolPlane.tools);
+			const allowedExecutionBindings = filterToolExecutionBindings(
+				allowedTools.map(tool => tool.function.name),
+				preparedToolPlane.toolPlaneKey,
+			);
+			subAgentToolPlaneKey = rotateToolExecutionBindingsSession({
+				sessionKey: toolPlaneSessionKey,
+				nextToolPlaneKey: `${preparedToolPlane.toolPlaneKey}:allowed`,
+				bindings: allowedExecutionBindings,
+			});
+			shouldCleanupDedicatedPlane = true;
+		} else {
+			const allTools = await collectAllMCPTools();
+			allowedTools = filterAllowedTools(agent, allTools);
+		}
+
 		if (allowedTools.length === 0) {
 			return {
 				success: false,
@@ -131,15 +162,6 @@ export async function executeSubAgent(
 			};
 		}
 		injectBuiltinTools(allowedTools, spawnDepth);
-		const allowedExecutionBindings = filterToolExecutionBindings(
-			allowedTools.map(tool => tool.function.name),
-			preparedToolPlane.toolPlaneKey,
-		);
-		const subAgentToolPlaneKey = rotateToolExecutionBindingsSession({
-			sessionKey: toolPlaneSessionKey,
-			nextToolPlaneKey: `${preparedToolPlane.toolPlaneKey}:allowed`,
-			bindings: allowedExecutionBindings,
-		});
 
 		// 3. Build initial messages
 		const messages = await buildInitialMessages(
@@ -183,6 +205,10 @@ export async function executeSubAgent(
 					error: 'Sub-agent execution aborted',
 				};
 			}
+
+			// Keep sub-agents aligned with upstream loop sequencing when another
+			// participant is compressing, so child turns do not race ahead.
+			await compressionCoordinator.waitUntilFree(ctx.instanceId);
 
 			// Inject pending user / inter-agent messages
 			injectPendingMessages(ctx);
@@ -285,13 +311,17 @@ export async function executeSubAgent(
 			error: error instanceof Error ? error.message : 'Unknown error',
 		};
 	} finally {
-		const [{clearToolExecutionBindingsSession}, {clearBridgeToolSnapshotSession}] =
-			await Promise.all([
+		if (shouldCleanupDedicatedPlane) {
+			const [
+				{clearToolExecutionBindingsSession},
+				{clearBridgeToolSnapshotSession},
+			] = await Promise.all([
 				import('../session/vcpCompatibility/toolExecutionBinding.js'),
 				import('../session/vcpCompatibility/toolSnapshot.js'),
 			]);
-		clearToolExecutionBindingsSession(toolPlaneSessionKey);
-		clearBridgeToolSnapshotSession(toolPlaneSessionKey);
+			clearToolExecutionBindingsSession(toolPlaneSessionKey);
+			clearBridgeToolSnapshotSession(toolPlaneSessionKey);
+		}
 	}
 }
 

@@ -33,7 +33,37 @@ import {
 	shouldAdvanceBridgeLifecycle,
 } from '../../../utils/session/vcpCompatibility/toolLifecycleSideband.js';
 
-function replacePendingToolMessages(
+function findReplaceableToolMessageIndex(
+	existingMessages: Message[],
+	toolCallId: string | undefined,
+): number {
+	if (!toolCallId) {
+		return -1;
+	}
+
+	let fallbackIndex = -1;
+	for (let index = existingMessages.length - 1; index >= 0; index--) {
+		const message = existingMessages[index];
+		if (message?.toolCallId !== toolCallId) {
+			continue;
+		}
+
+		if (
+			message.toolPending === true ||
+			message.messageStatus === 'pending'
+		) {
+			return index;
+		}
+
+		if (fallbackIndex === -1) {
+			fallbackIndex = index;
+		}
+	}
+
+	return fallbackIndex;
+}
+
+export function replacePendingToolMessages(
 	existingMessages: Message[],
 	resultMessages: Message[],
 ): Message[] {
@@ -45,17 +75,10 @@ function replacePendingToolMessages(
 			continue;
 		}
 
-		let pendingIndex = -1;
-		for (let index = nextMessages.length - 1; index >= 0; index--) {
-			const message = nextMessages[index];
-			if (
-				message?.toolCallId === resultMessage.toolCallId &&
-				message.toolPending === true
-			) {
-				pendingIndex = index;
-				break;
-			}
-		}
+		const pendingIndex = findReplaceableToolMessageIndex(
+			nextMessages,
+			resultMessage.toolCallId,
+		);
 
 		if (pendingIndex === -1) {
 			nextMessages.push(resultMessage);
@@ -72,32 +95,43 @@ function replacePendingToolMessages(
 	return nextMessages;
 }
 
-function applyBridgeToolStatusUpdate(
+export function applyBridgeToolStatusUpdate(
 	existingMessages: Message[],
 	update: BridgeToolStatusUpdate,
 ): Message[] {
 	let changed = false;
 	const nextMessages = existingMessages.map(message => {
-		if (
-			message.toolCallId !== update.toolCallId ||
-			message.toolPending !== true
-		) {
+		if (message.toolCallId !== update.toolCallId) {
 			return message;
 		}
 
-		const nextSideband = buildToolLifecycleSideband({
-			toolName: message.toolName || update.toolName,
-			messageStatus: 'pending',
-			detail: update.detail,
-			fallbackContent: message.content,
-		});
 		const nextLifecycleState = deriveBridgeLifecycleState(update);
 		const currentLifecycleState = message.toolLifecycleState;
 		const isSameLifecycleState =
 			currentLifecycleState === nextLifecycleState;
 		const canAdvance = shouldAdvanceBridgeLifecycle(currentLifecycleState, update);
+		if (!canAdvance && !isSameLifecycleState) {
+			return message;
+		}
 
-		if ((!canAdvance && !isSameLifecycleState) || message.toolStatusDetail === nextSideband) {
+		const nextMessageStatus: Message['messageStatus'] =
+			update.isTerminal === true
+				? nextLifecycleState === 'error' || nextLifecycleState === 'cancelled'
+					? 'error'
+					: 'success'
+				: 'pending';
+		const nextToolPending = update.isTerminal !== true;
+		const nextSideband = buildToolLifecycleSideband({
+			toolName: message.toolName || update.toolName,
+			messageStatus: nextMessageStatus,
+			detail: update.detail,
+		});
+		if (
+			message.toolStatusDetail === nextSideband &&
+			message.messageStatus === nextMessageStatus &&
+			message.toolPending === nextToolPending &&
+			isSameLifecycleState
+		) {
 			return message;
 		}
 
@@ -105,6 +139,8 @@ function applyBridgeToolStatusUpdate(
 		return {
 			...message,
 			toolName: message.toolName || update.toolName,
+			messageStatus: nextMessageStatus,
+			toolPending: nextToolPending,
 			toolLifecycleState: nextLifecycleState,
 			toolStatusDetail: nextSideband,
 		};

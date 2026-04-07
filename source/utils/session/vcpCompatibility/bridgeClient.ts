@@ -1,7 +1,10 @@
 import {randomUUID} from 'node:crypto';
 import {WebSocket} from 'ws';
 import type {ApiConfig} from '../../config/apiConfig.js';
-import type {BridgeManifestResponse} from './bridgeManifestTranslator.js';
+import {
+	normalizeBridgeManifestResponse,
+	type BridgeManifestResponse,
+} from './bridgeManifestTranslator.js';
 
 type BridgeEnvelope<T = unknown> = {
 	type: string;
@@ -44,6 +47,7 @@ export type BridgeStatusEvent = {
 
 export type BridgeManifestToolFilters = {
 	include?: string[];
+	profileName?: string;
 	includeExactToolNames?: string[];
 	excludeExactToolNames?: string[];
 	excludeBridgeToolIds?: string[];
@@ -71,6 +75,7 @@ export type BridgeStatusListener = (event: BridgeStatusEvent) => void;
 const BRIDGE_EXECUTE_TIMEOUT_MS = 120_000;
 const BRIDGE_ASYNC_EXECUTE_TIMEOUT_MS = 10 * 60 * 1000;
 const BRIDGE_MANIFEST_CACHE_MS = 30_000;
+const BRIDGE_MANIFEST_METADATA_REVALIDATE_MS = 5_000;
 const BRIDGE_MANIFEST_CACHE_MAX_ENTRIES = 100;
 const SNOW_BRIDGE_CHANNEL = 'bridge-ws';
 
@@ -78,6 +83,7 @@ type BridgeManifestCacheEntry = {
 	connectionKey: string;
 	manifest: BridgeManifestResponse;
 	expiresAt: number;
+	refreshAfter: number;
 };
 
 type BridgePendingManifestRequest = {
@@ -104,6 +110,7 @@ function normalizeManifestToolFilters(
 
 	const normalized = {
 		include: normalizeUniqueStrings(toolFilters.include || []),
+		profileName: String(toolFilters.profileName || '').trim(),
 		includeExactToolNames: normalizeUniqueStrings(
 			toolFilters.includeExactToolNames || [],
 		),
@@ -118,7 +125,12 @@ function normalizeManifestToolFilters(
 		),
 	};
 
-	if (Object.values(normalized).every(values => values.length === 0)) {
+	if (
+		!normalized.profileName &&
+		Object.entries(normalized)
+			.filter(([key]) => key !== 'profileName')
+			.every(([, values]) => Array.isArray(values) && values.length === 0)
+	) {
 		return undefined;
 	}
 
@@ -133,6 +145,17 @@ function buildManifestCacheKey(options: {
 		connectionKey: options.connectionKey,
 		toolFilters: options.toolFilters || null,
 	});
+}
+
+function shouldUseMetadataRevalidation(
+	manifest: BridgeManifestResponse,
+): boolean {
+	return Boolean(
+		manifest.metadata?.revision ||
+			manifest.metadata?.reloadedAt ||
+			manifest.metadata?.requiresApproval !== undefined ||
+			manifest.metadata?.approvalTimeoutMs !== undefined,
+	);
 }
 
 function normalizeBridgeStatusEvent(
@@ -182,6 +205,14 @@ function normalizeBridgeStatusEvent(
 			: {}),
 		rawData: {...data},
 	};
+}
+
+function formatBridgeErrorMessage(error: unknown): string {
+	if (error instanceof Error && error.message) {
+		return error.message;
+	}
+
+	return String(error || 'unknown error');
 }
 
 export class SnowBridgeClient {
@@ -332,6 +363,138 @@ export class SnowBridgeClient {
 
 			this.manifestCache.delete(oldestConnectionKey);
 		}
+	}
+
+	private cacheManifest(options: {
+		manifestCacheKey: string;
+		connectionKey: string;
+		manifest: BridgeManifestResponse;
+		now?: number;
+	}): BridgeManifestResponse {
+		const now = options.now ?? Date.now();
+		const refreshInterval = shouldUseMetadataRevalidation(options.manifest)
+			? BRIDGE_MANIFEST_METADATA_REVALIDATE_MS
+			: BRIDGE_MANIFEST_CACHE_MS;
+
+		this.touchManifestCacheEntry(options.manifestCacheKey, {
+			connectionKey: options.connectionKey,
+			manifest: options.manifest,
+			expiresAt: now + BRIDGE_MANIFEST_CACHE_MS,
+			refreshAfter: now + refreshInterval,
+		});
+		this.pruneManifestCache(now);
+		return options.manifest;
+	}
+
+	private loadManifest(options: {
+		config: Pick<
+			ApiConfig,
+			| 'baseUrl'
+			| 'bridgeWsUrl'
+			| 'bridgeVcpKey'
+			| 'bridgeAccessToken'
+			| 'toolTransport'
+		>;
+		connectionKey: string;
+		manifestCacheKey: string;
+		toolFilters?: BridgeManifestToolFilters;
+	}): Promise<BridgeManifestResponse> {
+		const manifestPromise = this.sendRequest<{
+			status: string;
+			plugins?: BridgeManifestResponse['plugins'];
+			bridgeVersion?: string;
+			vcpVersion?: string;
+			capabilities?: BridgeManifestResponse['capabilities'];
+			metadata?: BridgeManifestResponse['metadata'];
+			sidecar?: BridgeManifestResponse['sidecar'];
+			revision?: string;
+			reloadedAt?: string;
+			requiresApproval?: boolean;
+			approvalTimeoutMs?: number;
+			error?: {message?: string};
+		}>({
+			config: options.config,
+			type: 'get_vcp_manifests',
+			expectedType: 'vcp_manifest_response',
+			payload: {
+				...(options.toolFilters ? {toolFilters: options.toolFilters} : {}),
+			},
+		})
+			.then(response => {
+				if (response.status !== 'success') {
+					throw new Error(
+						response.error?.message || 'Failed to load SnowBridge manifest.',
+					);
+				}
+
+				const manifest = normalizeBridgeManifestResponse({
+					...(response.bridgeVersion !== undefined
+						? {bridgeVersion: response.bridgeVersion}
+						: {}),
+					...(response.vcpVersion !== undefined
+						? {vcpVersion: response.vcpVersion}
+						: {}),
+					...(response.capabilities !== undefined
+						? {capabilities: response.capabilities}
+						: {}),
+					plugins: response.plugins || [],
+					...(response.metadata !== undefined
+						? {metadata: response.metadata}
+						: {}),
+					...(response.sidecar !== undefined ? {sidecar: response.sidecar} : {}),
+					...(response.revision !== undefined
+						? {revision: response.revision}
+						: {}),
+					...(response.reloadedAt !== undefined
+						? {reloadedAt: response.reloadedAt}
+						: {}),
+					...(response.requiresApproval !== undefined
+						? {requiresApproval: response.requiresApproval}
+						: {}),
+					...(response.approvalTimeoutMs !== undefined
+						? {approvalTimeoutMs: response.approvalTimeoutMs}
+						: {}),
+				});
+				return this.cacheManifest({
+					manifestCacheKey: options.manifestCacheKey,
+					connectionKey: options.connectionKey,
+					manifest,
+				});
+			})
+			.finally(() => {
+				this.pendingManifestRequests.delete(options.manifestCacheKey);
+			});
+
+		this.pendingManifestRequests.set(options.manifestCacheKey, {
+			connectionKey: options.connectionKey,
+			promise: manifestPromise,
+		});
+		return manifestPromise;
+	}
+
+	private queueManifestRefresh(options: {
+		config: Pick<
+			ApiConfig,
+			| 'baseUrl'
+			| 'bridgeWsUrl'
+			| 'bridgeVcpKey'
+			| 'bridgeAccessToken'
+			| 'toolTransport'
+		>;
+		connectionKey: string;
+		manifestCacheKey: string;
+		toolFilters?: BridgeManifestToolFilters;
+	}): void {
+		if (this.pendingManifestRequests.has(options.manifestCacheKey)) {
+			return;
+		}
+
+		void this.loadManifest(options).catch(error => {
+			this.manifestCache.delete(options.manifestCacheKey);
+			console.warn(
+				`[SnowBridge] Background manifest refresh failed for ${options.connectionKey}: ${formatBridgeErrorMessage(error)}`,
+			);
+		});
 	}
 
 	private rejectAllPending(error: Error): void {
@@ -601,6 +764,14 @@ export class SnowBridgeClient {
 		const cachedManifest = this.manifestCache.get(manifestCacheKey);
 		if (cachedManifest && cachedManifest.expiresAt > now) {
 			this.touchManifestCacheEntry(manifestCacheKey, cachedManifest);
+			if (cachedManifest.refreshAfter <= now) {
+				this.queueManifestRefresh({
+					config,
+					connectionKey,
+					manifestCacheKey,
+					toolFilters,
+				});
+			}
 			return cachedManifest.manifest;
 		}
 		if (cachedManifest) {
@@ -612,45 +783,12 @@ export class SnowBridgeClient {
 			return pendingManifest.promise;
 		}
 
-		const manifestPromise = this.sendRequest<{
-			status: string;
-			plugins?: BridgeManifestResponse['plugins'];
-			error?: {message?: string};
-		}>({
+		return this.loadManifest({
 			config,
-			type: 'get_vcp_manifests',
-			expectedType: 'vcp_manifest_response',
-			payload: {
-				...(toolFilters ? {toolFilters} : {}),
-			},
-		})
-			.then(response => {
-				if (response.status !== 'success') {
-					throw new Error(
-						response.error?.message || 'Failed to load SnowBridge manifest.',
-					);
-				}
-
-				const manifest = {
-					plugins: response.plugins || [],
-				};
-				this.touchManifestCacheEntry(manifestCacheKey, {
-					connectionKey,
-					manifest,
-					expiresAt: Date.now() + BRIDGE_MANIFEST_CACHE_MS,
-				});
-				this.pruneManifestCache();
-				return manifest;
-			})
-			.finally(() => {
-				this.pendingManifestRequests.delete(manifestCacheKey);
-			});
-
-		this.pendingManifestRequests.set(manifestCacheKey, {
 			connectionKey,
-			promise: manifestPromise,
+			manifestCacheKey,
+			toolFilters,
 		});
-		return manifestPromise;
 	}
 
 	async executeTool(options: {

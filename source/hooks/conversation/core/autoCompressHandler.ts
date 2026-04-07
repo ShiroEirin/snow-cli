@@ -8,6 +8,7 @@ import {
 	shouldAutoCompress,
 	performAutoCompression,
 } from '../../../utils/core/autoCompress.js';
+import {compressionCoordinator} from '../../../utils/core/compressionCoordinator.js';
 import {sessionManager} from '../../../utils/session/sessionManager.js';
 
 export type AutoCompressOptions = {
@@ -55,6 +56,8 @@ export async function handleAutoCompression(
 	}
 
 	options.setIsAutoCompressing?.(true);
+
+	await compressionCoordinator.acquireLock('main');
 
 	try {
 		const compressingMessage: Message = {
@@ -126,6 +129,8 @@ export async function handleAutoCompression(
 			step: 'failed',
 			message: error instanceof Error ? error.message : 'Unknown error',
 		});
+	} finally {
+		compressionCoordinator.releaseLock('main');
 	}
 
 	options.setIsAutoCompressing?.(false);

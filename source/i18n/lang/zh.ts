@@ -170,6 +170,7 @@ export const zh: TranslationKeys = {
 		bridgeWsUrl: 'SnowBridge WebSocket 地址（可覆盖 Base URL 推导）:',
 		bridgeVcpKey: 'SnowBridge VCP_Key（配合 Base URL）:',
 		bridgeAccessToken: 'SnowBridge Access Token（可选）:',
+		bridgeToolProfile: 'SnowBridge Tool Profile（可选）:',
 		anthropicBeta: 'Anthropic Beta:',
 		anthropicCacheTTL: 'Anthropic 缓存时效:',
 		anthropicCacheTTL5m: '5分钟（默认）',

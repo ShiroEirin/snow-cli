@@ -185,6 +185,7 @@ export const en: TranslationKeys = {
 		bridgeWsUrl: 'SnowBridge WebSocket URL (overrides Base URL derivation):',
 		bridgeVcpKey: 'SnowBridge VCP_Key (paired with Base URL):',
 		bridgeAccessToken: 'SnowBridge Access Token (optional):',
+		bridgeToolProfile: 'SnowBridge Tool Profile (optional):',
 		anthropicBeta: 'Anthropic Beta:',
 		anthropicCacheTTL: 'Anthropic Cache TTL:',
 		anthropicCacheTTL5m: '5 minutes (default)',

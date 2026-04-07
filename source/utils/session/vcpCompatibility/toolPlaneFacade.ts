@@ -46,26 +46,30 @@ const EMPTY_LOCAL_TOOL_PLANE: LocalToolPlane = {
 };
 
 export function buildBridgeManifestToolFilters(options: {
+	config?: Pick<ApiConfig, 'bridgeToolProfile'>;
 	transport: ReturnType<typeof resolveToolTransport>;
 	localTools: MCPTool[];
 }): BridgeManifestToolFilters | undefined {
-	if (options.transport !== 'hybrid' || options.localTools.length === 0) {
+	const profileName = String(options.config?.bridgeToolProfile || '').trim();
+	const excludeExactToolNames =
+		options.transport === 'hybrid' && options.localTools.length > 0
+			? Array.from(
+					new Set(
+						options.localTools
+							.map(tool => tool.function.name.trim())
+							.filter(Boolean),
+					),
+			  ).sort((left, right) => left.localeCompare(right))
+			: [];
+
+	if (!profileName && excludeExactToolNames.length === 0) {
 		return undefined;
 	}
 
-	const excludeExactToolNames = Array.from(
-		new Set(
-			options.localTools
-				.map(tool => tool.function.name.trim())
-				.filter(Boolean),
-		),
-	).sort((left, right) => left.localeCompare(right));
-
-	return excludeExactToolNames.length > 0
-		? {
-				excludeExactToolNames,
-		  }
-		: undefined;
+	return {
+		...(profileName ? {profileName} : {}),
+		excludeExactToolNames,
+	};
 }
 
 export function buildPreparedToolPlaneRuntimeState(options: {
@@ -113,6 +117,7 @@ export async function prepareToolPlane(options: {
 				.then(localTools =>
 					snowBridgeClient.getManifest(options.config, {
 						toolFilters: buildBridgeManifestToolFilters({
+							config: options.config,
 							transport,
 							localTools,
 						}),

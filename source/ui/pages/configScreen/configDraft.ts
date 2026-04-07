@@ -11,6 +11,7 @@ export type ConfigDraftInput = Pick<
 	| 'bridgeWsUrl'
 	| 'bridgeVcpKey'
 	| 'bridgeAccessToken'
+	| 'bridgeToolProfile'
 	| 'systemPromptId'
 	| 'customHeadersSchemeId'
 	| 'anthropicBeta'

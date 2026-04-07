@@ -7,6 +7,7 @@ import MarkdownRenderer from '../common/MarkdownRenderer.js';
 import DiffViewer from '../tools/DiffViewer.js';
 import ToolResultPreview from '../tools/ToolResultPreview.js';
 import {HookErrorDisplay} from '../special/HookErrorDisplay.js';
+import StructuredSidebandPanel from './StructuredSidebandPanel.js';
 import {maskSkillInjectedText} from '../../../utils/ui/skillMask.js';
 import {toCodePoints, visualWidth} from '../../../utils/core/textUtils.js';
 import {
@@ -34,6 +35,8 @@ type Props = {
 	filteredMessages: Message[];
 	terminalWidth: number;
 	showThinking?: boolean;
+	thinkingPanelExpanded?: boolean;
+	toolPanelExpanded?: boolean;
 };
 
 export default function MessageRenderer({
@@ -42,6 +45,8 @@ export default function MessageRenderer({
 	filteredMessages,
 	terminalWidth,
 	showThinking = true,
+	thinkingPanelExpanded = true,
+	toolPanelExpanded = true,
 }: Props) {
 	const {theme} = useTheme();
 	const {t} = useI18n();
@@ -94,6 +99,21 @@ export default function MessageRenderer({
 	const getDisplayContent = (content: string): string => {
 		// 只做视觉隐藏：保留原始 message.content 用于请求体/持久化。
 		return maskSkillInjectedText(removeAnsiCodes(content || '')).displayText;
+	};
+
+	const getCollapsedSummary = (content: string): string | undefined => {
+		const firstMeaningfulLine = content
+			.split('\n')
+			.map(line => line.trim())
+			.find(Boolean);
+
+		if (!firstMeaningfulLine) {
+			return undefined;
+		}
+
+		return firstMeaningfulLine.length > 72
+			? `${firstMeaningfulLine.slice(0, 69)}...`
+			: firstMeaningfulLine;
 	};
 
 	const renderAssistantContent = (content: string): React.ReactNode => {
@@ -352,6 +372,110 @@ export default function MessageRenderer({
 		}
 	}
 
+	const toolSidebandLines = toolSideband
+		? toolSideband.split('\n').map(line => removeAnsiCodes(line || ''))
+		: [];
+	const toolSidebandTitle = toolSidebandLines[0] || '';
+	const toolSidebandDetailLines = toolSidebandLines.slice(1);
+	const shouldRenderToolPreview =
+		message.messageStatus === 'success' &&
+		!!message.toolResult &&
+		!(
+			message.toolCall &&
+			(message.toolCall.arguments?.oldContent ||
+				message.toolCall.arguments?.batchResults)
+		);
+
+	const renderToolPreview = (): React.ReactNode => {
+		if (!shouldRenderToolPreview) {
+			return null;
+		}
+
+		const resolvedToolName =
+			message.toolName ||
+			(message.content || '')
+				.replace(/^✓\s*/, '')
+				.replace(/^⚇✓\s*/, '')
+				.replace(/.*⚇✓\s*/, '')
+				.replace(/\x1b\[[0-9;]*m/g, '')
+				.split('\n')[0]
+				?.trim() ||
+			'';
+		const previewResult = message.toolResultPreview ?? message.toolResult ?? '';
+
+		return (
+			<ToolResultPreview
+				toolName={resolvedToolName}
+				result={previewResult}
+				maxLines={5}
+				isSubAgentInternal={
+					message.role === 'subagent' || message.subAgentInternal === true
+				}
+			/>
+		);
+	};
+
+	const renderToolSidebandPanel = (): React.ReactNode => {
+		if (!toolSidebandTitle) {
+			return null;
+		}
+
+		const collapsedSummary =
+			getCollapsedSummary(toolSidebandDetailLines.join('\n')) ||
+			(shouldRenderToolPreview ? 'Result preview hidden' : undefined);
+
+		return (
+			<StructuredSidebandPanel
+				title={toolSidebandTitle}
+				expanded={toolPanelExpanded}
+				color={toolStatusColor}
+				summary={collapsedSummary}
+			>
+				{toolSidebandDetailLines.length > 0 && (
+					<Box flexDirection="column" marginLeft={2}>
+						{toolSidebandDetailLines.map((line, lineIndex) => (
+							<Text
+								key={`tool-sideband-line-${lineIndex}`}
+								color={theme.colors.menuSecondary}
+							>
+								{line}
+							</Text>
+						))}
+					</Box>
+				)}
+				{renderToolPreview()}
+			</StructuredSidebandPanel>
+		);
+	};
+
+	const renderThinkingPanel = (): React.ReactNode => {
+		if (!message.thinking || !showThinking) {
+			return null;
+		}
+
+		const cleanedThinking = cleanThinkingContent(message.thinking);
+		if (!cleanedThinking) {
+			return null;
+		}
+
+		return (
+			<Box flexDirection="column" marginBottom={message.content ? 1 : 0}>
+				<StructuredSidebandPanel
+					title="Thinking"
+					expanded={thinkingPanelExpanded}
+					color={theme.colors.menuSecondary}
+					summary={getCollapsedSummary(cleanedThinking)}
+				>
+					<Box marginLeft={2}>
+						<Text color={theme.colors.menuSecondary} dimColor italic>
+							{cleanedThinking}
+						</Text>
+					</Box>
+				</StructuredSidebandPanel>
+			</Box>
+		);
+	};
+
 	return (
 		<Box
 			key={`msg-${index}`}
@@ -495,24 +619,7 @@ export default function MessageRenderer({
 												message.subAgentContent === true;
 
 											if (toolSideband) {
-												const lines = toolSideband.split('\n');
-												const titleLine = lines[0] || '';
-												const treeLines = lines.slice(1);
-
-												return (
-													<>
-														<Text color={toolStatusColor}>
-															{removeAnsiCodes(titleLine)}
-														</Text>
-														{treeLines.length > 0 && (
-															<Text color={theme.colors.menuSecondary}>
-																{treeLines
-																	.map(line => removeAnsiCodes(line || ''))
-																	.join('\n')}
-															</Text>
-														)}
-													</>
-												);
+												return renderToolSidebandPanel();
 											}
 
 											if (
@@ -578,20 +685,7 @@ export default function MessageRenderer({
 
 											return (
 												<>
-													{message.thinking && showThinking && (
-														<Box
-															flexDirection="column"
-															marginBottom={message.content ? 1 : 0}
-														>
-															<Text
-																color={theme.colors.menuSecondary}
-																dimColor
-																italic
-															>
-																{cleanThinkingContent(message.thinking)}
-															</Text>
-														</Box>
-													)}
+													{renderThinkingPanel()}
 													{message.role === 'user' ? (
 														<Box
 															flexDirection="column"
@@ -741,40 +835,7 @@ export default function MessageRenderer({
 											</Box>
 										)}
 									{/* Show tool result preview for successful tool executions */}
-									{message.messageStatus === 'success' &&
-										message.toolResult &&
-										// 只在没有 diff 数据时显示预览（有 diff 的工具会用 DiffViewer 显示）
-										!(
-											message.toolCall &&
-											(message.toolCall.arguments?.oldContent ||
-												message.toolCall.arguments?.batchResults)
-										) &&
-										(() => {
-											const resolvedToolName =
-												message.toolName ||
-												(message.content || '')
-													.replace(/^✓\s*/, '')
-													.replace(/^⚇✓\s*/, '')
-													.replace(/.*⚇✓\s*/, '')
-													.replace(/\x1b\[[0-9;]*m/g, '')
-													.split('\n')[0]
-													?.trim() ||
-												'';
-											const previewResult =
-												message.toolResultPreview ?? message.toolResult;
-
-											return (
-												<ToolResultPreview
-													toolName={resolvedToolName}
-													result={previewResult}
-													maxLines={5}
-													isSubAgentInternal={
-														message.role === 'subagent' ||
-														message.subAgentInternal === true
-													}
-												/>
-											);
-										})()}
+									{!toolSideband && renderToolPreview()}
 
 									{message.files && message.files.length > 0 && (
 										<Box flexDirection="column">

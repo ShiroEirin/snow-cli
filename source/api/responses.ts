@@ -2,8 +2,8 @@ import {
 	getOpenAiConfig,
 	getCustomSystemPromptForConfig,
 	getCustomHeadersForConfig,
+	type ApiConfig,
 } from '../utils/config/apiConfig.js';
-import {getSystemPromptForMode} from '../prompt/systemPrompt.js';
 import {
 	withRetryGenerator,
 	parseJsonWithFix,
@@ -21,6 +21,7 @@ import type {
 import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {getVersionHeader} from '../utils/core/version.js';
+import {resolveBuiltinSystemPrompt} from '../utils/session/vcpCompatibility/systemPromptPolicy.js';
 export interface ResponseOptions {
 	model: string;
 	messages: ChatMessage[];
@@ -192,6 +193,7 @@ function toResponseImageUrl(image: {data: string; mimeType?: string}): string {
 }
 
 function convertToResponseInput(
+	config: Pick<ApiConfig, 'backendMode' | 'toolTransport'>,
 	messages: ChatMessage[],
 	includeBuiltinSystemPrompt: boolean = true,
 	customSystemPromptOverride?: string[],
@@ -339,6 +341,12 @@ function convertToResponseInput(
 		// 有自定义系统提示词：拼接多条作为 instructions
 		systemInstructions = customSystemPrompts.join('\n\n');
 		if (includeBuiltinSystemPrompt) {
+			const builtinSystemPrompt = resolveBuiltinSystemPrompt(config, {
+				planMode,
+				vulnerabilityHuntingMode,
+				toolSearchDisabled,
+				teamMode,
+			});
 			// 默认系统提示词作为第一条用户消息
 			result.unshift({
 				type: 'message',
@@ -346,27 +354,19 @@ function convertToResponseInput(
 				content: [
 					{
 						type: 'input_text',
-						text:
-							'<environment_context>' +
-							getSystemPromptForMode(
-								planMode,
-								vulnerabilityHuntingMode,
-								toolSearchDisabled,
-								teamMode,
-							) +
-							'</environment_context>',
+						text: `<environment_context>${builtinSystemPrompt}</environment_context>`,
 					},
 				],
 			});
 		}
 	} else if (includeBuiltinSystemPrompt) {
 		// 没有自定义系统提示词，但需要添加默认系统提示词
-		systemInstructions = getSystemPromptForMode(
+		systemInstructions = resolveBuiltinSystemPrompt(config, {
 			planMode,
 			vulnerabilityHuntingMode,
 			toolSearchDisabled,
 			teamMode,
-		);
+		});
 	} else {
 		// 既没有自定义系统提示词，也不需要添加默认系统提示词
 		systemInstructions = 'You are a helpful assistant.';
@@ -553,6 +553,7 @@ export async function* createStreamingResponse(
 
 	// 提取系统提示词和转换后的消息
 	const {input: requestInput, systemInstructions} = convertToResponseInput(
+		config,
 		options.messages,
 		options.includeBuiltinSystemPrompt !== false,
 		customSystemPromptContent,

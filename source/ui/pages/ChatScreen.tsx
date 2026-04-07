@@ -115,6 +115,10 @@ export default function ChatScreen({
 		setTeamMode,
 		simpleMode,
 		showThinking,
+		thinkingPanelExpanded,
+		setThinkingPanelExpanded,
+		toolPanelExpanded,
+		setToolPanelExpanded,
 	} = useChatScreenModes({enableYolo, enablePlan});
 	const streamingState = useStreamingState();
 	const vscodeState = useVSCodeState();
@@ -347,6 +351,8 @@ export default function ChatScreen({
 		panelState,
 		handleEscKey,
 		btwPrompt,
+		setThinkingPanelExpanded,
+		setToolPanelExpanded,
 	});
 
 	const getFilteredProfiles = () => {
@@ -460,6 +466,8 @@ export default function ChatScreen({
 				simpleMode={simpleMode}
 				messages={messages}
 				showThinking={showThinking}
+				thinkingPanelExpanded={thinkingPanelExpanded}
+				toolPanelExpanded={toolPanelExpanded}
 				pendingMessages={pendingMessages}
 				pendingToolConfirmation={pendingToolConfirmation}
 				pendingUserQuestion={pendingUserQuestion}
@@ -500,17 +508,17 @@ export default function ChatScreen({
 
 			{shouldShowFooter && (
 				<ChatFooter
-				onSubmit={handleMessageSubmit}
-				onCommand={handleCommandExecution}
-				onHistorySelect={handleHistorySelect}
-				onSwitchProfile={handleSwitchProfile}
-				handleProfileSelect={handleProfileSelect}
-				handleHistorySelect={handleHistorySelect}
-				showReviewCommitPanel={panelState.showReviewCommitPanel}
-				setShowReviewCommitPanel={panelState.setShowReviewCommitPanel}
-				onReviewCommitConfirm={handleReviewCommitConfirm}
-				btwPrompt={btwPrompt}
-				onBtwClose={() => setBtwPrompt(null)}
+					onSubmit={handleMessageSubmit}
+					onCommand={handleCommandExecution}
+					onHistorySelect={handleHistorySelect}
+					onSwitchProfile={handleSwitchProfile}
+					handleProfileSelect={handleProfileSelect}
+					handleHistorySelect={handleHistorySelect}
+					showReviewCommitPanel={panelState.showReviewCommitPanel}
+					setShowReviewCommitPanel={panelState.setShowReviewCommitPanel}
+					onReviewCommitConfirm={handleReviewCommitConfirm}
+					btwPrompt={btwPrompt}
+					onBtwClose={() => setBtwPrompt(null)}
 					disabled={
 						!!pendingToolConfirmation ||
 						!!bashSensitiveCommand ||

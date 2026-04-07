@@ -7,6 +7,7 @@
     "toolTransport": "bridge",
     "bridgeVcpKey": "123456",
     "bridgeAccessToken": "",
+    "bridgeToolProfile": "snow-blackbox-searchonly",
     "advancedModel": "glm-5",
     "basicModel": "glm-5",
     "maxContextTokens": 256000,

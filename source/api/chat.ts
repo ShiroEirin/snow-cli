@@ -3,7 +3,6 @@ import {
 	getCustomHeadersForConfig,
 	getCustomSystemPromptForConfig,
 } from '../utils/config/apiConfig.js';
-import {getSystemPromptForMode} from '../prompt/systemPrompt.js';
 import {
 	withRetryGenerator,
 	parseJsonWithFix,
@@ -12,6 +11,7 @@ import {
 	createIdleTimeoutGuard,
 	StreamIdleTimeoutError,
 } from '../utils/core/streamGuards.js';
+import logger from '../utils/core/logger.js';
 import type {
 	ChatMessage,
 	ChatCompletionTool,
@@ -23,6 +23,7 @@ import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {getVersionHeader} from '../utils/core/version.js';
 import {resolveVcpRequestHeaders} from '../utils/session/vcpCompatibility/mode.js';
+import {resolveBuiltinSystemPrompt} from '../utils/session/vcpCompatibility/systemPromptPolicy.js';
 
 export type {
 	ChatMessage,
@@ -190,76 +191,44 @@ function getNextStreamingToolCallIndex(
 	return Math.max(...existingIndices) + 1;
 }
 
-function getStreamingToolCallFieldMatchScore(
-	currentValue: string,
-	incomingValue?: string,
-): number {
-	const nextFragment = incomingValue || '';
-	if (!currentValue || !nextFragment) {
-		return 0;
-	}
-
-	if (nextFragment === currentValue) {
-		return 5;
-	}
-
-	if (nextFragment.startsWith(currentValue) || currentValue.startsWith(nextFragment)) {
-		return 4;
-	}
-
-	if (currentValue.endsWith(nextFragment) || nextFragment.endsWith(currentValue)) {
-		return 3;
-	}
-
-	const overlapLength = getStreamingToolCallOverlap(currentValue, nextFragment);
-	if (overlapLength > 0) {
-		return 2;
-	}
-
-	return 0;
-}
-
-function inferStreamingToolCallIndex(
+function getSingleBufferedToolCallIndex(
 	toolCallsBuffer: Record<number, StreamingToolCallBufferEntry>,
-	deltaCall: StreamingToolCallDelta,
 ): number | undefined {
-	let bestMatch: {index: number; score: number} | undefined;
-	let hasTie = false;
-
-	for (const [rawIndex, toolCall] of Object.entries(toolCallsBuffer)) {
-		const index = Number(rawIndex);
-		let score = 0;
-
-		score +=
-			getStreamingToolCallFieldMatchScore(
-				toolCall.function.name,
-				deltaCall.function?.name,
-			) * 3;
-		score += getStreamingToolCallFieldMatchScore(
-			toolCall.function.arguments,
-			deltaCall.function?.arguments,
-		);
-
-		if (score === 0) {
-			continue;
-		}
-
-		if (!bestMatch || score > bestMatch.score) {
-			bestMatch = {index, score};
-			hasTie = false;
-			continue;
-		}
-
-		if (score === bestMatch.score) {
-			hasTie = true;
-		}
-	}
-
-	if (!bestMatch || hasTie) {
+	const indices = Object.keys(toolCallsBuffer).map(Number);
+	if (indices.length !== 1) {
 		return undefined;
 	}
 
-	return bestMatch.index;
+	return indices[0];
+}
+
+function hasStreamingToolCallIdentity(
+	toolCall?: StreamingToolCallBufferEntry,
+): boolean {
+	if (!toolCall) {
+		return false;
+	}
+
+	return Boolean(toolCall.id || toolCall.function.name);
+}
+
+function findUniqueStreamingToolCallIndexByName(
+	toolCallsBuffer: Record<number, StreamingToolCallBufferEntry>,
+	toolName?: string,
+): number | undefined {
+	if (!toolName) {
+		return undefined;
+	}
+
+	const matchingIndices = Object.entries(toolCallsBuffer)
+		.filter(([, toolCall]) => toolCall.function.name === toolName)
+		.map(([index]) => Number(index));
+
+	if (matchingIndices.length !== 1) {
+		return undefined;
+	}
+
+	return matchingIndices[0];
 }
 
 function resolveStreamingToolCallIndex(
@@ -268,7 +237,7 @@ function resolveStreamingToolCallIndex(
 	deltaCall: StreamingToolCallDelta,
 	deltaCallPosition: number,
 	deltaToolCallCount: number,
-): number {
+): number | undefined {
 	if (typeof deltaCall.index === 'number') {
 		if (deltaCall.id) {
 			toolCallIndexById.set(deltaCall.id, deltaCall.index);
@@ -286,32 +255,65 @@ function resolveStreamingToolCallIndex(
 	if (deltaToolCallCount > 1) {
 		const orderedIndex = deltaCallPosition;
 		const existingOrderedEntry = toolCallsBuffer[orderedIndex];
-		if (
-			!existingOrderedEntry ||
-			!existingOrderedEntry.id ||
-			!deltaCall.id ||
-			existingOrderedEntry.id === deltaCall.id
-		) {
+		const uniqueNameIndex = findUniqueStreamingToolCallIndexByName(
+			toolCallsBuffer,
+			deltaCall.function?.name,
+		);
+		if (!existingOrderedEntry) {
+			if (!deltaCall.id && !deltaCall.function?.name) {
+				return undefined;
+			}
 			if (deltaCall.id) {
 				toolCallIndexById.set(deltaCall.id, orderedIndex);
 			}
 			return orderedIndex;
 		}
-	}
 
-	const inferredIndex = inferStreamingToolCallIndex(toolCallsBuffer, deltaCall);
-	if (inferredIndex !== undefined) {
-		if (deltaCall.id) {
-			toolCallIndexById.set(deltaCall.id, inferredIndex);
+		if (deltaCall.id && existingOrderedEntry.id === deltaCall.id) {
+			toolCallIndexById.set(deltaCall.id, orderedIndex);
+			return orderedIndex;
 		}
-		return inferredIndex;
+
+		if (uniqueNameIndex !== undefined) {
+			if (deltaCall.id) {
+				toolCallIndexById.set(deltaCall.id, uniqueNameIndex);
+			}
+			return uniqueNameIndex;
+		}
+
+		if (!deltaCall.id && !deltaCall.function?.name) {
+			return hasStreamingToolCallIdentity(existingOrderedEntry)
+				? orderedIndex
+				: undefined;
+		}
+
+		if (deltaCall.id) {
+			const nextIndex = getNextStreamingToolCallIndex(toolCallsBuffer);
+			toolCallIndexById.set(deltaCall.id, nextIndex);
+			return nextIndex;
+		}
+
+		return undefined;
 	}
 
-	const nextIndex = getNextStreamingToolCallIndex(toolCallsBuffer);
-	if (deltaCall.id) {
-		toolCallIndexById.set(deltaCall.id, nextIndex);
+	const singleBufferedToolCallIndex = getSingleBufferedToolCallIndex(
+		toolCallsBuffer,
+	);
+	if (singleBufferedToolCallIndex !== undefined) {
+		return singleBufferedToolCallIndex;
 	}
-	return nextIndex;
+
+	if (deltaCall.id) {
+		const nextIndex = getNextStreamingToolCallIndex(toolCallsBuffer);
+		toolCallIndexById.set(deltaCall.id, nextIndex);
+		return nextIndex;
+	}
+
+	if (Object.keys(toolCallsBuffer).length === 0) {
+		return 0;
+	}
+
+	return undefined;
 }
 
 export function applyStreamingToolCallDelta(
@@ -328,6 +330,15 @@ export function applyStreamingToolCallDelta(
 		deltaCallPosition,
 		deltaToolCallCount,
 	);
+	if (index === undefined) {
+		logger.warn('Skipping ambiguous streaming tool-call delta without stable index/id', {
+			deltaCallPosition,
+			deltaToolCallCount,
+			deltaToolCallId: deltaCall.id,
+			deltaToolCallName: deltaCall.function?.name,
+		});
+		return '';
+	}
 
 	if (!toolCallsBuffer[index]) {
 		toolCallsBuffer[index] = createStreamingToolCallBufferEntry();
@@ -365,22 +376,29 @@ export function finalizeStreamingToolCalls(
 ): ToolCall[] {
 	return Object.entries(toolCallsBuffer)
 		.sort(([left], [right]) => Number(left) - Number(right))
-		.map(([, toolCall]) => {
+		.flatMap(([, toolCall]) => {
 			const rawArguments = toolCall.function.arguments.trim() || '{}';
 			const parseResult = parseJsonWithFix(rawArguments, {
 				toolName: toolCall.function.name || 'streaming tool call',
-				fallbackValue: {},
 				logWarning: true,
 				logError: true,
 			});
+			if (!parseResult.success || parseResult.data === undefined) {
+				logger.warn('Dropping malformed streaming tool call before execution', {
+					toolCallId: toolCall.id,
+					toolName: toolCall.function.name,
+					rawArguments,
+				});
+				return [];
+			}
 
-			return {
+			return [{
 				...toolCall,
 				function: {
 					...toolCall.function,
-					arguments: JSON.stringify(parseResult.data || {}),
+					arguments: JSON.stringify(parseResult.data),
 				},
-			};
+			}];
 		});
 }
 
@@ -396,6 +414,7 @@ export function finalizeStreamingToolCalls(
  */
 function convertToOpenAIMessages(
 	messages: ChatMessage[],
+	config: ReturnType<typeof getOpenAiConfig>,
 	includeBuiltinSystemPrompt: boolean = true,
 	customSystemPromptOverride?: string[],
 	planMode: boolean = false,
@@ -519,6 +538,12 @@ function convertToOpenAIMessages(
 	// 如果配置了自定义系统提示词（最高优先级，始终添加）
 	if (customSystemPrompts && customSystemPrompts.length > 0) {
 		if (includeBuiltinSystemPrompt) {
+			const builtinSystemPrompt = resolveBuiltinSystemPrompt(config, {
+				planMode,
+				vulnerabilityHuntingMode,
+				toolSearchDisabled,
+				teamMode,
+			});
 			// 自定义系统提示词作为 system 消息（多条独立内容块），默认系统提示词作为第一条 user 消息
 			result = [
 				{
@@ -530,12 +555,7 @@ function convertToOpenAIMessages(
 				} as ChatCompletionMessageParam,
 				{
 					role: 'user',
-					content: getSystemPromptForMode(
-						planMode,
-						vulnerabilityHuntingMode,
-						toolSearchDisabled,
-						teamMode,
-					),
+					content: builtinSystemPrompt,
 				} as ChatCompletionMessageParam,
 				...result,
 			];
@@ -553,16 +573,17 @@ function convertToOpenAIMessages(
 			];
 		}
 	} else if (includeBuiltinSystemPrompt) {
+		const builtinSystemPrompt = resolveBuiltinSystemPrompt(config, {
+			planMode,
+			vulnerabilityHuntingMode,
+			toolSearchDisabled,
+			teamMode,
+		});
 		// 没有自定义系统提示词，但需要添加默认系统提示词
 		result = [
 			{
 				role: 'system',
-				content: getSystemPromptForMode(
-					planMode,
-					vulnerabilityHuntingMode,
-					toolSearchDisabled,
-					teamMode,
-				),
+				content: builtinSystemPrompt,
 			} as ChatCompletionMessageParam,
 			...result,
 		];
@@ -802,6 +823,7 @@ export async function* createStreamingChatCompletion(
 				model: options.model || config.advancedModel,
 				messages: convertToOpenAIMessages(
 					options.messages,
+					config,
 					options.includeBuiltinSystemPrompt !== false, // 默认为 true
 					customSystemPromptContent,
 					options.planMode || false,

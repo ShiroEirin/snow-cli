@@ -98,6 +98,63 @@ export function validateBridgeSearchToolResult(options = {}) {
 	};
 }
 
+function extractToolArguments(toolCall) {
+	const parsedArguments = tryParseJson(String(toolCall?.function?.arguments || ''));
+	return parsedArguments && typeof parsedArguments === 'object'
+		? parsedArguments
+		: null;
+}
+
+function extractBridgeSearchQuery(toolCall) {
+	const parsedArguments = extractToolArguments(toolCall);
+	if (!parsedArguments) {
+		return '';
+	}
+
+	const queryCandidate = [
+		parsedArguments.query,
+		parsedArguments.search,
+		parsedArguments.keyword,
+		parsedArguments.searchTerm,
+		parsedArguments.pattern,
+		parsedArguments.text,
+		parsedArguments.q,
+	].find(value => typeof value === 'string' && value.trim().length > 0);
+
+	return typeof queryCandidate === 'string' ? queryCandidate.trim() : '';
+}
+
+export function validateBridgeSearchToolCall(options = {}) {
+	const {
+		toolCall,
+		requiredTerms = [BRIDGE_SEARCH_PROBE.query],
+		toolLabel = 'Bridge search tool',
+	} = options;
+	const normalizedQuery = normalizeComparableText(extractBridgeSearchQuery(toolCall));
+	const semanticQuery = normalizeBridgeSearchSemantics(normalizedQuery);
+	if (!normalizedQuery) {
+		throw new Error(`${toolLabel} call did not include a search query.`);
+	}
+
+	const missingTerms = requiredTerms.filter(
+		term =>
+			!semanticQuery.includes(
+				normalizeBridgeSearchSemantics(normalizeComparableText(term)),
+			),
+	);
+	if (missingTerms.length > 0) {
+		throw new Error(
+			`${toolLabel} query did not include required semantics: ${missingTerms.join(
+				', ',
+			)}.`,
+		);
+	}
+
+	return {
+		normalizedQuery,
+	};
+}
+
 function buildCoreModeScenarios(expectedContent) {
 	return {
 		local: [
@@ -108,15 +165,22 @@ function buildCoreModeScenarios(expectedContent) {
 				expectedTool: 'filesystem-read',
 				expectedToolResultIncludes: expectedContent,
 				expectedAssistantIncludes: expectedContent,
+				expectPlainTextReply: true,
 			},
 		],
 		bridge: [
 			{
 				name: 'bridge-search',
 				validateToolResult: validateBridgeSearchToolResult,
+				validateToolCall: options =>
+					validateBridgeSearchToolCall({
+						...options,
+						toolLabel: 'Bridge search tool',
+					}),
 				prompt:
 					`Call exactly the tool \`vcp-servercodesearcher-searchcode\` to search this workspace for \`${BRIDGE_SEARCH_PROBE.query}\`. After the tool returns, reply with the first matched file path only.`,
 				expectedTool: 'vcp-servercodesearcher-searchcode',
+				expectPlainTextReply: true,
 			},
 		],
 		hybrid: [
@@ -127,16 +191,225 @@ function buildCoreModeScenarios(expectedContent) {
 				expectedTool: 'filesystem-read',
 				expectedToolResultIncludes: expectedContent,
 				expectedAssistantIncludes: expectedContent,
+				expectPlainTextReply: true,
 			},
 			{
 				name: 'bridge-search',
 				validateToolResult: validateBridgeSearchToolResult,
+				validateToolCall: options =>
+					validateBridgeSearchToolCall({
+						...options,
+						toolLabel: 'Bridge search tool',
+					}),
 				prompt:
 					`Call exactly the tool \`vcp-servercodesearcher-searchcode\` to search this workspace for \`${BRIDGE_SEARCH_PROBE.query}\`. After the tool returns, reply with the first matched file path only.`,
 				expectedTool: 'vcp-servercodesearcher-searchcode',
+				expectPlainTextReply: true,
 			},
 		],
 	};
+}
+
+function validateSubagentScenarioMessages(options) {
+	const {
+		messages,
+		previousMessageCount,
+		scenario,
+		expectFilesystem,
+		expectBridgeSearch,
+	} = options;
+	const collectedToolCalls = collectToolCalls(messages);
+	const topLevelToolCalls = collectedToolCalls.filter(
+		entry => !messages[entry.messageIndex]?.subAgentInternal,
+	);
+	const topLevelSubagentCalls = topLevelToolCalls.filter(
+		entry => entry.toolCall.function.name === 'subagent-agent_explore',
+	);
+	const unexpectedTopLevelTools = [
+		...new Set(
+			topLevelToolCalls
+				.filter(entry => entry.toolCall.function.name !== 'subagent-agent_explore')
+				.map(entry => entry.toolCall.function.name),
+		),
+	];
+	if (unexpectedTopLevelTools.length > 0) {
+		throw new Error(
+			`Unexpected top-level tools were recorded for the subagent scenario: ${unexpectedTopLevelTools.join(
+				', ',
+			)}.`,
+		);
+	}
+
+	if (topLevelSubagentCalls.length === 0) {
+		throw new Error(
+			'Expected top-level "subagent-agent_explore" tool call was not recorded in session history.',
+		);
+	}
+
+	const effectiveTopLevelSubagentCall =
+		topLevelSubagentCalls[topLevelSubagentCalls.length - 1];
+	const subagentToolResultMessage = messages.find(
+		message => message.tool_call_id === effectiveTopLevelSubagentCall?.toolCall.id,
+	);
+	if (!subagentToolResultMessage?.content) {
+		throw new Error(
+			'Expected tool result for "subagent-agent_explore" was not recorded in session history.',
+		);
+	}
+
+	const parsedSubagentResult = tryParseJson(
+		String(subagentToolResultMessage.content),
+	);
+	if (!parsedSubagentResult) {
+		throw new Error(
+			'Tool result for "subagent-agent_explore" was not valid JSON.',
+		);
+	}
+
+	if (parsedSubagentResult?.success !== true) {
+		throw new Error(
+			`Subagent tool returned non-success payload: ${subagentToolResultMessage.content}`,
+		);
+	}
+
+	const expectedSegments = [];
+	if (expectFilesystem) {
+		const internalFilesystemCalls = collectedToolCalls.filter(
+			entry =>
+				Boolean(messages[entry.messageIndex]?.subAgentInternal) &&
+				entry.toolCall.function.name === 'filesystem-read',
+		);
+		if (internalFilesystemCalls.length === 0) {
+			throw new Error(
+				'Expected sub-agent internal "filesystem-read" tool call was not recorded in session history.',
+			);
+		}
+
+		const matchedInternalFilesystemCall = internalFilesystemCalls.find(entry =>
+			toolCallTargetsProbePath(
+				entry.toolCall,
+				scenario.expectedProbePath,
+				scenario.expectedProbeRoot,
+			),
+		);
+		if (!matchedInternalFilesystemCall) {
+			throw new Error(
+				'Expected sub-agent internal "filesystem-read" tool call did not target the probe file.',
+			);
+		}
+
+		const internalToolResultMessage = messages.find(
+			message =>
+				message.tool_call_id === matchedInternalFilesystemCall.toolCall.id,
+		);
+		if (!internalToolResultMessage?.content) {
+			throw new Error(
+				'Expected tool result for sub-agent internal "filesystem-read" was not recorded in session history.',
+			);
+		}
+
+		expectedSegments.push(
+			extractFirstComparableLine(
+				extractToolResultComparableValue(internalToolResultMessage.content),
+			),
+		);
+	}
+
+	if (expectBridgeSearch) {
+		const internalBridgeCalls = collectedToolCalls.filter(
+			entry =>
+				Boolean(messages[entry.messageIndex]?.subAgentInternal) &&
+				entry.toolCall.function.name === 'vcp-servercodesearcher-searchcode',
+		);
+		if (internalBridgeCalls.length === 0) {
+			throw new Error(
+				'Expected sub-agent internal "vcp-servercodesearcher-searchcode" tool call was not recorded in session history.',
+			);
+		}
+
+		const internalBridgeResultMessage = messages.find(
+			message => message.tool_call_id === internalBridgeCalls[0]?.toolCall.id,
+		);
+		if (!internalBridgeResultMessage?.content) {
+			throw new Error(
+				'Expected tool result for sub-agent internal bridge search was not recorded in session history.',
+			);
+		}
+
+		validateBridgeSearchToolCall({
+			toolCall: internalBridgeCalls[0]?.toolCall,
+			toolLabel: 'Sub-agent internal bridge search tool',
+		});
+
+		const parsedBridgeResult = tryParseJson(
+			String(internalBridgeResultMessage.content),
+		);
+		expectedSegments.push(
+			validateBridgeSearchToolResult({
+				parsedToolResult: parsedBridgeResult,
+			}).expectedAssistantIncludes,
+		);
+	}
+
+	const expectedFinalText = expectedSegments.join(' || ');
+	const subagentResultText = extractSubagentResultPlainTextCandidate(
+		parsedSubagentResult?.result,
+		expectedFinalText,
+	);
+	if (subagentResultText !== expectedFinalText) {
+		throw new Error(
+			'Subagent tool result did not exactly match the expected final answer text.',
+		);
+	}
+
+	const finalAssistantContent = extractFinalAssistantContent({
+		messages,
+		expectedAssistantIncludes: expectedFinalText,
+		expectedTool: scenario.expectedTool,
+	});
+	if (normalizeComparableText(finalAssistantContent) !== expectedFinalText) {
+		throw new Error(
+			'Final assistant reply did not exactly match the expected subagent answer text.',
+		);
+	}
+
+	return {
+		scenario: scenario.name,
+		expectedTool: scenario.expectedTool,
+		toolCall: effectiveTopLevelSubagentCall?.toolCall,
+		toolResultPreview: subagentResultText.slice(0, 240),
+		finalAssistantPreview: finalAssistantContent.slice(0, 240),
+		messageCount: previousMessageCount + messages.length,
+	};
+}
+
+function extractSubagentResultPlainTextCandidate(resultValue, expectedFinalText) {
+	const normalizedResult = normalizeComparableText(String(resultValue || '').trim());
+	if (!normalizedResult) {
+		return normalizedResult;
+	}
+
+	if (normalizedResult === expectedFinalText) {
+		return normalizedResult;
+	}
+
+	const candidateLines = Array.from(
+		new Set(
+			String(resultValue || '')
+				.split(/\r?\n/)
+				.map(line =>
+					normalizeComparableText(
+						line
+							.replace(/^[-*]\s+/, '')
+							.replace(/^`+|`+$/g, '')
+							.trim(),
+					),
+				)
+				.filter(Boolean),
+		),
+	);
+
+	return candidateLines.find(line => line === expectedFinalText) || normalizedResult;
 }
 
 export function buildSubagentModeScenarios(expectedContent) {
@@ -145,131 +418,168 @@ export function buildSubagentModeScenarios(expectedContent) {
 			{
 				name: 'subagent-explore',
 				buildPrompt: filePath =>
-					`Call exactly the tool \`subagent-agent_explore\` with a prompt that tells the sub-agent to use \`filesystem-read\` on \`${filePath}\` and return only the first line. After the tool returns, reply with exactly that first line and nothing else.`,
+					[
+						'This scenario allows exactly one top-level tool call: `subagent-agent_explore`.',
+						'Do not call `filesystem-read` or any other tool directly from the main assistant.',
+						'Do not call `subagent-agent_explore` more than once and do not retry it after success.',
+						`Pass a prompt that tells the sub-agent to use only \`filesystem-read\` on \`${filePath}\`, capture only the first line, and return only that first line.`,
+						'After the tool returns, reply with exactly that first line and nothing else. Do not add markdown, labels, code fences, or commentary.',
+					].join(' '),
 				expectedTool: 'subagent-agent_explore',
 				expectedAssistantIncludes: expectedContent,
-				validateMessages: ({messages, previousMessageCount, scenario}) => {
-					const collectedToolCalls = collectToolCalls(messages);
-					const topLevelToolCalls = collectedToolCalls.filter(
-						entry => !messages[entry.messageIndex]?.subAgentInternal,
-					);
-					const topLevelSubagentCalls = topLevelToolCalls.filter(
-						entry =>
-							entry.toolCall.function.name === 'subagent-agent_explore',
-					);
-					if (topLevelSubagentCalls.length !== 1) {
-						throw new Error(
-							`Expected exactly one top-level "subagent-agent_explore" tool call, but found ${topLevelSubagentCalls.length}.`,
-						);
-					}
-
-					if (topLevelToolCalls.length !== 1) {
-						throw new Error(
-							'Subagent scenario unexpectedly recorded extra top-level tool calls.',
-						);
-					}
-
-					const subagentToolResultMessage = messages.find(
-						message =>
-							message.tool_call_id === topLevelSubagentCalls[0]?.toolCall.id,
-					);
-					if (!subagentToolResultMessage?.content) {
-						throw new Error(
-							'Expected tool result for "subagent-agent_explore" was not recorded in session history.',
-						);
-					}
-
-					let parsedSubagentResult;
-					try {
-						parsedSubagentResult = JSON.parse(
-							String(subagentToolResultMessage.content),
-						);
-					} catch {
-						throw new Error(
-							'Tool result for "subagent-agent_explore" was not valid JSON.',
-						);
-					}
-
-					if (parsedSubagentResult?.success !== true) {
-						throw new Error(
-							`Subagent tool returned non-success payload: ${subagentToolResultMessage.content}`,
-						);
-					}
-
-					const subagentResultText = extractFirstComparableLine(
-						parsedSubagentResult?.result,
-					);
-					if (
-						subagentResultText !==
-						normalizeComparableText(scenario.expectedAssistantIncludes)
-					) {
-						throw new Error(
-							'Subagent tool result did not exactly match the expected final answer text.',
-						);
-					}
-
-					const internalFilesystemCalls = collectedToolCalls.filter(
-						entry =>
-							Boolean(messages[entry.messageIndex]?.subAgentInternal) &&
-							entry.toolCall.function.name === 'filesystem-read',
-					);
-					if (internalFilesystemCalls.length === 0) {
-						throw new Error(
-							'Expected sub-agent internal "filesystem-read" tool call was not recorded in session history.',
-						);
-					}
-
-					const matchedInternalFilesystemCall = internalFilesystemCalls.find(entry =>
-						toolCallTargetsProbePath(
-							entry.toolCall,
-							scenario.expectedProbePath,
-							scenario.expectedProbeRoot,
-						),
-					);
-					if (!matchedInternalFilesystemCall) {
-						throw new Error(
-							'Expected sub-agent internal "filesystem-read" tool call did not target the probe file.',
-						);
-					}
-
-					const internalToolResultMessage = messages.find(
-						message =>
-							message.tool_call_id === matchedInternalFilesystemCall.toolCall.id,
-					);
-					if (!internalToolResultMessage?.content) {
-						throw new Error(
-							'Expected tool result for sub-agent internal "filesystem-read" was not recorded in session history.',
-						);
-					}
-
-					const internalReadFirstLine = extractFirstComparableLine(
-						extractToolResultComparableValue(internalToolResultMessage.content),
-					);
-					if (
-						internalReadFirstLine !==
-						normalizeComparableText(scenario.expectedAssistantIncludes)
-					) {
-						throw new Error(
-							'Sub-agent internal "filesystem-read" result did not match the expected first line.',
-						);
-					}
-
-					const finalAssistantContent = extractFinalAssistantContent({
-						messages,
-						expectedAssistantIncludes: scenario.expectedAssistantIncludes,
-						expectedTool: scenario.expectedTool,
-					});
-					return {
-						scenario: scenario.name,
-						expectedTool: scenario.expectedTool,
-						toolCall: topLevelSubagentCalls[0]?.toolCall,
-						toolResultPreview: subagentResultText.slice(0, 240),
-						finalAssistantPreview: finalAssistantContent.slice(0, 240),
-						messageCount: previousMessageCount + messages.length,
-					};
-				},
+				validateMessages: options =>
+					validateSubagentScenarioMessages({
+						...options,
+						expectFilesystem: true,
+						expectBridgeSearch: false,
+					}),
 			},
 		],
+		bridge: [
+			{
+				name: 'subagent-bridge-search',
+				prompt: [
+					'Call exactly one top-level tool in this scenario: `subagent-agent_explore`.',
+					'Do not call `vcp-agentassistant-askmaidagent`, `vcp-servercodesearcher-searchcode`, or any other tool directly from the main assistant.',
+					'Do not call `subagent-agent_explore` more than once and do not retry it after success.',
+					'The sub-agent must use `vcp-servercodesearcher-searchcode` to search this workspace for the exact literal term `SnowBridge` and return only the first matched file path as plain text.',
+					'Do not replace `SnowBridge` with `SnowCli` or any other search term.',
+					'If the sub-agent cannot do that, stop instead of falling back to another top-level tool.',
+					'After the tool returns, reply with exactly that file path and nothing else. Do not add markdown, labels, or extra wording.',
+				].join(' '),
+				expectedTool: 'subagent-agent_explore',
+				validateMessages: options =>
+					validateSubagentScenarioMessages({
+						...options,
+						expectFilesystem: false,
+						expectBridgeSearch: true,
+					}),
+			},
+		],
+		hybrid: [
+			{
+				name: 'subagent-hybrid-runtime',
+				buildPrompt: (filePath, probeRoot) => {
+					const targetPath =
+						buildScenarioRelativePath(filePath, probeRoot) || filePath;
+					return [
+						'Call exactly the tool `subagent-agent_explore`.',
+						'The main assistant must not call `filesystem-read`, `vcp-servercodesearcher-searchcode`, `vcp-agentassistant-askmaidagent`, or any other tool directly in this scenario.',
+						'Do not call `subagent-agent_explore` more than once and do not retry it after success.',
+						'The sub-agent must do two steps in order and call one internal tool at a time: first use `filesystem-read` on the exact target file path provided below and capture only the first line; then use `vcp-servercodesearcher-searchcode` to search this workspace for `SnowBridge` and capture only the first matched file path.',
+						'Use the exact literal search term `SnowBridge` for the bridge search; do not replace it with `SnowCli` or any other token, and do not narrow the bridge search to the target file path.',
+						'The sub-agent must not substitute another file path, change the file extension, shorten the target path, or read any file other than the exact target file below.',
+						'If the sub-agent fails, do not fall back to any top-level tool besides `subagent-agent_explore`.',
+						'The sub-agent must return exactly `FIRST_LINE || MATCHED_PATH` and nothing else.',
+						'After the tool returns, reply with exactly that combined text and nothing else.',
+						`Target file: ${targetPath}`,
+					].join(' ');
+				},
+				expectedTool: 'subagent-agent_explore',
+				validateMessages: options =>
+					validateSubagentScenarioMessages({
+						...options,
+						expectFilesystem: true,
+						expectBridgeSearch: true,
+					}),
+			},
+		],
+	};
+}
+
+function validateTeamScenarioMessages(options) {
+	const {messages, previousMessageCount, scenario} = options;
+	const collectedToolCalls = collectToolCalls(messages).filter(
+		entry => !messages[entry.messageIndex]?.subAgentInternal,
+	);
+	assertExactToolCallSequence(collectedToolCalls, scenario.expectedSequence);
+	const teammateEvidence = collectTeammateExecutionEvidence({
+		messages,
+		scenario,
+	});
+
+	const comparableSegments = [];
+	const expectedSegmentsByTool = {};
+	for (const expectedToolName of scenario.expectedSequence) {
+		const entry = collectedToolCalls.find(
+			item => item.toolCall.function.name === expectedToolName,
+		);
+		if (!entry) {
+			throw new Error(
+				`Expected top-level tool "${expectedToolName}" was not recorded in session history.`,
+			);
+		}
+
+		const toolResultMessage = messages.find(
+			message => message.tool_call_id === entry.toolCall.id,
+		);
+		if (!toolResultMessage?.content) {
+			throw new Error(
+				`Expected tool result for "${entry.toolCall.function.name}" was not recorded in session history.`,
+			);
+		}
+
+		if (String(toolResultMessage.content).startsWith('Error:')) {
+			throw new Error(
+				`Tool result for "${entry.toolCall.function.name}" failed: ${toolResultMessage.content}`,
+			);
+		}
+
+		if (expectedToolName === 'filesystem-read') {
+			const filesystemSegment = extractFirstComparableLine(
+				extractToolResultComparableValue(toolResultMessage.content),
+			);
+			comparableSegments.push(filesystemSegment);
+			expectedSegmentsByTool[expectedToolName] = filesystemSegment;
+		}
+
+		if (expectedToolName === 'vcp-servercodesearcher-searchcode') {
+			validateBridgeSearchToolCall({
+				toolCall: entry.toolCall,
+				toolLabel: 'Team bridge search tool',
+			});
+			const bridgeSegment = validateBridgeSearchToolResult({
+				parsedToolResult: tryParseJson(String(toolResultMessage.content)),
+			}).expectedAssistantIncludes;
+			comparableSegments.push(bridgeSegment);
+			expectedSegmentsByTool[expectedToolName] = bridgeSegment;
+		}
+	}
+
+	const expectedFinalText = comparableSegments.join(' || ');
+	if (
+		teammateEvidence.segmentsByTool['filesystem-read'] &&
+		teammateEvidence.segmentsByTool['filesystem-read'] !==
+			expectedSegmentsByTool['filesystem-read']
+	) {
+		throw new Error(
+			'Teammate internal filesystem evidence did not match the expected team answer text.',
+		);
+	}
+
+	const finalAssistantContent = extractFinalAssistantContent({
+		messages,
+		expectedAssistantIncludes: expectedFinalText,
+		expectedTool:
+			scenario.expectedSequence[scenario.expectedSequence.length - 1] ||
+			scenario.expectedTool,
+	});
+	if (
+		normalizeComparableText(finalAssistantContent) !==
+		normalizeComparableText(expectedFinalText)
+	) {
+		throw new Error(
+			'Final assistant reply did not exactly match the expected team answer text.',
+		);
+	}
+
+	return {
+		scenario: scenario.name,
+		expectedTool: scenario.expectedTool,
+		toolCall: collectedToolCalls[0]?.toolCall,
+		toolResultPreview: expectedFinalText.slice(0, 240),
+		finalAssistantPreview: finalAssistantContent.slice(0, 240),
+		messageCount: previousMessageCount + messages.length,
 	};
 }
 
@@ -279,66 +589,113 @@ export function buildTeamModeScenarios(expectedContent) {
 			{
 				name: 'team-runtime',
 				expectedTool: 'team-spawn_teammate',
-				buildPrompt: filePath =>
-					[
+				buildPrompt: (filePath, probeRoot) => {
+					const teammateRelativePath = buildScenarioRelativePath(
+						filePath,
+						probeRoot,
+					);
+					return [
 						'You are validating Agent Team mode in this git repository.',
 						'Follow this exact tool sequence:',
-						'1. Call `team-spawn_teammate` with name `reader` and a prompt telling the teammate to read the file path below, then wait for further messages.',
+						'Call exactly one top-level tool per assistant turn, do not batch multiple top-level tools in one response, never repeat a step that already succeeded, and do not emit narration-only assistant turns between steps.',
+						'1. Call `team-spawn_teammate` with name `reader` and a prompt telling the teammate to use ONLY `filesystem-read` on the worktree-relative path shown below, capture only the first line, then call `wait_for_messages` and stop.',
+						'In that teammate prompt, explicitly require exactly one internal tool call per assistant turn and forbid progress-only prose between internal steps.',
 						'2. Call `team-wait_for_teammates`.',
 						'3. Call `team-shutdown_teammate` for `reader`.',
 						'4. Call `team-merge_all_teammate_work` with strategy `auto`.',
 						'5. Call `team-cleanup_team`.',
-						'6. Call `filesystem-read` on the same file path.',
-						'After all tools return, reply with the first line only.',
+						'6. Call `filesystem-read` on the same absolute target file path.',
+						'After all tools return, reply with the first line only and nothing else.',
+						`Teammate relative path: ${teammateRelativePath}`,
 						`Target file: ${filePath}`,
-					].join(' '),
-				expectedAssistantIncludes: expectedContent,
-				validateMessages: ({messages, previousMessageCount, scenario}) => {
-					const collectedToolCalls = collectToolCalls(messages).filter(
-						entry => !messages[entry.messageIndex]?.subAgentInternal,
-					);
-					const expectedSequence = [
-						'team-spawn_teammate',
-						'team-wait_for_teammates',
-						'team-shutdown_teammate',
-						'team-merge_all_teammate_work',
-						'team-cleanup_team',
-						'filesystem-read',
-					];
-					assertExactToolCallSequence(collectedToolCalls, expectedSequence);
-					for (const entry of collectedToolCalls) {
-						if (expectedSequence.includes(entry.toolCall.function.name)) {
-							const toolResultMessage = messages.find(
-								message => message.tool_call_id === entry.toolCall.id,
-							);
-							if (!toolResultMessage?.content) {
-								throw new Error(
-									`Expected tool result for "${entry.toolCall.function.name}" was not recorded in session history.`,
-								);
-							}
-
-							if (String(toolResultMessage.content).startsWith('Error:')) {
-								throw new Error(
-									`Tool result for "${entry.toolCall.function.name}" failed: ${toolResultMessage.content}`,
-								);
-							}
-						}
-					}
-
-					const finalAssistantContent = extractFinalAssistantContent({
-						messages,
-						expectedAssistantIncludes: scenario.expectedAssistantIncludes,
-						expectedTool: 'filesystem-read',
-					});
-					return {
-						scenario: scenario.name,
-						expectedTool: 'team-spawn_teammate',
-						toolCall: collectedToolCalls[0]?.toolCall,
-						toolResultPreview: 'team sequence completed',
-						finalAssistantPreview: finalAssistantContent.slice(0, 240),
-						messageCount: previousMessageCount + messages.length,
-					};
+					].join(' ');
 				},
+				expectedAssistantIncludes: expectedContent,
+				expectedSequence: [
+					'team-spawn_teammate',
+					'team-wait_for_teammates',
+					'team-shutdown_teammate',
+					'team-merge_all_teammate_work',
+					'team-cleanup_team',
+					'filesystem-read',
+				],
+				expectedTeammateEvidence: ['filesystem-read'],
+				validateMessages: validateTeamScenarioMessages,
+			},
+		],
+		bridge: [
+			{
+				name: 'team-bridge-runtime',
+				expectedTool: 'team-spawn_teammate',
+				prompt: [
+					'You are validating Agent Team mode in this git repository.',
+					'Follow this exact tool sequence and DO NOT call any other tools:',
+					'Call exactly one top-level tool per assistant turn, do not batch multiple top-level tools in one response, never repeat a step that already succeeded, and do not emit narration-only assistant turns between steps.',
+					'Never call `team-spawn_teammate` more than once, and never call `vcp-agentassistant-askmaidagent` before, during, or after the required team sequence.',
+					'1. Call `team-spawn_teammate` with name `reader` and a prompt telling the teammate to use ONLY `vcp-servercodesearcher-searchcode` to search this workspace for `SnowBridge`, then call `wait_for_messages` and stop.',
+					'In that teammate prompt, explicitly require exactly one internal tool call per assistant turn and forbid any progress-only prose between internal steps.',
+					'2. Call `team-wait_for_teammates`.',
+					'3. Call `team-shutdown_teammate` with `target_id` set to `reader`.',
+					'4. Call `team-merge_all_teammate_work` with strategy `auto`.',
+					'5. Call `team-cleanup_team`.',
+					'6. Call `vcp-servercodesearcher-searchcode` to search this workspace for `SnowBridge`.',
+					'Never call `vcp-agentassistant-askmaidagent` or any `vcp-serverfileoperator-*` tool in this test.',
+					'After all tools return, reply with exactly the first matched file path and nothing else.',
+				].join(' '),
+				expectedSequence: [
+					'team-spawn_teammate',
+					'team-wait_for_teammates',
+					'team-shutdown_teammate',
+					'team-merge_all_teammate_work',
+					'team-cleanup_team',
+					'vcp-servercodesearcher-searchcode',
+				],
+				expectedTeammateEvidence: ['vcp-servercodesearcher-searchcode'],
+				validateMessages: validateTeamScenarioMessages,
+			},
+		],
+		hybrid: [
+			{
+				name: 'team-hybrid-runtime',
+				expectedTool: 'team-spawn_teammate',
+				buildPrompt: (filePath, probeRoot) => {
+					const teammateRelativePath = buildScenarioRelativePath(
+						filePath,
+						probeRoot,
+					);
+					return [
+						'You are validating Agent Team mode in this git repository.',
+						'Follow this exact tool sequence and DO NOT call any other tools:',
+						'Call exactly one top-level tool per assistant turn, do not batch multiple top-level tools in one response, never repeat a step that already succeeded, and do not emit narration-only assistant turns between steps.',
+						'Never call `team-spawn_teammate` more than once, and never call `vcp-agentassistant-askmaidagent` before, during, or after the required team sequence.',
+						'1. Call `team-spawn_teammate` with name `reader` and a prompt telling the teammate to first use ONLY `filesystem-read` on the worktree-relative path shown below to capture only the first line, then use ONLY `vcp-servercodesearcher-searchcode` to search this workspace for `SnowBridge`, then call `wait_for_messages` and stop.',
+						'In that teammate prompt, explicitly require exactly one internal tool call per assistant turn, forbid any progress-only prose between internal steps, and forbid moving on to the code search until the file read succeeds.',
+						'2. Call `team-wait_for_teammates`.',
+						'3. Call `team-shutdown_teammate` with `target_id` set to `reader`.',
+						'4. Call `team-merge_all_teammate_work` with strategy `auto`.',
+						'5. Call `team-cleanup_team`.',
+						'6. Call `filesystem-read` on the same file path.',
+						'7. Call `vcp-servercodesearcher-searchcode` to search this workspace for `SnowBridge`.',
+						'Never call `vcp-agentassistant-askmaidagent` or any `vcp-serverfileoperator-*` tool in this test.',
+						'After all tools return, reply with exactly `FIRST_LINE || MATCHED_PATH` and nothing else.',
+						`Teammate relative path: ${teammateRelativePath}`,
+						`Target file: ${filePath}`,
+					].join(' ');
+				},
+				expectedSequence: [
+					'team-spawn_teammate',
+					'team-wait_for_teammates',
+					'team-shutdown_teammate',
+					'team-merge_all_teammate_work',
+					'team-cleanup_team',
+					'filesystem-read',
+					'vcp-servercodesearcher-searchcode',
+				],
+				expectedTeammateEvidence: [
+					'filesystem-read',
+					'vcp-servercodesearcher-searchcode',
+				],
+				validateMessages: validateTeamScenarioMessages,
 			},
 		],
 	};
@@ -886,21 +1243,26 @@ export function resolveModes(snowConfig, requestedModes) {
 	return ['local'];
 }
 
-function resolveModesForSuite(suite, snowConfig, requestedModes) {
-	if (suite === 'core') {
-		return resolveModes(snowConfig, requestedModes);
+export function resolveModesForSuite(suite, snowConfig, requestedModes) {
+	const supportedModesBySuite = {
+		core: ['local', 'bridge', 'hybrid'],
+		subagent: ['local', 'bridge', 'hybrid'],
+		team: ['local', 'bridge', 'hybrid'],
+	};
+	const supportedModes = supportedModesBySuite[suite] || ['local'];
+	const resolvedModes = resolveModes(snowConfig, requestedModes);
+	const filteredModes = resolvedModes.filter(mode => supportedModes.includes(mode));
+
+	if (requestedModes.length > 0 && filteredModes.length !== resolvedModes.length) {
+		const unsupportedModes = resolvedModes.filter(
+			mode => !supportedModes.includes(mode),
+		);
+		throw new Error(
+			`Suite "${suite}" does not support mode(s): ${unsupportedModes.join(', ')}`,
+		);
 	}
 
-	if (requestedModes.length === 0) {
-		return ['local'];
-	}
-
-	const uniqueModes = Array.from(new Set(requestedModes));
-	if (uniqueModes.some(mode => mode !== 'local')) {
-		throw new Error(`Suite "${suite}" only supports mode "local".`);
-	}
-
-	return uniqueModes;
+	return filteredModes;
 }
 
 function ensureModeSupported(snowConfig, mode) {
@@ -1249,7 +1611,11 @@ function readSessionMessages(tempRoot, sessionId) {
 }
 
 function normalizeComparableText(value) {
-	return String(value).replaceAll('\\', '/');
+	return String(value).trim().replaceAll('\\', '/');
+}
+
+function normalizeBridgeSearchSemantics(value) {
+	return normalizeComparableText(value).toLowerCase().replaceAll(/[^a-z0-9]+/g, '');
 }
 
 function isRetryableScenarioExtractionError(error) {
@@ -1260,7 +1626,12 @@ function isRetryableScenarioExtractionError(error) {
 		'Unexpected end of JSON input',
 		'Unexpected non-whitespace character after JSON',
 		'Unable to locate session file for',
+		'Expected top-level "subagent-agent_explore" tool call was not recorded',
+		'Expected sub-agent internal "filesystem-read" tool call was not recorded',
+		'Expected sub-agent internal "vcp-servercodesearcher-searchcode" tool call was not recorded',
+		'Team scenario is still in progress',
 		'Expected tool "',
+		'Expected top-level tool "',
 		'Expected tool call sequence was not recorded',
 		'Expected tool result for "',
 		'Expected final assistant reply for "',
@@ -1324,18 +1695,25 @@ function assertToolCallSequence(collectedToolCalls, expectedSequence) {
 
 function assertExactToolCallSequence(collectedToolCalls, expectedSequence) {
 	const actualSequence = collectedToolCalls.map(entry => entry.toolCall.function.name);
-	if (actualSequence.length !== expectedSequence.length) {
-		throw new Error(
-			`Unexpected top-level tool call count for team scenario: expected ${expectedSequence.length}, got ${actualSequence.length}.`,
-		);
-	}
-
-	for (let index = 0; index < expectedSequence.length; index += 1) {
+	const comparableLength = Math.min(actualSequence.length, expectedSequence.length);
+	for (let index = 0; index < comparableLength; index += 1) {
 		if (actualSequence[index] !== expectedSequence[index]) {
 			throw new Error(
 				`Unexpected top-level tool call order for team scenario: expected ${expectedSequence.join(' -> ')}, got ${actualSequence.join(' -> ')}.`,
 			);
 		}
+	}
+
+	if (actualSequence.length < expectedSequence.length) {
+		throw new Error(
+			`Team scenario is still in progress: recorded ${actualSequence.length} of ${expectedSequence.length} top-level tool calls.`,
+		);
+	}
+
+	if (actualSequence.length > expectedSequence.length) {
+		throw new Error(
+			`Unexpected top-level tool call count for team scenario: expected ${expectedSequence.length}, got ${actualSequence.length}.`,
+		);
 	}
 }
 
@@ -1412,6 +1790,106 @@ function normalizeComparablePath(value, baseDir) {
 	return normalizeComparableText(resolve(baseDir, normalizedValue));
 }
 
+function buildScenarioRelativePath(targetPath, baseDir) {
+	if (!targetPath) {
+		return '';
+	}
+
+	if (!baseDir) {
+		return normalizeComparableText(String(targetPath));
+	}
+
+	return normalizeComparableText(relative(resolve(baseDir), resolve(targetPath)));
+}
+
+function extractComparableSegmentForToolResult(toolName, toolCall, toolResultMessage) {
+	if (!toolResultMessage?.content) {
+		throw new Error(
+			`Expected tool result for "${toolName}" was not recorded in session history.`,
+		);
+	}
+
+	if (String(toolResultMessage.content).startsWith('Error:')) {
+		throw new Error(
+			`Tool result for "${toolName}" failed: ${toolResultMessage.content}`,
+		);
+	}
+
+	if (toolName === 'filesystem-read') {
+		return extractFirstComparableLine(
+			extractToolResultComparableValue(toolResultMessage.content),
+		);
+	}
+
+	if (toolName === 'vcp-servercodesearcher-searchcode') {
+		validateBridgeSearchToolCall({
+			toolCall,
+			toolLabel: 'Teammate internal bridge search tool',
+		});
+		return validateBridgeSearchToolResult({
+			parsedToolResult: tryParseJson(String(toolResultMessage.content)),
+		}).expectedAssistantIncludes;
+	}
+
+	return '';
+}
+
+function collectTeammateExecutionEvidence(options) {
+	const {messages, scenario} = options;
+	const expectedEvidence = Array.isArray(scenario.expectedTeammateEvidence)
+		? scenario.expectedTeammateEvidence
+		: [];
+	if (expectedEvidence.length === 0) {
+		return {comparableSegments: [], segmentsByTool: {}};
+	}
+
+	const internalToolCalls = collectToolCalls(messages).filter(entry =>
+		Boolean(messages[entry.messageIndex]?.subAgentInternal),
+	);
+	const comparableSegments = [];
+	const segmentsByTool = {};
+
+	for (const toolName of expectedEvidence) {
+		const matchingCalls = internalToolCalls.filter(
+			entry => entry.toolCall.function.name === toolName,
+		);
+		if (matchingCalls.length === 0) {
+			throw new Error(
+				`Expected teammate internal "${toolName}" tool call was not recorded in session history.`,
+			);
+		}
+
+		const matchedCall =
+			toolName === 'filesystem-read'
+				? matchingCalls.find(entry =>
+					toolCallTargetsProbePath(
+						entry.toolCall,
+						scenario.expectedProbePath,
+						scenario.expectedProbeRoot,
+					),
+				)
+				: matchingCalls[0];
+		if (!matchedCall) {
+			throw new Error(
+				'Expected teammate internal "filesystem-read" tool call did not target the probe file.',
+			);
+		}
+
+		const toolResultMessage = messages.find(
+			message => message.tool_call_id === matchedCall.toolCall.id,
+		);
+		const comparableSegment = extractComparableSegmentForToolResult(
+			toolName,
+			matchedCall.toolCall,
+			toolResultMessage,
+		);
+		comparableSegments.push(comparableSegment);
+		segmentsByTool[toolName] = comparableSegment;
+	}
+
+	return {comparableSegments, segmentsByTool};
+}
+
 function extractFinalAssistantContent(options) {
 	const {messages, expectedAssistantIncludes, expectedTool} = options;
 	const finalAssistantMessage = messages
@@ -1439,17 +1917,10 @@ function extractFinalAssistantContent(options) {
 	}
 
 	const finalAssistantContent = String(finalAssistantMessage.content || '').trim();
-	if (
-		expectedAssistantIncludes &&
-		!normalizeComparableText(finalAssistantContent).includes(
-			normalizeComparableText(expectedAssistantIncludes),
-		)
-	) {
-		throw new Error(
-			`Final assistant reply for "${expectedTool}" did not include expected text "${expectedAssistantIncludes}"`,
-		);
-	}
-
+	const relaxedPlainTextCandidate = extractRelaxedPlainTextCandidate(
+		finalAssistantContent,
+		expectedAssistantIncludes,
+	);
 	if (
 		/<\/?think(?:ing)?>/i.test(finalAssistantContent) ||
 		/<<<\[?TOOL_REQUEST\]?>>>|tool_name\s*[:=]/i.test(finalAssistantContent)
@@ -1459,7 +1930,69 @@ function extractFinalAssistantContent(options) {
 		);
 	}
 
-	return finalAssistantContent;
+	if (
+		expectedAssistantIncludes &&
+		normalizeComparableText(finalAssistantContent) !==
+			normalizeComparableText(expectedAssistantIncludes) &&
+		relaxedPlainTextCandidate !==
+			normalizeComparableText(expectedAssistantIncludes)
+	) {
+		throw new Error(
+			`Final assistant reply for "${expectedTool}" did not exactly match expected plain text "${expectedAssistantIncludes}"`,
+		);
+	}
+
+	return relaxedPlainTextCandidate
+		? expectedAssistantIncludes
+		: finalAssistantContent;
+}
+
+function stripSimplePlainTextFormatting(value) {
+	const text = String(value || '').trim();
+	const fencedMatch = text.match(/^```(?:[\w-]+)?\s*([\s\S]*?)\s*```$/);
+	const unfenced = fencedMatch ? fencedMatch[1] || '' : text;
+	return unfenced
+		.replace(/^`([^`]+)`$/s, '$1')
+		.replace(/```/g, '')
+		.replace(/`/g, '')
+		.replaceAll('**', '')
+		.replaceAll('__', '')
+		.replaceAll('*', '')
+		.trim();
+}
+
+function extractRelaxedPlainTextCandidate(content, expectedAssistantIncludes) {
+	const normalizedExpected = normalizeComparableText(expectedAssistantIncludes);
+	if (!normalizedExpected) {
+		return '';
+	}
+
+	if (normalizeComparableText(content) === normalizedExpected) {
+		return normalizedExpected;
+	}
+
+	const normalizedSingleLine = normalizeComparableText(
+		stripSimplePlainTextFormatting(content).replace(/\s+/g, ' '),
+	);
+	if (normalizedSingleLine === normalizedExpected) {
+		return normalizedExpected;
+	}
+	const allowedPrefixes = [
+		/^the first matched file path is:\s*(.+)$/i,
+		/^first matched file path:\s*(.+)$/i,
+		/^the first line of the file is:\s*(.+)$/i,
+		/^the first line is:\s*(.+)$/i,
+		/^first line:\s*(.+)$/i,
+	];
+
+	for (const pattern of allowedPrefixes) {
+		const matched = normalizedSingleLine.match(pattern);
+		if (matched && normalizeComparableText(matched[1]) === normalizedExpected) {
+			return normalizedExpected;
+		}
+	}
+
+	return '';
 }
 
 export function extractScenarioResultFromSession(options) {
@@ -1505,6 +2038,12 @@ export function extractScenarioResultFromSession(options) {
 		throw new Error(
 			`Expected exactly one "${scenario.expectedTool}" tool call, but found ${matchedToolCalls.length}.`,
 		);
+	}
+
+	if (typeof scenario.validateToolCall === 'function') {
+		scenario.validateToolCall({
+			toolCall: matchedToolCall,
+		});
 	}
 
 	const toolResultMessageIndex = nextMessages.findIndex(
@@ -1754,7 +2293,7 @@ async function runMode(options) {
 		const firstScenario = {
 			...suiteScenarios[0],
 			prompt: suiteScenarios[0].buildPrompt
-				? suiteScenarios[0].buildPrompt(readTarget)
+				? suiteScenarios[0].buildPrompt(readTarget, runtimeWorkDir)
 				: suiteScenarios[0].prompt,
 			expectedProbePath: readTarget,
 			expectedProbeRoot: runtimeWorkDir,
@@ -1790,7 +2329,9 @@ async function runMode(options) {
 		for (const scenario of suiteScenarios.slice(1)) {
 			const resolvedScenario = {
 				...scenario,
-				prompt: scenario.buildPrompt ? scenario.buildPrompt(readTarget) : scenario.prompt,
+				prompt: scenario.buildPrompt
+					? scenario.buildPrompt(readTarget, runtimeWorkDir)
+					: scenario.prompt,
 				expectedProbePath: readTarget,
 				expectedProbeRoot: runtimeWorkDir,
 			};
@@ -1900,9 +2441,7 @@ function isMainModule() {
 }
 
 if (isMainModule()) {
-	try {
-		await run();
-	} catch (error) {
+	run().catch(error => {
 		console.error(
 			JSON.stringify(
 				{
@@ -1913,5 +2452,5 @@ if (isMainModule()) {
 			),
 		);
 		process.exitCode = 1;
-	}
+	});
 }

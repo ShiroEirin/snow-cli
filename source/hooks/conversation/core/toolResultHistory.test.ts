@@ -3,6 +3,7 @@ import test from 'ava';
 import {
 	buildConversationToolMessage,
 	buildHistoryToolMessage,
+	projectToolMessagesForContext,
 	projectToolMessageForContext,
 } from '../../../utils/session/toolMessageProjection.js';
 
@@ -94,4 +95,82 @@ test('projectToolMessageForContext uses summarized tool content only for tool me
 	});
 
 	t.is(projectedAssistantMessage.content, 'assistant text');
+});
+
+test('projectToolMessagesForContext deduplicates repeated tool summaries for the same tool call', t => {
+	const projectedMessages = projectToolMessagesForContext([
+		{
+			tool_call_id: 'tool-dup',
+			role: 'tool',
+			content: 'raw 1',
+			historyContent: 'same tool summary',
+		},
+		{
+			tool_call_id: 'tool-dup',
+			role: 'tool',
+			content: 'raw 2',
+			historyContent: 'same tool summary',
+		},
+	] as any);
+
+	t.is(projectedMessages[0]?.content, 'same tool summary');
+	t.is(projectedMessages[1]?.content, '[duplicate tool context omitted ×2]');
+});
+
+test('projectToolMessagesForContext keeps identical summaries from different tool calls', t => {
+	const projectedMessages = projectToolMessagesForContext([
+		{
+			tool_call_id: 'tool-a',
+			role: 'tool',
+			content: 'raw 1',
+			historyContent: 'same tool summary',
+		},
+		{
+			tool_call_id: 'tool-b',
+			role: 'tool',
+			content: 'raw 2',
+			historyContent: 'same tool summary',
+		},
+	] as any);
+
+	t.is(projectedMessages[0]?.content, 'same tool summary');
+	t.is(projectedMessages[1]?.content, 'same tool summary');
+});
+
+test('projectToolMessagesForContext enforces a total projection budget across tool messages', t => {
+	const oversizedSummary = Array.from({length: 220}, () => '0123456789').join('');
+	const projectedMessages = projectToolMessagesForContext([
+		{
+			role: 'tool',
+			content: oversizedSummary,
+			historyContent: `first ${oversizedSummary}`,
+		},
+		{
+			role: 'tool',
+			content: oversizedSummary,
+			historyContent: `second ${oversizedSummary}`,
+		},
+		{
+			role: 'tool',
+			content: oversizedSummary,
+			historyContent: `third ${oversizedSummary}`,
+		},
+		{
+			role: 'tool',
+			content: oversizedSummary,
+			historyContent: `fourth ${oversizedSummary}`,
+		},
+		{
+			role: 'tool',
+			content: oversizedSummary,
+			historyContent: `fifth ${oversizedSummary}`,
+		},
+	] as any);
+
+	t.true(
+		projectedMessages.some(message =>
+			message.content.includes('[tool context omitted: projection budget exceeded]') ||
+			message.content.includes('[tool context truncated by projection budget]'),
+		),
+	);
 });

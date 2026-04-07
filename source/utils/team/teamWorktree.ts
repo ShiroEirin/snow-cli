@@ -2,6 +2,12 @@ import {execSync} from 'child_process';
 import {existsSync} from 'fs';
 import {join, resolve, relative, isAbsolute} from 'path';
 import {mkdirSync, rmSync} from 'fs';
+import {fileURLToPath, pathToFileURL} from 'url';
+import {
+	getToolExecutionBinding,
+	normalizeBridgeArgumentAliases,
+	type BridgeToolExecutionBinding,
+} from '../session/vcpCompatibility/toolExecutionBinding.js';
 
 const WORKTREE_BASE = join(process.cwd(), '.snow', 'worktrees');
 
@@ -403,15 +409,25 @@ export function enforceWorktreePath(
 
 	const mainRoot = resolve(process.cwd());
 	const resolvedWorktree = resolve(worktreePath);
+	const isWithin = (candidateRoot: string, candidatePath: string): boolean => {
+		const candidateRelativePath = relative(candidateRoot, candidatePath);
+		return (
+			candidateRelativePath === '' ||
+			(
+				!candidateRelativePath.startsWith('..') &&
+				!isAbsolute(candidateRelativePath)
+			)
+		);
+	};
 
 	if (isAbsolute(filePath)) {
 		const resolved = resolve(filePath);
 
-		if (resolved === resolvedWorktree || resolved.startsWith(resolvedWorktree + '/')) {
+		if (isWithin(resolvedWorktree, resolved)) {
 			return resolved;
 		}
 
-		if (resolved === mainRoot || resolved.startsWith(mainRoot + '/')) {
+		if (isWithin(mainRoot, resolved)) {
 			const rel = relative(mainRoot, resolved);
 			return resolve(resolvedWorktree, rel);
 		}
@@ -420,6 +436,187 @@ export function enforceWorktreePath(
 	}
 
 	return resolve(resolvedWorktree, filePath);
+}
+
+function looksLikeBareFileNameCandidate(value: string): boolean {
+	return /^[^\s:*?"<>|]+(?:\.[^\s:*?"<>|]+)+$/u.test(value);
+}
+
+function looksLikeWorktreePathCandidate(
+	value: string,
+	allowBareFileName = true,
+): boolean {
+	const normalizedValue = String(value || '').trim();
+	if (!normalizedValue) {
+		return false;
+	}
+
+	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(normalizedValue)) {
+		return normalizedValue.startsWith('file://');
+	}
+
+	return (
+		/^[a-z]:[\\/]/i.test(normalizedValue) ||
+		/^\\\\/.test(normalizedValue) ||
+		/^[\\/]/.test(normalizedValue) ||
+		/^\.\.?(?:[\\/]|$)/.test(normalizedValue) ||
+		/[\\/]/.test(normalizedValue) ||
+		(allowBareFileName && looksLikeBareFileNameCandidate(normalizedValue))
+	);
+}
+
+function tokenizePathPropertyName(key: string): string[] {
+	return key
+		.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+		.split(/[^a-zA-Z0-9]+/)
+		.map(token => token.trim().toLowerCase())
+		.filter(Boolean)
+		.map(token => {
+			if (token.endsWith('ies')) {
+				return `${token.slice(0, -3)}y`;
+			}
+
+			if (token.length > 1 && token.endsWith('s')) {
+				return token.slice(0, -1);
+			}
+
+			return token;
+		});
+}
+
+function looksLikePathPropertyName(key: string): boolean {
+	const tokens = tokenizePathPropertyName(key);
+	return tokens.some(
+		token =>
+			token === 'path' ||
+			token === 'file' ||
+			token === 'url' ||
+			token === 'uri' ||
+			token === 'image' ||
+			token === 'directory' ||
+			token === 'dir' ||
+			token === 'folder' ||
+			token === 'cwd',
+	);
+}
+
+type BridgeRewriteTraversalMode = 'root' | 'keyedPath' | 'neutral';
+
+function rewriteBridgeValueForWorktree(
+	value: unknown,
+	worktreePath: string,
+	traversalMode: BridgeRewriteTraversalMode = 'root',
+): {value: unknown; blockedPath?: string} {
+	if (typeof value === 'string') {
+		const normalizedValue = value.trim();
+		if (
+			!normalizedValue ||
+			!looksLikeWorktreePathCandidate(
+				normalizedValue,
+				traversalMode !== 'neutral',
+			)
+		) {
+			return {value};
+		}
+
+		if (normalizedValue.startsWith('file://')) {
+			try {
+				const remappedPath = enforceWorktreePath(
+					fileURLToPath(normalizedValue),
+					worktreePath,
+				);
+				return remappedPath === null
+					? {value, blockedPath: value}
+					: {value: pathToFileURL(remappedPath).toString()};
+			} catch {
+				return {value};
+			}
+		}
+
+		const remappedPath = enforceWorktreePath(normalizedValue, worktreePath);
+		return remappedPath === null
+			? {value, blockedPath: value}
+			: {value: pathToFileURL(remappedPath).toString()};
+	}
+
+	if (Array.isArray(value)) {
+		const rewrittenItems: unknown[] = [];
+		for (const item of value) {
+			const rewrittenItem = rewriteBridgeValueForWorktree(
+				item,
+				worktreePath,
+				traversalMode,
+			);
+			if (rewrittenItem.blockedPath) {
+				return rewrittenItem;
+			}
+
+			rewrittenItems.push(rewrittenItem.value);
+		}
+
+		return {value: rewrittenItems};
+	}
+
+	if (typeof value === 'object' && value !== null) {
+		const rewrittenEntries: Record<string, unknown> = {};
+		for (const [key, item] of Object.entries(value)) {
+			const rewrittenItem = rewriteBridgeValueForWorktree(
+				item,
+				worktreePath,
+				looksLikePathPropertyName(key) ? 'keyedPath' : 'neutral',
+			);
+			if (rewrittenItem.blockedPath) {
+				return rewrittenItem;
+			}
+
+			rewrittenEntries[key] = rewrittenItem.value;
+		}
+
+		return {value: rewrittenEntries};
+	}
+
+	return {value};
+}
+
+function rewriteBridgeArgsForWorktree(
+	toolName: string,
+	args: Record<string, unknown>,
+	worktreePath: string,
+	toolPlaneKey?: string,
+): {args: Record<string, unknown>; error?: string} {
+	const binding = getToolExecutionBinding(toolName, toolPlaneKey);
+	if (!binding || binding.kind !== 'bridge') {
+		return {args};
+	}
+
+	const bridgeBinding = binding as BridgeToolExecutionBinding;
+	const normalizedArgs = normalizeBridgeArgumentAliases(args, bridgeBinding);
+	const rewrittenArgs: Record<string, unknown> = {...normalizedArgs};
+
+	for (const argumentBinding of bridgeBinding.argumentBindings || []) {
+		if (
+			!argumentBinding.fileUrlCompatible ||
+			!(argumentBinding.name in rewrittenArgs) ||
+			rewrittenArgs[argumentBinding.name] === undefined
+		) {
+			continue;
+		}
+
+		const rewrittenValue = rewriteBridgeValueForWorktree(
+			rewrittenArgs[argumentBinding.name],
+			worktreePath,
+		);
+		if (rewrittenValue.blockedPath) {
+			return {
+				args,
+				error: `[Worktree Enforcement] Path "${rewrittenValue.blockedPath}" is outside your worktree (${worktreePath}).`,
+			};
+		}
+
+		rewrittenArgs[argumentBinding.name] = rewrittenValue.value;
+	}
+
+	return {args: rewrittenArgs};
 }
 
 /**
@@ -431,8 +628,23 @@ export function rewriteToolArgsForWorktree(
 	toolName: string,
 	args: any,
 	worktreePath: string,
+	toolPlaneKey?: string,
 ): {args: any; error?: string} {
 	const rw = (p: string) => enforceWorktreePath(p, worktreePath);
+	const bridgeArgsResult = rewriteBridgeArgsForWorktree(
+		toolName,
+		args as Record<string, unknown>,
+		worktreePath,
+		toolPlaneKey,
+	);
+	if (bridgeArgsResult.error) {
+		return {
+			args,
+			error: bridgeArgsResult.error,
+		};
+	}
+
+	args = bridgeArgsResult.args;
 
 	// filesystem-read / filesystem-create / filesystem-edit
 	if (toolName.startsWith('filesystem-')) {

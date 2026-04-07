@@ -17,6 +17,7 @@ export type VcpOutboundTransformArgs = {
 	config: VcpCompatibilityConfig;
 	messages: ChatMessage[];
 	allowTimeBridge?: boolean;
+	allowProjectionBridge?: boolean;
 };
 
 export type VcpOutboundTransform = {

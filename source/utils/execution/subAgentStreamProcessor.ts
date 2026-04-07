@@ -10,7 +10,7 @@ import {
 } from '../core/subAgentContextCompressor.js';
 import {resolveVcpModeRequest} from '../session/vcpCompatibility/mode.js';
 import {applyVcpOutboundMessageTransforms} from '../session/vcpCompatibility/applyOutboundMessageTransforms.js';
-import {projectToolMessageForContext} from '../session/toolMessageProjection.js';
+import {compressionCoordinator} from '../core/compressionCoordinator.js';
 import {emitSubAgentMessage} from './subAgentTypes.js';
 import type {SubAgentExecutionContext} from './subAgentTypes.js';
 import type {ChatMessage} from '../../api/chat.js';
@@ -23,6 +23,43 @@ export interface StreamProcessResult {
 	errorMessage: string;
 }
 
+export function shouldApplySubAgentOutboundTransforms(config: {
+	backendMode?: string;
+	toolTransport?: string;
+}): boolean {
+	return config.backendMode === 'vcp' && config.toolTransport !== 'local';
+}
+
+export function buildSubAgentStreamRequestContext(options: {
+	config: any;
+	model: string;
+	messages: ChatMessage[];
+	allowedTools: MCPTool[];
+}) {
+	const resolvedRequest = resolveVcpModeRequest(options.config, {
+		model: options.model,
+		tools: options.allowedTools,
+		toolChoice: 'auto',
+	});
+	const transformedMessages = shouldApplySubAgentOutboundTransforms(
+		options.config,
+	)
+		? applyVcpOutboundMessageTransforms({
+				config: {
+					...options.config,
+					requestMethod: resolvedRequest.requestMethod,
+				},
+				messages: options.messages,
+				allowProjectionBridge: false,
+			})
+		: options.messages;
+
+	return {
+		resolvedRequest,
+		transformedMessages,
+	};
+}
+
 export function createApiStream(
 	config: any,
 	model: string,
@@ -32,17 +69,12 @@ export function createApiStream(
 	configProfile: string | undefined,
 	abortSignal?: AbortSignal,
 ): AsyncIterable<any> {
-	const resolvedRequest = resolveVcpModeRequest(config, {
-		model,
-		tools: allowedTools,
-		toolChoice: 'auto',
-	});
-	const transformedMessages = applyVcpOutboundMessageTransforms({
-		config: {
-			...config,
-			requestMethod: resolvedRequest.requestMethod,
-		},
-		messages: messages.map(message => projectToolMessageForContext(message)),
+	const {resolvedRequest, transformedMessages} =
+		buildSubAgentStreamRequestContext({
+			config,
+			model,
+			messages,
+			allowedTools,
 	});
 
 	if (resolvedRequest.requestMethod === 'anthropic') {
@@ -170,9 +202,7 @@ export async function processStreamEvents(
 
 	// Fallback: count tokens with tiktoken when API doesn't return usage
 	if (ctx.latestTotalTokens === 0 && config.maxContextTokens) {
-		ctx.latestTotalTokens = countMessagesTokens(
-			ctx.messages.map(message => projectToolMessageForContext(message)),
-		);
+		ctx.latestTotalTokens = countMessagesTokens(ctx.messages);
 
 		if (ctx.latestTotalTokens > 0) {
 			const ctxPct = getContextPercentage(
@@ -269,6 +299,8 @@ export async function handleContextCompression(
 		percentage: Math.round(ctxPercentage),
 	});
 
+	const lockId = ctx.instanceId || `subagent-${ctx.agent.id}`;
+	await compressionCoordinator.acquireLock(lockId);
 	try {
 		const compressionResult = await compressSubAgentContext(
 			ctx.messages,
@@ -310,6 +342,8 @@ export async function handleContextCompression(
 			`[SubAgent:${ctx.agent.name}] Context compression failed:`,
 			compressError,
 		);
+	} finally {
+		compressionCoordinator.releaseLock(lockId);
 	}
 
 	return false;

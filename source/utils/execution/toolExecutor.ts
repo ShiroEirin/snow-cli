@@ -163,6 +163,139 @@ export function createTeamUserQuestionAdapter(
 	};
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
+function normalizeBridgePhaseValue(value: unknown): string | undefined {
+	if (typeof value !== 'string') {
+		return undefined;
+	}
+
+	const normalizedValue = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+	return normalizedValue || undefined;
+}
+
+function mergeBridgeIngressPayload(
+	basePayload: Record<string, unknown>,
+	segment: Record<string, unknown>,
+): Record<string, unknown> {
+	const mergedPayload: Record<string, unknown> = {
+		...basePayload,
+		...segment,
+	};
+	delete mergedPayload['accepted'];
+	delete mergedPayload['final'];
+	delete mergedPayload['finalResult'];
+
+	for (const sidecarKey of ['historyContent', 'previewContent', 'statusEvents']) {
+		if (
+			mergedPayload[sidecarKey] === undefined &&
+			basePayload[sidecarKey] !== undefined
+		) {
+			mergedPayload[sidecarKey] = basePayload[sidecarKey];
+		}
+	}
+
+	return mergedPayload;
+}
+
+function normalizeBridgeIngressPayload(payload: unknown): unknown {
+	if (!isRecord(payload)) {
+		return payload;
+	}
+
+	let normalizedPayload: Record<string, unknown> = {...payload};
+	const finalSegment = isRecord(payload['final'])
+		? payload['final']
+		: isRecord(payload['finalResult'])
+		? payload['finalResult']
+		: undefined;
+	const acceptedSegment = isRecord(payload['accepted'])
+		? payload['accepted']
+		: undefined;
+
+	if (finalSegment) {
+		normalizedPayload = mergeBridgeIngressPayload(normalizedPayload, finalSegment);
+	} else if (acceptedSegment) {
+		normalizedPayload = mergeBridgeIngressPayload(
+			normalizedPayload,
+			acceptedSegment,
+		);
+	}
+
+	const phaseHints = [
+		finalSegment ? 'final' : undefined,
+		payload['accepted'] === true || acceptedSegment ? 'accepted' : undefined,
+		normalizedPayload['phase'],
+		normalizedPayload['stage'],
+		normalizedPayload['state'],
+		normalizedPayload['kind'],
+		normalizedPayload['status'],
+	];
+	const normalizedPhase =
+		phaseHints
+			.map(hint => normalizeBridgePhaseValue(hint))
+			.find(Boolean) || undefined;
+
+	const asyncStatus = isRecord(normalizedPayload['asyncStatus'])
+		? {...normalizedPayload['asyncStatus']}
+		: {};
+	const taskId =
+		String(
+			normalizedPayload['taskId'] ||
+				asyncStatus['taskId'] ||
+				'',
+		).trim() || undefined;
+
+	const isAcceptedIngress =
+		normalizedPhase === 'accepted' ||
+		normalizedPhase === 'queued' ||
+		normalizedPhase === 'submitted';
+	const isFinalIngress =
+		normalizedPhase === 'final' ||
+		normalizedPhase === 'result' ||
+		normalizedPhase === 'completed' ||
+		normalizedPhase === 'done';
+
+	if (isAcceptedIngress) {
+		normalizedPayload = {
+			...normalizedPayload,
+			status: 'accepted',
+			asyncStatus: {
+				...asyncStatus,
+				enabled: true,
+				state: 'accepted',
+				event:
+					normalizeBridgePhaseValue(asyncStatus['event']) === 'result'
+						? 'lifecycle'
+						: asyncStatus['event'] || 'lifecycle',
+				...(taskId ? {taskId} : {}),
+			},
+		};
+	}
+
+	if (isFinalIngress) {
+		const hasError = normalizedPayload['error'] !== undefined;
+		normalizedPayload = {
+			...normalizedPayload,
+			status: hasError ? 'error' : 'success',
+			asyncStatus: {
+				...asyncStatus,
+				enabled:
+					asyncStatus['enabled'] === undefined
+						? Boolean(taskId)
+						: asyncStatus['enabled'],
+				state: hasError ? 'error' : 'completed',
+				event: 'result',
+				...(taskId ? {taskId} : {}),
+			},
+		};
+	}
+
+	return normalizedPayload;
+}
+
 async function executeBridgeToolCall(options: {
 	toolName: string;
 	args: Record<string, any>;
@@ -431,6 +564,14 @@ export async function executeToolCall(
 		else if (toolCall.function.name.startsWith('subagent-')) {
 			const agentId = toolCall.function.name.substring('subagent-'.length);
 			const subAgentPrompt = (args['prompt'] as string) || '';
+			if (!subAgentPrompt.trim()) {
+				result = {
+					tool_call_id: toolCall.id,
+					role: 'tool',
+					content: 'Error: Sub-agent prompt is required',
+				};
+				return result;
+			}
 
 			// Look up agent name from config for tracking
 			let agentName = agentId;
@@ -590,8 +731,9 @@ export async function executeToolCall(
 							toolPlaneKey: toolSnapshotKey || currentSessionId,
 							abortSignal,
 							onStatus: payload => {
-								const bridgeSummary =
-									summarizeBridgeStatusPayload(payload);
+								const bridgeSummary = summarizeBridgeStatusPayload(
+									normalizeBridgeIngressPayload(payload),
+								);
 								if (!bridgeSummary) {
 									return;
 								}
@@ -610,45 +752,57 @@ export async function executeToolCall(
 						onTokenUpdate,
 					  );
 
+			const normalizedToolResult =
+				executionBinding.kind === 'bridge'
+					? normalizeBridgeIngressPayload(toolResult)
+					: toolResult;
+
 			// Pre-extract edit diff data from raw result before stringification/truncation
 			// This ensures DiffViewer data survives token limit truncation
 			let editDiffData: Record<string, any> | undefined;
 			if (
-				typeof toolResult === 'object' && toolResult !== null &&
+				typeof normalizedToolResult === 'object' &&
+				normalizedToolResult !== null &&
 				toolCall.function.name === 'filesystem-edit'
 			) {
-				if (toolResult.oldContent && toolResult.newContent) {
+				if (normalizedToolResult.oldContent && normalizedToolResult.newContent) {
 					editDiffData = {
-						oldContent: toolResult.oldContent,
-						newContent: toolResult.newContent,
+						oldContent: normalizedToolResult.oldContent,
+						newContent: normalizedToolResult.newContent,
 						filename: args['filePath'],
-						completeOldContent: toolResult.completeOldContent,
-						completeNewContent: toolResult.completeNewContent,
-						contextStartLine: toolResult.contextStartLine,
+						completeOldContent: normalizedToolResult.completeOldContent,
+						completeNewContent: normalizedToolResult.completeNewContent,
+						contextStartLine: normalizedToolResult.contextStartLine,
 					};
-				} else if (toolResult.results && Array.isArray(toolResult.results)) {
+				} else if (
+					normalizedToolResult.results &&
+					Array.isArray(normalizedToolResult.results)
+				) {
 					editDiffData = {
-						batchResults: toolResult.results,
+						batchResults: normalizedToolResult.results,
 						isBatch: true,
 					};
 				}
 			}
 
 			// Extract multimodal content (text + images)
-			const {textContent, images} = extractMultimodalContent(toolResult);
-			const bridgeSidecar = extractToolResultSidecar(toolResult);
+			const {textContent, images} = extractMultimodalContent(normalizedToolResult);
+			const bridgeSidecar = extractToolResultSidecar(normalizedToolResult);
 			const toolHistoryArtifacts =
 				bridgeSidecar.historyContent || bridgeSidecar.previewContent
 					? {
 							historyContent:
 								bridgeSidecar.historyContent ||
-								buildToolHistoryArtifacts(toolResult, textContent).historyContent,
+								buildToolHistoryArtifacts(
+									normalizedToolResult,
+									textContent,
+								).historyContent,
 							previewContent: bridgeSidecar.previewContent,
 					  }
-					: buildToolHistoryArtifacts(toolResult, textContent);
+					: buildToolHistoryArtifacts(normalizedToolResult, textContent);
 			const bridgeSummary =
 				executionBinding.kind === 'bridge'
-					? summarizeBridgeStatusPayload(toolResult)
+					? summarizeBridgeStatusPayload(normalizedToolResult)
 					: null;
 
 			result = {

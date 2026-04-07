@@ -1,5 +1,8 @@
 import type {MCPServiceTools} from '../../execution/mcpToolsManager.js';
-import type {BridgeToolExecutionBinding} from './toolExecutionBinding.js';
+import type {
+	BridgeToolArgumentBinding,
+	BridgeToolExecutionBinding,
+} from './toolExecutionBinding.js';
 
 export type BridgeManifestCommand = {
 	commandName?: string;
@@ -8,6 +11,19 @@ export type BridgeManifestCommand = {
 	description?: string;
 	parameters?: unknown[];
 	example?: string;
+	metadata?: BridgeMetadataSidecar;
+	sidecar?: BridgeMetadataSidecar;
+	revision?: string;
+	reloadedAt?: string;
+	requiresApproval?: boolean;
+	approvalTimeoutMs?: number;
+};
+
+export type BridgeMetadataSidecar = {
+	revision?: string;
+	reloadedAt?: string;
+	requiresApproval?: boolean;
+	approvalTimeoutMs?: number;
 };
 
 export type BridgeManifestPlugin = {
@@ -16,6 +32,12 @@ export type BridgeManifestPlugin = {
 	description: string;
 	pluginType?: string;
 	bridgeCommands: BridgeManifestCommand[];
+	metadata?: BridgeMetadataSidecar;
+	sidecar?: BridgeMetadataSidecar;
+	revision?: string;
+	reloadedAt?: string;
+	requiresApproval?: boolean;
+	approvalTimeoutMs?: number;
 };
 
 export type BridgeManifestResponse = {
@@ -23,6 +45,12 @@ export type BridgeManifestResponse = {
 	vcpVersion?: string;
 	capabilities?: Record<string, unknown>;
 	plugins: BridgeManifestPlugin[];
+	metadata?: BridgeMetadataSidecar;
+	sidecar?: BridgeMetadataSidecar;
+	revision?: string;
+	reloadedAt?: string;
+	requiresApproval?: boolean;
+	approvalTimeoutMs?: number;
 };
 
 export type BridgeModelToolDescriptor = {
@@ -32,12 +60,14 @@ export type BridgeModelToolDescriptor = {
 		description: string;
 		parameters: Record<string, unknown>;
 	};
+	metadata?: BridgeMetadataSidecar;
 };
 
 export type BridgeToolPlane = {
 	modelTools: BridgeModelToolDescriptor[];
 	servicesInfo: MCPServiceTools[];
 	bindings: BridgeToolExecutionBinding[];
+	metadata?: BridgeMetadataSidecar;
 };
 
 type BridgeToolParameterDefinition = {
@@ -45,6 +75,8 @@ type BridgeToolParameterDefinition = {
 	required: boolean;
 	schema: Record<string, unknown>;
 	source: 'structured' | 'description';
+	aliases?: string[];
+	fileUrlCompatible?: boolean;
 };
 
 const SUPPORTED_BRIDGE_PLUGIN_TYPES = new Set([
@@ -52,6 +84,162 @@ const SUPPORTED_BRIDGE_PLUGIN_TYPES = new Set([
 	'asynchronous',
 	'hybridservice',
 ]);
+
+function normalizeMetadataString(value: unknown): string | undefined {
+	const normalizedValue = String(value || '').trim();
+	return normalizedValue || undefined;
+}
+
+function normalizeMetadataBoolean(value: unknown): boolean | undefined {
+	if (typeof value === 'boolean') {
+		return value;
+	}
+
+	if (typeof value === 'string') {
+		const normalizedValue = value.trim().toLowerCase();
+		if (normalizedValue === 'true' || normalizedValue === '1') {
+			return true;
+		}
+
+		if (normalizedValue === 'false' || normalizedValue === '0') {
+			return false;
+		}
+	}
+
+	return undefined;
+}
+
+function normalizeMetadataNumber(value: unknown): number | undefined {
+	if (typeof value === 'number') {
+		return Number.isFinite(value) && value >= 0 ? value : undefined;
+	}
+
+	if (typeof value === 'string') {
+		const normalizedValue = Number(value.trim());
+		return Number.isFinite(normalizedValue) && normalizedValue >= 0
+			? normalizedValue
+			: undefined;
+	}
+
+	return undefined;
+}
+
+function normalizeStringList(value: unknown): string[] {
+	if (Array.isArray(value)) {
+		return Array.from(
+			new Set(
+				value
+					.map(item => String(item || '').trim())
+					.filter(Boolean),
+			),
+		);
+	}
+
+	if (typeof value === 'string') {
+		return Array.from(
+			new Set(
+				value
+					.split(/\s*(?:,|，|、|\|)\s*/u)
+					.map(item => item.trim())
+					.filter(Boolean),
+			),
+		);
+	}
+
+	return [];
+}
+
+function isBridgeMetadataCandidate(
+	value: unknown,
+): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
+export function mergeBridgeMetadataSidecars(
+	...candidates: unknown[]
+): BridgeMetadataSidecar | undefined {
+	const mergedMetadata: BridgeMetadataSidecar = {};
+
+	for (const candidate of candidates) {
+		if (!isBridgeMetadataCandidate(candidate)) {
+			continue;
+		}
+
+		const revision = normalizeMetadataString(candidate['revision']);
+		if (revision !== undefined) {
+			mergedMetadata.revision = revision;
+		}
+
+		const reloadedAt = normalizeMetadataString(candidate['reloadedAt']);
+		if (reloadedAt !== undefined) {
+			mergedMetadata.reloadedAt = reloadedAt;
+		}
+
+		const requiresApproval = normalizeMetadataBoolean(
+			candidate['requiresApproval'],
+		);
+		if (requiresApproval !== undefined) {
+			mergedMetadata.requiresApproval = requiresApproval;
+		}
+
+		const approvalTimeoutMs = normalizeMetadataNumber(
+			candidate['approvalTimeoutMs'],
+		);
+		if (approvalTimeoutMs !== undefined) {
+			mergedMetadata.approvalTimeoutMs = approvalTimeoutMs;
+		}
+	}
+
+	return Object.keys(mergedMetadata).length > 0 ? mergedMetadata : undefined;
+}
+
+function normalizeBridgeManifestCommand(
+	command: BridgeManifestCommand,
+): BridgeManifestCommand {
+	const metadata = mergeBridgeMetadataSidecars(
+		command.metadata,
+		command.sidecar,
+		command,
+	);
+
+	return metadata ? {...command, metadata} : command;
+}
+
+function normalizeBridgeManifestPlugin(
+	plugin: BridgeManifestPlugin,
+): BridgeManifestPlugin {
+	const metadata = mergeBridgeMetadataSidecars(
+		plugin.metadata,
+		plugin.sidecar,
+		plugin,
+	);
+
+	return {
+		...plugin,
+		...(metadata ? {metadata} : {}),
+		bridgeCommands: (plugin.bridgeCommands || []).map(command =>
+			normalizeBridgeManifestCommand(command),
+		),
+	};
+}
+
+export function normalizeBridgeManifestResponse(
+	manifest: BridgeManifestResponse,
+): BridgeManifestResponse {
+	const metadata = mergeBridgeMetadataSidecars(
+		manifest.metadata,
+		manifest.sidecar,
+		manifest,
+	);
+
+	return {
+		...manifest,
+		...(metadata ? {metadata} : {}),
+		plugins: (manifest.plugins || []).map(plugin =>
+			normalizeBridgeManifestPlugin(plugin),
+		),
+	};
+}
 
 function slugifySegment(value: string): string {
 	return value
@@ -360,6 +548,8 @@ function normalizeParameterDefinition(
 		required?: boolean;
 		typeHint?: string;
 		source?: 'structured' | 'description';
+		aliases?: string[];
+		fileUrlCompatible?: boolean;
 	},
 ): BridgeToolParameterDefinition {
 	const description = options?.description?.trim();
@@ -385,7 +575,163 @@ function normalizeParameterDefinition(
 		required: options?.required ?? false,
 		source: options?.source ?? 'structured',
 		schema,
+		...(options?.aliases?.length ? {aliases: options.aliases} : {}),
+		...(options?.fileUrlCompatible ? {fileUrlCompatible: true} : {}),
 	};
+}
+
+function normalizeParameterAliasName(value: string): string {
+	return String(value || '')
+		.trim()
+		.replace(/^[`'"“”‘’]+|[`'"“”‘’]+$/g, '')
+		.trim();
+}
+
+function isLikelyParameterAlias(value: string): boolean {
+	return /^[A-Za-z_][\w.-]*$/.test(value);
+}
+
+function parseParameterNameAliases(rawName: string): {
+	name: string;
+	aliases: string[];
+} {
+	const normalizedName = normalizeParameterAliasName(rawName);
+	if (!normalizedName) {
+		return {
+			name: '',
+			aliases: [],
+		};
+	}
+
+	const aliasSegments = normalizedName
+		.split(/\s*(?:\/|\||、|，|,)\s*/u)
+		.map(segment => normalizeParameterAliasName(segment))
+		.filter(Boolean);
+	if (
+		aliasSegments.length > 1 &&
+		aliasSegments.every(segment => isLikelyParameterAlias(segment))
+	) {
+		return {
+			name: aliasSegments[0] || '',
+			aliases: Array.from(new Set(aliasSegments.slice(1))),
+		};
+	}
+
+	return {
+		name: normalizedName,
+		aliases: [],
+	};
+}
+
+function extractAliasHints(
+	...hints: Array<string | undefined>
+): string[] {
+	const aliasCandidates: string[] = [];
+
+	for (const hint of hints) {
+		const normalizedHint = String(hint || '').trim();
+		if (!normalizedHint) {
+			continue;
+		}
+
+		for (const match of normalizedHint.matchAll(
+			/(?:aliases?|别名)\s*(?:are|is|为|[:：])\s*([A-Za-z0-9_./|,，、 -]+)/giu,
+		)) {
+			const rawValue = match[1];
+			if (!rawValue) {
+				continue;
+			}
+
+			aliasCandidates.push(
+				...rawValue
+					.split(/\s*(?:\/|\||,|，|、)\s*/u)
+					.map(segment => normalizeParameterAliasName(segment))
+					.filter(isLikelyParameterAlias),
+			);
+		}
+	}
+
+	return Array.from(new Set(aliasCandidates));
+}
+
+function resolveParameterAliasMetadata(
+	candidate: Record<string, unknown>,
+): string[] {
+	const binding =
+		candidate['binding'] && typeof candidate['binding'] === 'object'
+			? (candidate['binding'] as Record<string, unknown>)
+			: undefined;
+	const metadata =
+		candidate['metadata'] && typeof candidate['metadata'] === 'object'
+			? (candidate['metadata'] as Record<string, unknown>)
+			: undefined;
+
+	return Array.from(
+		new Set([
+			...normalizeStringList(candidate['aliases']),
+			...normalizeStringList(candidate['alias']),
+			...normalizeStringList(binding?.['aliases']),
+			...normalizeStringList(binding?.['alias']),
+			...normalizeStringList(metadata?.['aliases']),
+			...normalizeStringList(metadata?.['alias']),
+		]),
+	);
+}
+
+function normalizeBooleanHint(value: unknown): boolean | undefined {
+	if (typeof value === 'boolean') {
+		return value;
+	}
+
+	if (typeof value === 'string') {
+		const normalizedValue = value.trim().toLowerCase();
+		if (['true', '1', 'yes', 'y'].includes(normalizedValue)) {
+			return true;
+		}
+
+		if (['false', '0', 'no', 'n'].includes(normalizedValue)) {
+			return false;
+		}
+	}
+
+	return undefined;
+}
+
+function resolveFileUrlCompatibility(
+	candidate: Record<string, unknown>,
+	hints: Array<string | undefined>,
+): boolean {
+	const binding =
+		candidate['binding'] && typeof candidate['binding'] === 'object'
+			? (candidate['binding'] as Record<string, unknown>)
+			: undefined;
+	const metadata =
+		candidate['metadata'] && typeof candidate['metadata'] === 'object'
+			? (candidate['metadata'] as Record<string, unknown>)
+			: undefined;
+	const explicitHintCandidates = [
+		candidate['fileUrlCompatible'],
+		candidate['acceptsFileUrl'],
+		candidate['supportsFileUrl'],
+		binding?.['fileUrlCompatible'],
+		binding?.['acceptsFileUrl'],
+		binding?.['supportsFileUrl'],
+		metadata?.['fileUrlCompatible'],
+		metadata?.['acceptsFileUrl'],
+		metadata?.['supportsFileUrl'],
+	];
+	for (const hint of explicitHintCandidates) {
+		const normalizedHint = normalizeBooleanHint(hint);
+		if (normalizedHint !== undefined) {
+			return normalizedHint;
+		}
+	}
+
+	return hints.some(hint =>
+		/(?:file:\/\/|file url|file-uri|本地文件路径|本地路径|文件路径)/iu.test(
+			String(hint || ''),
+		),
+	);
 }
 
 function normalizeParameterDefinitions(
@@ -395,10 +741,18 @@ function normalizeParameterDefinitions(
 
 	for (const parameter of parameters) {
 		if (typeof parameter === 'string') {
+			const parsedParameterName = parseParameterNameAliases(parameter);
+			if (!parsedParameterName.name) {
+				continue;
+			}
+
 			definitions.set(
-				parameter,
-				normalizeParameterDefinition(parameter, {
+				parsedParameterName.name,
+				normalizeParameterDefinition(parsedParameterName.name, {
 					source: 'structured',
+					...(parsedParameterName.aliases.length > 0
+						? {aliases: parsedParameterName.aliases}
+						: {}),
 				}),
 			);
 			continue;
@@ -414,35 +768,47 @@ function normalizeParameterDefinitions(
 			required?: unknown;
 			type?: unknown;
 		};
-		const name =
-			typeof candidate.name === 'string' ? candidate.name.trim() : '';
+		const parsedParameterName = parseParameterNameAliases(
+			typeof candidate.name === 'string' ? candidate.name : '',
+		);
+		const name = parsedParameterName.name;
 		if (!name) {
 			continue;
 		}
 
+		const description =
+			typeof candidate.description === 'string'
+				? candidate.description
+				: undefined;
+		const typeHint =
+			typeof candidate.type === 'string'
+				? candidate.type
+				: description;
+		const aliases = Array.from(
+			new Set([
+				...parsedParameterName.aliases,
+				...resolveParameterAliasMetadata(parameter as Record<string, unknown>),
+				...extractAliasHints(typeHint, description),
+			]),
+		).filter(alias => alias !== name);
+		const fileUrlCompatible = resolveFileUrlCompatibility(
+			parameter as Record<string, unknown>,
+			[typeHint, description],
+		);
+
 		definitions.set(
 			name,
 			normalizeParameterDefinition(name, {
-				description:
-					typeof candidate.description === 'string'
-						? candidate.description
-						: undefined,
+				description,
 				required:
 					candidate.required === true ||
 					(typeof candidate.required === 'string' &&
 						isRequiredHint(candidate.required)) ||
-					isRequiredHint(
-						typeof candidate.description === 'string'
-							? candidate.description
-							: undefined,
-					),
-				typeHint:
-					typeof candidate.type === 'string'
-						? candidate.type
-						: typeof candidate.description === 'string'
-						? candidate.description
-						: undefined,
+					isRequiredHint(description),
+				typeHint,
 				source: 'structured',
+				...(aliases.length > 0 ? {aliases} : {}),
+				...(fileUrlCompatible ? {fileUrlCompatible: true} : {}),
 			}),
 		);
 	}
@@ -473,10 +839,7 @@ function shouldSkipDescriptionParameter(
 }
 
 function normalizeDescriptionParameterName(name: string): string {
-	return String(name || '')
-		.trim()
-		.replace(/^[`'"“”‘’]+|[`'"“”‘’]+$/g, '')
-		.trim();
+	return normalizeParameterAliasName(name);
 }
 
 function isLegacySectionStart(line: string): boolean {
@@ -608,16 +971,17 @@ function extractParameterDefinitionsFromDescription(
 		}
 
 		const match =
-			/^(?:[-*•]|\d+\.)?\s*(?:`(?<backtickName>[^`]+)`|(?<plainName>[A-Za-z_][\w.-]*))(?:\s*[（(](?<meta>[^)）]+)[)）])?\s*[:：]\s*(?<description>.+)$/.exec(
+			/^(?:[-*•]|\d+\.)?\s*(?<rawName>`[^`]+`|[A-Za-z_][\w./|,-]*)(?:\s*[（(](?<meta>[^)）]+)[)）])?\s*[:：]\s*(?<description>.+)$/.exec(
 				line,
 			);
 		if (!match?.groups) {
 			continue;
 		}
 
-		const name = normalizeDescriptionParameterName(
-			match.groups['backtickName'] || match.groups['plainName'] || '',
+		const parsedParameterName = parseParameterNameAliases(
+			match.groups['rawName'] || '',
 		);
+		const name = normalizeDescriptionParameterName(parsedParameterName.name);
 		const parameterDescription = match.groups['description']?.trim();
 		const meta = match.groups['meta']?.trim();
 		if (
@@ -632,6 +996,16 @@ function extractParameterDefinitionsFromDescription(
 		const typeHint = [meta, parameterDescription].filter(Boolean).join(', ');
 		const required =
 			isRequiredHint(meta) || isRequiredHint(parameterDescription);
+		const aliases = Array.from(
+			new Set([
+				...parsedParameterName.aliases,
+				...extractAliasHints(meta, parameterDescription),
+			]),
+		).filter(alias => alias !== name);
+		const fileUrlCompatible = resolveFileUrlCompatibility(
+			{},
+			[meta, parameterDescription],
+		);
 
 		definitions.set(
 			name,
@@ -640,6 +1014,8 @@ function extractParameterDefinitionsFromDescription(
 				required,
 				typeHint,
 				source: 'description',
+				...(aliases.length > 0 ? {aliases} : {}),
+				...(fileUrlCompatible ? {fileUrlCompatible: true} : {}),
 			}),
 		);
 	}
@@ -716,11 +1092,12 @@ function shouldTranslateBridgePlugin(plugin: BridgeManifestPlugin): boolean {
 export function translateBridgeManifestToToolPlane(
 	manifest: BridgeManifestResponse,
 ): BridgeToolPlane {
+	const normalizedManifest = normalizeBridgeManifestResponse(manifest);
 	const modelTools: BridgeModelToolDescriptor[] = [];
 	const servicesInfo: MCPServiceTools[] = [];
 	const bindings: BridgeToolExecutionBinding[] = [];
 
-	for (const plugin of manifest.plugins) {
+	for (const plugin of normalizedManifest.plugins) {
 		if (!shouldTranslateBridgePlugin(plugin)) {
 			continue;
 		}
@@ -752,11 +1129,31 @@ export function translateBridgeManifestToToolPlane(
 			const stringifyArgumentNames = parameterDefinitions
 				.filter(parameter => parameter.source === 'description')
 				.map(parameter => parameter.name);
+			const argumentBindings: BridgeToolArgumentBinding[] = parameterDefinitions
+				.filter(
+					parameter =>
+						(parameter.aliases && parameter.aliases.length > 0) ||
+						parameter.fileUrlCompatible === true,
+				)
+				.map(parameter => ({
+					name: parameter.name,
+					...(parameter.aliases && parameter.aliases.length > 0
+						? {aliases: parameter.aliases}
+						: {}),
+					...(parameter.fileUrlCompatible
+						? {fileUrlCompatible: true}
+						: {}),
+				}));
 			const parameters = buildParametersSchema(parameterDefinitions, {
 				strictDescriptionContract:
 					structuredParameterDefinitions.length === 0 &&
 					hasStrictDescriptionContract(command.description || ''),
 			});
+			const metadata = mergeBridgeMetadataSidecars(
+				normalizedManifest.metadata,
+				plugin.metadata,
+				command.metadata,
+			);
 
 			modelTools.push({
 				type: 'function',
@@ -765,6 +1162,7 @@ export function translateBridgeManifestToToolPlane(
 					description,
 					parameters,
 				},
+				...(metadata ? {metadata} : {}),
 			});
 
 			pluginTools.push({
@@ -780,6 +1178,9 @@ export function translateBridgeManifestToToolPlane(
 				displayName: plugin.displayName,
 				commandName,
 				stringifyArgumentNames,
+				...(argumentBindings.length > 0
+					? {argumentBindings}
+					: {}),
 			});
 		}
 
@@ -795,5 +1196,6 @@ export function translateBridgeManifestToToolPlane(
 		modelTools,
 		servicesInfo,
 		bindings,
+		...(normalizedManifest.metadata ? {metadata: normalizedManifest.metadata} : {}),
 	};
 }

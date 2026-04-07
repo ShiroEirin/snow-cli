@@ -6,6 +6,27 @@ import {hashBasedSnapshotManager} from '../../../utils/codebase/hashBasedSnapsho
 
 export type RollbackMode = 'conversation' | 'both' | 'files';
 
+export function resolveCompactRollbackSelection(
+	hasFiles: boolean,
+	mode: RollbackMode,
+	selectedFiles: string[],
+	totalFileCount: number,
+): [RollbackMode, string[]?] {
+	if (!hasFiles) {
+		return ['conversation'];
+	}
+
+	if (mode === 'conversation') {
+		return ['conversation'];
+	}
+
+	if (selectedFiles.length === totalFileCount) {
+		return [mode];
+	}
+
+	return [mode, selectedFiles];
+}
+
 type Props = {
 	fileCount: number;
 	filePaths: string[];
@@ -13,6 +34,7 @@ type Props = {
 	teamCount?: number;
 	previewSessionId?: string;
 	previewTargetMessageIndex?: number;
+	terminalWidth: number;
 	onConfirm: (mode: RollbackMode | null, selectedFiles?: string[]) => void;
 };
 
@@ -23,6 +45,7 @@ export default function FileRollbackConfirmation({
 	teamCount,
 	previewSessionId,
 	previewTargetMessageIndex,
+	terminalWidth,
 	onConfirm,
 }: Props) {
 	const {t} = useI18n();
@@ -108,9 +131,11 @@ export default function FileRollbackConfirmation({
 		{label: t.fileRollback.filesOnly, value: 'files'},
 	];
 
+	const hasFiles = fileCount > 0;
+
 	useInput((input, key) => {
 		// Tab - toggle full file list view
-		if (key.tab) {
+		if (key.tab && hasFiles) {
 			// Leaving file list mode should close the diff
 			if (showFullList) {
 				closePreviewDiff();
@@ -196,16 +221,13 @@ export default function FileRollbackConfirmation({
 			// Enter - confirm selection (only when not in full list mode)
 			if (key.return) {
 				const mode = options[selectedIndex]?.value ?? 'conversation';
-				if (mode === 'both' || mode === 'files') {
-					const selectedFilesArray = Array.from(selectedFiles);
-					if (selectedFilesArray.length === filePaths.length) {
-						onConfirm(mode);
-					} else {
-						onConfirm(mode, selectedFilesArray);
-					}
-				} else {
-					onConfirm('conversation');
-				}
+				const [confirmedMode, confirmedFiles] = resolveCompactRollbackSelection(
+					hasFiles,
+					mode,
+					Array.from(selectedFiles),
+					filePaths.length,
+				);
+				onConfirm(confirmedMode, confirmedFiles);
 				return;
 			}
 		}
@@ -239,12 +261,19 @@ export default function FileRollbackConfirmation({
 		showFullList && fileScrollIndex + maxFilesToShowFull < filePaths.length;
 
 	const selectedCount = selectedFiles.size;
-
-	// Check if there are any files to rollback
-	const hasFiles = fileCount > 0;
+	const hasNotebookRollback = notebookCount !== undefined && notebookCount > 0;
+	const hasTeamRollback = teamCount !== undefined && teamCount > 0;
+	const shouldShowNotebookRollback = hasFiles && hasNotebookRollback;
+	const separatorWidth = Math.max(0, terminalWidth - 4);
 
 	return (
 		<Box flexDirection="column" marginX={1} marginBottom={1} padding={1}>
+			{/* Top border separator */}
+			<Box height={1}>
+				<Text color="gray" dimColor>
+					{'─'.repeat(separatorWidth)}
+				</Text>
+			</Box>
 			<Box marginBottom={1}>
 				<Text color="yellow" bold>
 					⚠ {t.fileRollback.title}
@@ -257,13 +286,28 @@ export default function FileRollbackConfirmation({
 					<Box marginBottom={1}>
 						<Text color="white">{t.fileRollback.noFilesConfirm}</Text>
 					</Box>
-
-					<Box marginTop={1}>
-						<Text color="gray" dimColor>
-							{t.fileRollback.noFilesConfirmHint}
-						</Text>
-					</Box>
 				</>
+			)}
+
+			{/* Notebook rollback info */}
+			{shouldShowNotebookRollback && (
+				<Box marginBottom={1} marginLeft={2}>
+					<Text color="magenta">
+						{t.fileRollback.notebookCount.replace(
+							'{count}',
+							String(notebookCount),
+						)}
+					</Text>
+				</Box>
+			)}
+
+			{/* Team cleanup info */}
+			{hasTeamRollback && (
+				<Box marginBottom={1} marginLeft={2}>
+					<Text color="cyan">
+						⚑ {t.fileRollback.teamCount.replace('{count}', String(teamCount))}
+					</Text>
+				</Box>
 			)}
 
 			{/* Has files mode - full file rollback UI */}
@@ -329,28 +373,6 @@ export default function FileRollbackConfirmation({
 						)}
 					</Box>
 
-					{/* Notebook rollback info */}
-					{notebookCount !== undefined && notebookCount > 0 && (
-						<Box marginBottom={1} marginLeft={2}>
-							<Text color="magenta">
-								{t.fileRollback.notebookCount.replace(
-									'{count}',
-									String(notebookCount),
-								)}
-							</Text>
-						</Box>
-					)}
-
-					{/* Team cleanup info */}
-					{teamCount !== undefined && teamCount > 0 && (
-						<Box marginBottom={1} marginLeft={2}>
-							<Text color="cyan">
-								⚑{' '}
-								{t.fileRollback.teamCount.replace('{count}', String(teamCount))}
-							</Text>
-						</Box>
-					)}
-
 					{!showFullList && (
 						<>
 							<Box marginBottom={1}>
@@ -383,6 +405,14 @@ export default function FileRollbackConfirmation({
 						</Text>
 					</Box>
 				</>
+			)}
+
+			{!hasFiles && (
+				<Box marginTop={1}>
+					<Text color="gray" dimColor>
+						{t.fileRollback.noFilesConfirmHint}
+					</Text>
+				</Box>
 			)}
 		</Box>
 	);

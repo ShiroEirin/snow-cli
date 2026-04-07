@@ -1,9 +1,25 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
 import os from 'node:os';
 import {mkdirSync, mkdtempSync, writeFileSync} from 'node:fs';
-import {join, resolve} from 'node:path';
+import {join, resolve, sep} from 'node:path';
 import {pathToFileURL} from 'node:url';
+
+const require = createRequire(import.meta.url);
+const isAvaRuntime =
+	process.env.AVA_PATH ||
+	process.argv.some(argument => argument.toLowerCase().includes(`${sep}ava${sep}`))
+		? true
+		: false;
+const testModule = isAvaRuntime ? require('ava') : require('node:test');
+const rawTest = testModule.default ?? testModule;
+const test = isAvaRuntime
+	? (title, implementation) =>
+		rawTest(title, async testContext => {
+			await implementation(testContext);
+			testContext.pass();
+		})
+	: rawTest;
 
 import {
 	buildSubagentModeScenarios,
@@ -13,8 +29,10 @@ import {
 	parseArguments,
 	resolveCliEntrypoint,
 	resolveModes,
+	resolveModesForSuite,
 	resolveReadTarget,
 	resolveRuntimeWorkDir,
+	validateBridgeSearchToolCall,
 	validateBridgeSearchToolResult,
 	waitForScenarioResultFromSession,
 } from '../vcp-blackbox.mjs';
@@ -126,6 +144,33 @@ test('parseArguments accepts suite and probe options', () => {
 	assert.deepEqual(options.modes, ['local']);
 	assert.equal(options.probeFile, 'main.py');
 	assert.equal(options.probeExpected, 'import tkinter as tk');
+});
+
+test('subagent suite enables local, bridge, and hybrid modes when bridge access is configured', () => {
+	const resolvedModes = resolveModesForSuite(
+		'subagent',
+		{
+			bridgeVcpKey: '123456',
+		},
+		[],
+	);
+
+	assert.deepEqual(resolvedModes, ['local', 'bridge', 'hybrid']);
+	assert.equal(buildSubagentModeScenarios('import tkinter as tk').bridge.length, 1);
+});
+
+test('subagent suite rejects unsupported explicit modes', () => {
+	assert.throws(
+		() =>
+			resolveModesForSuite(
+				'subagent',
+				{
+					bridgeVcpKey: '123456',
+				},
+				['imaginary-mode'],
+			),
+		/Suite "subagent" does not support mode\(s\): imaginary-mode/,
+	);
 });
 
 test('subagent scenario validation accepts a clean internal filesystem-read path', () => {
@@ -252,7 +297,7 @@ test('subagent scenario validation rejects leaked top-level filesystem-read fall
 				previousMessageCount: 0,
 				scenario,
 			}),
-		/extra top-level tool calls/,
+		/Unexpected top-level tools were recorded for the subagent scenario: filesystem-read/,
 	);
 });
 
@@ -364,7 +409,7 @@ test('subagent scenario validation rejects an internal filesystem-read with the 
 				previousMessageCount: 0,
 				scenario,
 			}),
-		/did not match the expected first line/,
+		/did not match the expected first line|did not exactly match the expected final answer text/,
 	);
 });
 
@@ -422,6 +467,210 @@ test('subagent scenario validation accepts a relative probe path inside the same
 	assert.equal(result.finalAssistantPreview, 'import tkinter as tk');
 });
 
+test('subagent bridge scenario prompt forbids top-level bridge fallbacks', () => {
+	const scenario = buildSubagentModeScenarios('ignored').bridge[0];
+
+	assert.match(scenario.prompt, /Call exactly one top-level tool/i);
+	assert.match(scenario.prompt, /Do not call `vcp-agentassistant-askmaidagent`/);
+	assert.match(scenario.prompt, /exact literal term `SnowBridge`/);
+	assert.match(scenario.prompt, /stop instead of falling back/i);
+});
+
+test('subagent scenario validation reports unexpected top-level fallback tools directly', () => {
+	const scenario = buildSubagentModeScenarios('Plugin.js').bridge[0];
+
+	assert.throws(
+		() =>
+			scenario.validateMessages({
+				messages: [
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'wrong-top-level',
+								function: {
+									name: 'vcp-agentassistant-askmaidagent',
+									arguments: '{"prompt":"search SnowBridge"}',
+								},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'wrong-top-level',
+						content: '{"status":"error"}',
+					},
+				],
+				previousMessageCount: 0,
+				scenario,
+			}),
+		/Unexpected top-level tools were recorded for the subagent scenario: vcp-agentassistant-askmaidagent/,
+	);
+});
+
+test('subagent scenario validation allows self-correcting retries when every top-level tool remains subagent-agent_explore', () => {
+	const scenario = buildSubagentModeScenarios('#!/usr/bin/env node').hybrid[0];
+	scenario.expectedProbePath = 'D:/repo/source/cli.tsx';
+	scenario.expectedProbeRoot = 'D:/repo';
+
+	const result = scenario.validateMessages({
+		messages: [
+			{
+				role: 'assistant',
+				tool_calls: [
+					{
+						id: 'subagent-first',
+						function: {
+							name: 'subagent-agent_explore',
+							arguments: '{"prompt":"wrong first attempt"}',
+						},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'subagent-first',
+				content: '{"success":true,"result":"wrong"}',
+			},
+			{
+				role: 'assistant',
+				tool_calls: [
+					{
+						id: 'subagent-second',
+						function: {
+							name: 'subagent-agent_explore',
+							arguments: '{"prompt":"correct retry"}',
+						},
+					},
+				],
+			},
+			{
+				role: 'assistant',
+				subAgentInternal: true,
+				tool_calls: [
+					{
+						id: 'internal-read',
+						function: {
+							name: 'filesystem-read',
+							arguments: '{"filePath":"D:/repo/source/cli.tsx"}',
+						},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'internal-read',
+				content: '{"content":"#!/usr/bin/env node"}',
+			},
+			{
+				role: 'assistant',
+				subAgentInternal: true,
+				tool_calls: [
+					{
+						id: 'internal-bridge',
+						function: {
+							name: 'vcp-servercodesearcher-searchcode',
+							arguments: '{"query":"SnowBridge"}',
+						},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'internal-bridge',
+				content: '{"status":"success","result":[{"file_path":"Plugin.js"}]}',
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'subagent-second',
+				content: '{"success":true,"result":"#!/usr/bin/env node || Plugin.js"}',
+			},
+			{
+				role: 'assistant',
+				content: '#!/usr/bin/env node || Plugin.js',
+			},
+		],
+		previousMessageCount: 0,
+		scenario,
+	});
+
+	assert.equal(result.toolCall.id, 'subagent-second');
+	assert.equal(result.finalAssistantPreview, '#!/usr/bin/env node || Plugin.js');
+});
+
+test('subagent scenario validation accepts verbose subagent result wrappers when an exact plain-text line is still present', () => {
+	const scenario = buildSubagentModeScenarios('#!/usr/bin/env node').hybrid[0];
+	scenario.expectedProbePath = 'D:/repo/source/cli.tsx';
+	scenario.expectedProbeRoot = 'D:/repo';
+
+	const result = scenario.validateMessages({
+		messages: [
+			{
+				role: 'assistant',
+				tool_calls: [
+					{
+						id: 'subagent-call',
+						function: {
+							name: 'subagent-agent_explore',
+							arguments: '{"prompt":"hybrid run"}',
+						},
+					},
+				],
+			},
+			{
+				role: 'assistant',
+				subAgentInternal: true,
+				tool_calls: [
+					{
+						id: 'internal-read',
+						function: {
+							name: 'filesystem-read',
+							arguments: '{"filePath":"D:/repo/source/cli.tsx"}',
+						},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'internal-read',
+				content: '{"content":"#!/usr/bin/env node"}',
+			},
+			{
+				role: 'assistant',
+				subAgentInternal: true,
+				tool_calls: [
+					{
+						id: 'internal-bridge',
+						function: {
+							name: 'vcp-servercodesearcher-searchcode',
+							arguments: '{"query":"SnowBridge"}',
+						},
+					},
+				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'internal-bridge',
+				content: '{"status":"success","result":[{"file_path":"Plugin.js"}]}',
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'subagent-call',
+				content:
+					'{"success":true,"result":"**Combined result:**\\n```\\n#!/usr/bin/env node || Plugin.js\\n```"}',
+			},
+			{
+				role: 'assistant',
+				content: '#!/usr/bin/env node || Plugin.js',
+			},
+		],
+		previousMessageCount: 0,
+		scenario,
+	});
+
+	assert.equal(result.toolResultPreview, '#!/usr/bin/env node || Plugin.js');
+});
+
 test('resolveModes enables bridge coverage when bridgeWsUrl is configured', () => {
 	assert.deepEqual(
 		resolveModes(
@@ -473,9 +722,17 @@ test('team scenario validation ignores sub-agent internal tool calls', () => {
 				tool_calls: [
 					{
 						id: 'subagent-read',
-						function: {name: 'filesystem-read', arguments: '{}'},
+						function: {
+							name: 'filesystem-read',
+							arguments: '{"filePath":"main.py"}',
+						},
 					},
 				],
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'subagent-read',
+				content: '{"content":"import tkinter as tk"}',
 			},
 			{
 				role: 'tool',
@@ -549,6 +806,130 @@ test('team scenario validation ignores sub-agent internal tool calls', () => {
 
 	assert.equal(result.expectedTool, 'team-spawn_teammate');
 	assert.equal(result.finalAssistantPreview, 'import tkinter as tk');
+});
+
+test('team scenario validation rejects assistant replies that only include the expected answer', () => {
+	const scenario = buildTeamModeScenarios('import tkinter as tk').local[0];
+
+	assert.throws(
+		() =>
+			scenario.validateMessages({
+				messages: [
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-spawn',
+								function: {name: 'team-spawn_teammate', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-spawn',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						subAgentInternal: true,
+						tool_calls: [
+							{
+								id: 'subagent-read',
+								function: {
+									name: 'filesystem-read',
+									arguments: '{"filePath":"main.py"}',
+								},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'subagent-read',
+						content: '{"content":"import tkinter as tk"}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-wait',
+								function: {name: 'team-wait_for_teammates', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-wait',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-shutdown',
+								function: {name: 'team-shutdown_teammate', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-shutdown',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-merge',
+								function: {name: 'team-merge_all_teammate_work', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-merge',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-cleanup',
+								function: {name: 'team-cleanup_team', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-cleanup',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'main-read',
+								function: {
+									name: 'filesystem-read',
+									arguments: '{"filePath":"D:/repo/main.py"}',
+								},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'main-read',
+						content: '{"content":"import tkinter as tk"}',
+					},
+					{
+						role: 'assistant',
+						content: 'Answer: import tkinter as tk',
+					},
+				],
+				previousMessageCount: 0,
+				scenario,
+			}),
+		/exactly match expected plain text|exactly match the expected team answer text/,
+	);
 });
 
 test('team scenario validation rejects unexpected extra top-level tool calls', () => {
@@ -664,7 +1045,110 @@ test('team scenario validation rejects unexpected extra top-level tool calls', (
 				previousMessageCount: 0,
 				scenario,
 			}),
-		/Unexpected top-level tool call count/,
+		/Unexpected top-level tool call (count|order)/,
+	);
+});
+
+test('team scenario validation requires teammate internal execution evidence', () => {
+	const scenario = buildTeamModeScenarios('import tkinter as tk').local[0];
+
+	assert.throws(
+		() =>
+			scenario.validateMessages({
+				messages: [
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-spawn',
+								function: {name: 'team-spawn_teammate', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-spawn',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-wait',
+								function: {name: 'team-wait_for_teammates', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-wait',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-shutdown',
+								function: {name: 'team-shutdown_teammate', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-shutdown',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-merge',
+								function: {name: 'team-merge_all_teammate_work', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-merge',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'team-cleanup',
+								function: {name: 'team-cleanup_team', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'team-cleanup',
+						content: '{"success":true}',
+					},
+					{
+						role: 'assistant',
+						tool_calls: [
+							{
+								id: 'main-read',
+								function: {name: 'filesystem-read', arguments: '{}'},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'main-read',
+						content: '{"content":"import tkinter as tk"}',
+					},
+					{
+						role: 'assistant',
+						content: 'import tkinter as tk',
+					},
+				],
+				previousMessageCount: 0,
+				scenario,
+			}),
+		/Expected teammate internal "filesystem-read" tool call/,
 	);
 });
 
@@ -879,6 +1363,7 @@ test('extractScenarioResultFromSession accepts bridge tool result matches inside
 	const scenario = {
 		name: 'bridge-search',
 		expectedTool: 'vcp-servercodesearcher-searchcode',
+		validateToolCall: validateBridgeSearchToolCall,
 		validateToolResult: validateBridgeSearchToolResult,
 	};
 
@@ -918,7 +1403,7 @@ test('extractScenarioResultFromSession accepts bridge tool result matches inside
 
 	assert.equal(
 		result.finalAssistantPreview,
-		'.helloagents\\modules\\plugin-system.md',
+		'.helloagents/modules/plugin-system.md',
 	);
 });
 
@@ -964,10 +1449,53 @@ test('extractScenarioResultFromSession rejects leaked protocol content in final 
 	);
 });
 
+test('extractScenarioResultFromSession rejects markdown-wrapped plain-text replies', () => {
+	const scenario = {
+		name: 'filesystem-read',
+		expectedTool: 'filesystem-read',
+		expectedToolResultIncludes: '#!/usr/bin/env node',
+		expectedAssistantIncludes: '#!/usr/bin/env node',
+	};
+
+	assert.throws(
+		() =>
+			extractScenarioResultFromSession({
+				messages: [
+					{
+						role: 'assistant',
+						content: '',
+						tool_calls: [
+							{
+								id: 'call-1',
+								function: {
+									name: 'filesystem-read',
+									arguments: '{"path":"source/cli.tsx"}',
+								},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'call-1',
+						content: JSON.stringify({content: '#!/usr/bin/env node\nimport x'}),
+					},
+					{
+						role: 'assistant',
+						content: '`#!/usr/bin/env node`',
+					},
+				],
+				scenario,
+				previousMessageCount: 0,
+			}),
+		/exactly match expected plain text/,
+	);
+});
+
 test('extractScenarioResultFromSession accepts slash-normalized bridge assistant replies', () => {
 	const scenario = {
 		name: 'bridge-search',
 		expectedTool: 'vcp-servercodesearcher-searchcode',
+		validateToolCall: validateBridgeSearchToolCall,
 		validateToolResult: validateBridgeSearchToolResult,
 	};
 
@@ -1003,7 +1531,7 @@ test('extractScenarioResultFromSession accepts slash-normalized bridge assistant
 
 	assert.equal(
 		result.finalAssistantPreview,
-		'.helloagents\\modules\\plugin-system.md',
+		'.helloagents/modules/plugin-system.md',
 	);
 });
 
@@ -1017,6 +1545,81 @@ test('validateBridgeSearchToolResult rejects empty bridge search matches', () =>
 				},
 			}),
 		/did not contain a matched file path/,
+	);
+});
+
+test('validateBridgeSearchToolCall rejects weak bridge queries', () => {
+	assert.throws(
+		() =>
+			validateBridgeSearchToolCall({
+				toolCall: {
+					function: {
+						name: 'vcp-servercodesearcher-searchcode',
+						arguments: '{"query":"bridge"}',
+					},
+				},
+			}),
+		/required semantics/,
+	);
+});
+
+test('validateBridgeSearchToolCall accepts case and separator variations', () => {
+	assert.doesNotThrow(() =>
+		validateBridgeSearchToolCall({
+			toolCall: {
+				function: {
+					name: 'vcp-servercodesearcher-searchcode',
+					arguments: '{"query":"snow- bridge"}',
+				},
+			},
+		}),
+	);
+});
+
+test('extractScenarioResultFromSession rejects bridge searches without the key query semantics', () => {
+	const scenario = {
+		name: 'bridge-search',
+		expectedTool: 'vcp-servercodesearcher-searchcode',
+		validateToolCall: validateBridgeSearchToolCall,
+		validateToolResult: validateBridgeSearchToolResult,
+	};
+
+	assert.throws(
+		() =>
+			extractScenarioResultFromSession({
+				messages: [
+					{
+						role: 'assistant',
+						content: '',
+						tool_calls: [
+							{
+								id: 'call-1',
+								function: {
+									name: 'vcp-servercodesearcher-searchcode',
+									arguments: '{"query":"bridge"}',
+								},
+							},
+						],
+					},
+					{
+						role: 'tool',
+						tool_call_id: 'call-1',
+						content: JSON.stringify([
+							{
+								file_path: '.helloagents\\modules\\plugin-system.md',
+								line_number: 2,
+							},
+						]),
+					},
+					{
+						role: 'assistant',
+						content: '.helloagents\\modules\\plugin-system.md',
+					},
+				],
+				scenario,
+				previousMessageCount: 0,
+			}),
+		/required semantics/,
 	);
 });
 
@@ -1069,6 +1672,6 @@ test('waitForScenarioResultFromSession retries until final assistant reply is pe
 
 	assert.equal(
 		result.finalAssistantPreview,
-		'.helloagents\\modules\\plugin-system.md',
+		'.helloagents/modules/plugin-system.md',
 	);
 });

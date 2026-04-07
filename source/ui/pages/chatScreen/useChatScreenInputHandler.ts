@@ -42,6 +42,8 @@ type Options = {
 	panelState: {handleEscapeKey: () => boolean};
 	handleEscKey: (key: InputKey, input: string) => boolean;
 	btwPrompt: string | null;
+	setThinkingPanelExpanded: Dispatch<SetStateAction<boolean>>;
+	setToolPanelExpanded: Dispatch<SetStateAction<boolean>>;
 };
 
 export function useChatScreenInputHandler({
@@ -60,6 +62,8 @@ export function useChatScreenInputHandler({
 	panelState,
 	handleEscKey,
 	btwPrompt,
+	setThinkingPanelExpanded,
+	setToolPanelExpanded,
 }: Options) {
 	useInput((input, key) => {
 		// BtwPanel is active — it owns all keyboard input, skip everything here
@@ -114,6 +118,16 @@ export function useChatScreenInputHandler({
 		}
 
 		if (pendingToolConfirmation || pendingUserQuestion) {
+			return;
+		}
+
+		if (key.ctrl && input === 't') {
+			setThinkingPanelExpanded(previous => !previous);
+			return;
+		}
+
+		if (key.ctrl && input === 'u') {
+			setToolPanelExpanded(previous => !previous);
 			return;
 		}
 

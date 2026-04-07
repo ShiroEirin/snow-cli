@@ -37,6 +37,7 @@ test('buildBridgeManifestToolFilters excludes exact local tool names in hybrid m
 
 	t.deepEqual(
 		buildBridgeManifestToolFilters({
+			config: {bridgeToolProfile: ''},
 			transport: 'hybrid',
 			localTools,
 		}),
@@ -49,6 +50,7 @@ test('buildBridgeManifestToolFilters excludes exact local tool names in hybrid m
 test('buildBridgeManifestToolFilters skips bridge-only sessions', (t: any) => {
 	t.is(
 		buildBridgeManifestToolFilters({
+			config: {bridgeToolProfile: ''},
 			transport: 'bridge',
 			localTools: [
 				{
@@ -62,6 +64,20 @@ test('buildBridgeManifestToolFilters skips bridge-only sessions', (t: any) => {
 			],
 		}),
 		undefined,
+	);
+});
+
+test('buildBridgeManifestToolFilters keeps configured bridge tool profile in bridge mode', (t: any) => {
+	t.deepEqual(
+		buildBridgeManifestToolFilters({
+			config: {bridgeToolProfile: 'writer-mode'},
+			transport: 'bridge',
+			localTools: [],
+		}),
+		{
+			profileName: 'writer-mode',
+			excludeExactToolNames: [],
+		},
 	);
 });
 

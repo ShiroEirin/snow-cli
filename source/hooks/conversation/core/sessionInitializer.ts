@@ -3,7 +3,7 @@ import {sessionManager} from '../../../utils/session/sessionManager.js';
 import {getTodoService} from '../../../utils/execution/mcpToolsManager.js';
 import {formatTodoContext} from '../../../utils/core/todoPreprocessor.js';
 import {getSystemPromptForMode} from '../../../prompt/systemPrompt.js';
-import {projectToolMessageForContext} from '../../../utils/session/toolMessageProjection.js';
+import {projectToolMessagesForContext} from '../../../utils/session/toolMessageProjection.js';
 
 /**
  * Initialize conversation session and TODO context
@@ -58,9 +58,7 @@ export async function initializeConversationSession(
 		const filteredMessages = session.messages.filter(
 			msg => !msg.subAgentInternal,
 		);
-		conversationMessages.push(
-			...filteredMessages.map(message => projectToolMessageForContext(message)),
-		);
+		conversationMessages.push(...projectToolMessagesForContext(filteredMessages));
 	}
 
 	return {conversationMessages, currentSession, existingTodoList};

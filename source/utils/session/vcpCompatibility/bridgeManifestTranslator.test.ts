@@ -363,3 +363,155 @@ test('mark description-derived schema as strict when command forbids extra param
 	});
 	t.deepEqual(parameters?.['required'], ['prompt', 'mode']);
 });
+
+test('preserve manifest metadata sidecar at the translator seam', (t: any) => {
+	const toolPlane = translateBridgeManifestToToolPlane({
+		revision: 'rev-42',
+		reloadedAt: '2026-04-04T10:00:00.000Z',
+		plugins: [
+			{
+				name: 'FileOperator',
+				displayName: 'FileOperator',
+				description: 'File tools.',
+				requiresApproval: true,
+				approvalTimeoutMs: 45_000,
+				bridgeCommands: [
+					{
+						commandName: 'ReadFile',
+						description: 'Read file.',
+						parameters: [],
+					},
+				],
+			},
+		],
+	});
+
+	t.deepEqual(toolPlane.metadata, {
+		revision: 'rev-42',
+		reloadedAt: '2026-04-04T10:00:00.000Z',
+	});
+	t.deepEqual(toolPlane.modelTools[0]?.metadata, {
+		revision: 'rev-42',
+		reloadedAt: '2026-04-04T10:00:00.000Z',
+		requiresApproval: true,
+		approvalTimeoutMs: 45_000,
+	});
+});
+
+test('command metadata sidecar overrides plugin approval hints without leaking into schema', (t: any) => {
+	const toolPlane = translateBridgeManifestToToolPlane({
+		plugins: [
+			{
+				name: 'ShellExec',
+				displayName: 'ShellExec',
+				description: 'Execute shell commands.',
+				metadata: {
+					requiresApproval: true,
+					approvalTimeoutMs: 120_000,
+				},
+				bridgeCommands: [
+					{
+						commandName: 'ListFiles',
+						description: 'List files.',
+						parameters: [],
+						sidecar: {
+							requiresApproval: false,
+							approvalTimeoutMs: 15_000,
+						},
+					},
+				],
+			},
+		],
+	});
+
+	t.deepEqual(toolPlane.modelTools[0]?.metadata, {
+		requiresApproval: false,
+		approvalTimeoutMs: 15_000,
+	});
+	t.false(
+		Object.prototype.hasOwnProperty.call(
+			toolPlane.modelTools[0]?.function.parameters || {},
+			'requiresApproval',
+		),
+	);
+});
+
+test('collect argument alias and file-url compatibility hints from structured bridge metadata', (t: any) => {
+	const toolPlane = translateBridgeManifestToToolPlane({
+		plugins: [
+			{
+				name: 'ImageComposer',
+				displayName: 'Image Composer',
+				description: 'Compose images.',
+				pluginType: 'hybridservice',
+				bridgeCommands: [
+					{
+						commandName: 'EditImage',
+						description: 'Edit image with local-path compatibility.',
+						parameters: [
+							{
+								name: 'imageUrl',
+								description:
+									'主图，支持 file:// 本地路径。别名: image_path。',
+								required: true,
+								type: 'string',
+								binding: {
+									aliases: ['fileUrl'],
+									fileUrlCompatible: true,
+								},
+								metadata: {
+									aliases: ['image_path'],
+								},
+							},
+						],
+					},
+				],
+			},
+		],
+	});
+
+	t.deepEqual(toolPlane.bindings[0]?.argumentBindings, [
+		{
+			name: 'imageUrl',
+			aliases: ['fileUrl', 'image_path'],
+			fileUrlCompatible: true,
+		},
+	]);
+});
+
+test('infer argument alias and file-url compatibility from description-only bridge manifests', (t: any) => {
+	const toolPlane = translateBridgeManifestToToolPlane({
+		plugins: [
+			{
+				name: 'ImageComposer',
+				displayName: 'Image Composer',
+				description: 'Compose images.',
+				pluginType: 'hybridservice',
+				bridgeCommands: [
+					{
+						commandName: 'EditImage',
+						description: `编辑图片。
+参数:
+- imageUrl/fileUrl (字符串, 必需): 主图。别名: image_path。支持 file:// 本地路径。
+- prompt (字符串, 必需): 编辑指令。`,
+						parameters: [],
+					},
+				],
+			},
+		],
+	});
+
+	const parameters = getToolParameters(toolPlane);
+
+	t.deepEqual(Object.keys(parameters?.['properties'] || {}).sort(), [
+		'imageUrl',
+		'prompt',
+	]);
+	t.deepEqual(toolPlane.bindings[0]?.argumentBindings, [
+		{
+			name: 'imageUrl',
+			aliases: ['fileUrl', 'image_path'],
+			fileUrlCompatible: true,
+		},
+	]);
+});

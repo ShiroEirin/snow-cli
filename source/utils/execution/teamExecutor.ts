@@ -19,7 +19,8 @@ import {
 	type ToolExecutionBinding,
 } from '../session/vcpCompatibility/toolExecutionBinding.js';
 import {rewriteToolArgsForWorktree} from '../team/teamWorktree.js';
-import {projectToolMessageForContext} from '../session/toolMessageProjection.js';
+import {projectToolMessagesForContext} from '../session/toolMessageProjection.js';
+import {compressionCoordinator} from '../core/compressionCoordinator.js';
 
 export interface TeammateExecutionOptions {
 	onMessage?: (message: SubAgentMessage) => void;
@@ -69,6 +70,31 @@ export function createTeammateUserQuestionAdapter(
 			cancelled: response.cancelled,
 		};
 	};
+}
+
+function emitTeammateToolResult(options: {
+	onMessage?: TeammateExecutionOptions['onMessage'];
+	memberId: string;
+	memberName: string;
+	toolCallId: string;
+	toolName: string;
+	content: string;
+}): void {
+	if (!options.onMessage) {
+		return;
+	}
+
+	options.onMessage({
+		type: 'sub_agent_message',
+		agentId: `teammate-${options.memberId}`,
+		agentName: options.memberName,
+		message: {
+			type: 'tool_result',
+			tool_call_id: options.toolCallId,
+			tool_name: options.toolName,
+			content: options.content,
+		},
+	});
 }
 
 const PLAN_APPROVAL_PROTECTED_LOCAL_TOOLS = new Set([
@@ -385,6 +411,8 @@ ${role ? `Your role: ${role}` : ''}
 				};
 			}
 
+			await compressionCoordinator.waitUntilFree(instanceId);
+
 			// Dequeue messages from lead or other teammates
 			const teammateMessages = teamTracker.dequeueTeammateMessages(instanceId);
 			for (const msg of teammateMessages) {
@@ -411,7 +439,7 @@ ${role ? `Your role: ${role}` : ''}
 			// API call
 			const model = config.advancedModel || 'gpt-5';
 			const projectMessagesForModel = () =>
-				messages.map(message => projectToolMessageForContext(message));
+				projectToolMessagesForContext(messages);
 			const resolvedRequest = resolveVcpModeRequest(config, {
 				model,
 				tools: allowedTools,
@@ -587,6 +615,7 @@ ${role ? `Your role: ${role}` : ''}
 						});
 					}
 
+					await compressionCoordinator.acquireLock(instanceId);
 					try {
 						const compressionResult = await compressSubAgentContext(
 							messages, latestTotalTokens, config.maxContextTokens,
@@ -623,6 +652,8 @@ ${role ? `Your role: ${role}` : ''}
 							`[Teammate:${memberName}] Context compression failed:`,
 							compressError,
 						);
+					} finally {
+						compressionCoordinator.releaseLock(instanceId);
 					}
 				}
 			}
@@ -761,6 +792,14 @@ ${role ? `Your role: ${role}` : ''}
 					tool_call_id: tc.id,
 					content: resultContent,
 				});
+				emitTeammateToolResult({
+					onMessage,
+					memberId,
+					memberName,
+					toolCallId: tc.id,
+					toolName: tc.function.name,
+					content: resultContent,
+				});
 			}
 
 		// Handle wait_for_messages: notify lead, mark standby, then block until messages arrive
@@ -807,6 +846,14 @@ ${role ? `Your role: ${role}` : ''}
 					tool_call_id: waitCall.id,
 					content: 'Session terminated by team lead.',
 				});
+				emitTeammateToolResult({
+					onMessage,
+					memberId,
+					memberName,
+					toolCallId: waitCall.id,
+					toolName: waitCall.function.name,
+					content: 'Session terminated by team lead.',
+				});
 				break;
 			}
 
@@ -816,6 +863,14 @@ ${role ? `Your role: ${role}` : ''}
 			messages.push({
 				role: 'tool' as const,
 				tool_call_id: waitCall.id,
+				content: `Received ${receivedMessages.length} message(s):\n${msgSummary}`,
+			});
+			emitTeammateToolResult({
+				onMessage,
+				memberId,
+				memberName,
+				toolCallId: waitCall.id,
+				toolName: waitCall.function.name,
 				content: `Received ${receivedMessages.length} message(s):\n${msgSummary}`,
 			});
 
@@ -861,11 +916,20 @@ ${role ? `Your role: ${role}` : ''}
 									tc.function.name,
 									toolArgs,
 									worktreePath,
+									instanceId,
 								);
 								if (rwResult.error) {
 									messages.push({
 										role: 'tool' as const,
 										tool_call_id: tc.id,
+										content: `Error: ${rwResult.error}`,
+									});
+									emitTeammateToolResult({
+										onMessage,
+										memberId,
+										memberName,
+										toolCallId: tc.id,
+										toolName: tc.function.name,
 										content: `Error: ${rwResult.error}`,
 									});
 									continue;
@@ -896,10 +960,26 @@ ${role ? `Your role: ${role}` : ''}
 									historyContent: result.historyContent,
 									previewContent: result.previewContent,
 								} as ChatMessage);
+								emitTeammateToolResult({
+									onMessage,
+									memberId,
+									memberName,
+									toolCallId: tc.id,
+									toolName: tc.function.name,
+									content: result.content,
+								});
 							} catch (e: any) {
 								messages.push({
 									role: 'tool' as const,
 									tool_call_id: tc.id,
+									content: `Error: ${e.message}`,
+								});
+								emitTeammateToolResult({
+									onMessage,
+									memberId,
+									memberName,
+									toolCallId: tc.id,
+									toolName: tc.function.name,
 									content: `Error: ${e.message}`,
 								});
 							}
@@ -935,6 +1015,14 @@ ${role ? `Your role: ${role}` : ''}
 								tool_call_id: tc.id,
 								content: feedback,
 							});
+							emitTeammateToolResult({
+								onMessage,
+								memberId,
+								memberName,
+								toolCallId: tc.id,
+								toolName: tc.function.name,
+								content: feedback,
+							});
 							continue;
 						}
 					} else {
@@ -947,11 +1035,20 @@ ${role ? `Your role: ${role}` : ''}
 								toolName,
 								toolArgs,
 								worktreePath,
+								instanceId,
 							);
 							if (rwResult.error) {
 								messages.push({
 									role: 'tool' as const,
 									tool_call_id: tc.id,
+									content: `Error: ${rwResult.error}`,
+								});
+								emitTeammateToolResult({
+									onMessage,
+									memberId,
+									memberName,
+									toolCallId: tc.id,
+									toolName: tc.function.name,
 									content: `Error: ${rwResult.error}`,
 								});
 								continue;
@@ -982,10 +1079,26 @@ ${role ? `Your role: ${role}` : ''}
 								historyContent: result.historyContent,
 								previewContent: result.previewContent,
 							} as ChatMessage);
+							emitTeammateToolResult({
+								onMessage,
+								memberId,
+								memberName,
+								toolCallId: tc.id,
+								toolName: tc.function.name,
+								content: result.content,
+							});
 						} catch (e: any) {
 							messages.push({
 								role: 'tool' as const,
 								tool_call_id: tc.id,
+								content: `Error: ${e.message}`,
+							});
+							emitTeammateToolResult({
+								onMessage,
+								memberId,
+								memberName,
+								toolCallId: tc.id,
+								toolName: tc.function.name,
 								content: `Error: ${e.message}`,
 							});
 						}

@@ -2,8 +2,8 @@ import {
 	getOpenAiConfig,
 	getCustomSystemPromptForConfig,
 	getCustomHeadersForConfig,
+	type ApiConfig,
 } from '../utils/config/apiConfig.js';
-import {getSystemPromptForMode} from '../prompt/systemPrompt.js';
 import {
 	withRetryGenerator,
 	parseJsonWithFix,
@@ -16,6 +16,7 @@ import type {ChatMessage, ChatCompletionTool, UsageInfo} from './types.js';
 import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {getVersionHeader} from '../utils/core/version.js';
+import {resolveBuiltinSystemPrompt} from '../utils/session/vcpCompatibility/systemPromptPolicy.js';
 
 export interface GeminiOptions {
 	model: string;
@@ -161,6 +162,7 @@ function convertToolsToGemini(tools?: ChatCompletionTool[]): any[] | undefined {
  * @param includeBuiltinSystemPrompt - Whether to include builtin system prompt (default true)
  */
 function convertToGeminiMessages(
+	config: Pick<ApiConfig, 'backendMode' | 'toolTransport'>,
 	messages: ChatMessage[],
 	includeBuiltinSystemPrompt: boolean = true,
 	customSystemPromptOverride?: string[],
@@ -387,17 +389,18 @@ function convertToGeminiMessages(
 	if (customSystemPrompts && customSystemPrompts.length > 0) {
 		systemInstruction = customSystemPrompts;
 		if (includeBuiltinSystemPrompt) {
+			const builtinSystemPrompt = resolveBuiltinSystemPrompt(config, {
+				planMode,
+				vulnerabilityHuntingMode,
+				toolSearchDisabled,
+				teamMode,
+			});
 			// Prepend default system prompt as first user message
 			contents.unshift({
 				role: 'user',
 				parts: [
 					{
-						text: getSystemPromptForMode(
-							planMode,
-							vulnerabilityHuntingMode,
-							toolSearchDisabled,
-							teamMode,
-						),
+						text: builtinSystemPrompt,
 					},
 				],
 			});
@@ -405,12 +408,12 @@ function convertToGeminiMessages(
 	} else if (!systemInstruction && includeBuiltinSystemPrompt) {
 		// 没有自定义系统提示词，但需要添加默认系统提示词
 		systemInstruction = [
-			getSystemPromptForMode(
+			resolveBuiltinSystemPrompt(config, {
 				planMode,
 				vulnerabilityHuntingMode,
 				toolSearchDisabled,
 				teamMode,
-			),
+			}),
 		];
 	}
 
@@ -477,6 +480,7 @@ export async function* createStreamingGeminiCompletion(
 	yield* withRetryGenerator(
 		async function* () {
 			const {systemInstruction, contents} = convertToGeminiMessages(
+				config,
 				options.messages,
 				options.includeBuiltinSystemPrompt !== false, // 默认为 true
 				customSystemPromptContent,

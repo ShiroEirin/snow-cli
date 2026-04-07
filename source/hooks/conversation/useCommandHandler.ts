@@ -8,7 +8,7 @@ import {performHybridCompression} from '../../utils/core/subAgentContextCompress
 import {getOpenAiConfig} from '../../utils/config/apiConfig.js';
 import {getHybridCompressEnabled} from '../../utils/config/projectSettings.js';
 import {getTodoService} from '../../utils/execution/mcpToolsManager.js';
-import {projectToolMessageForContext} from '../../utils/session/toolMessageProjection.js';
+import {projectToolMessagesForContext} from '../../utils/session/toolMessageProjection.js';
 import {navigateTo} from '../integration/useGlobalNavigation.js';
 import type {UsageInfo} from '../../api/chat.js';
 import {resetTerminal} from '../../utils/execution/terminal.js';
@@ -88,8 +88,8 @@ export async function executeContextCompression(
 		const sessionMessages = currentSession.messages;
 
 		// 转换为 ChatMessage 格式（保留所有关键字段）
-		const chatMessages = sessionMessages.map(msg => {
-			const projectedMessage = projectToolMessageForContext(msg);
+		const chatMessages = projectToolMessagesForContext(sessionMessages).map(
+			projectedMessage => {
 			return {
 				role: projectedMessage.role,
 				content: projectedMessage.content,

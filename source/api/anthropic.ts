@@ -3,9 +3,9 @@ import {
 	getOpenAiConfig,
 	getCustomSystemPromptForConfig,
 	getCustomHeadersForConfig,
+	type ApiConfig,
 	type ThinkingConfig,
 } from '../utils/config/apiConfig.js';
-import {getSystemPromptForMode} from '../prompt/systemPrompt.js';
 import {
 	withRetryGenerator,
 	parseJsonWithFix,
@@ -20,6 +20,7 @@ import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {isDevMode, getDevUserId} from '../utils/core/devMode.js';
 import {getVersionHeader} from '../utils/core/version.js';
+import {resolveBuiltinSystemPrompt} from '../utils/session/vcpCompatibility/systemPromptPolicy.js';
 
 export interface AnthropicOptions {
 	model: string;
@@ -209,6 +210,7 @@ function convertToolsToAnthropic(
  * @param cacheTTL - Cache TTL for prompt caching (default: '5m')
  */
 function convertToAnthropicMessages(
+	config: Pick<ApiConfig, 'backendMode' | 'toolTransport'>,
 	messages: ChatMessage[],
 	includeBuiltinSystemPrompt: boolean = true,
 	customSystemPromptOverride?: string[],
@@ -418,18 +420,19 @@ function convertToAnthropicMessages(
 	if (customSystemPrompts && customSystemPrompts.length > 0) {
 		systemContents = customSystemPrompts;
 		if (includeBuiltinSystemPrompt) {
+			const builtinSystemPrompt = resolveBuiltinSystemPrompt(config, {
+				planMode,
+				vulnerabilityHuntingMode,
+				toolSearchDisabled,
+				teamMode,
+			});
 			// 将默认系统提示词作为第一条用户消息
 			anthropicMessages.unshift({
 				role: 'user',
 				content: [
 					{
 						type: 'text',
-						text: getSystemPromptForMode(
-							planMode,
-							vulnerabilityHuntingMode,
-							toolSearchDisabled,
-							teamMode,
-						),
+						text: builtinSystemPrompt,
 						cache_control: {type: 'ephemeral', ttl: cacheTTL},
 					},
 				] as any,
@@ -438,12 +441,12 @@ function convertToAnthropicMessages(
 	} else if (!systemContents && includeBuiltinSystemPrompt) {
 		// 没有自定义系统提示词，但需要添加默认系统提示词
 		systemContents = [
-			getSystemPromptForMode(
+			resolveBuiltinSystemPrompt(config, {
 				planMode,
 				vulnerabilityHuntingMode,
 				toolSearchDisabled,
 				teamMode,
-			),
+			}),
 		];
 	}
 
@@ -691,6 +694,7 @@ export async function* createStreamingAnthropicCompletion(
 			customSystemPromptContent ||= getCustomSystemPromptForConfig(config);
 
 			const {system, messages} = convertToAnthropicMessages(
+				config,
 				options.messages,
 				options.includeBuiltinSystemPrompt !== false, // 默认为 true
 				customSystemPromptContent,

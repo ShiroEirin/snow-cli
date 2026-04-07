@@ -22,6 +22,7 @@ import type {
 	PendingMessageInput,
 	PendingUserQuestionState,
 } from './types.js';
+import {useProgressiveHistoryReplay} from './useProgressiveHistoryReplay.js';
 
 type Props = {
 	remountKey: number;
@@ -30,6 +31,8 @@ type Props = {
 	simpleMode: boolean;
 	messages: Message[];
 	showThinking: boolean;
+	thinkingPanelExpanded: boolean;
+	toolPanelExpanded: boolean;
 	pendingMessages: PendingMessageInput[];
 	pendingToolConfirmation: any;
 	pendingUserQuestion: PendingUserQuestionState;
@@ -51,6 +54,8 @@ export default function ChatScreenConversationView({
 	simpleMode,
 	messages,
 	showThinking,
+	thinkingPanelExpanded,
+	toolPanelExpanded,
 	pendingMessages,
 	pendingToolConfirmation,
 	pendingUserQuestion,
@@ -64,6 +69,8 @@ export default function ChatScreenConversationView({
 	setHookError,
 	compressionStatus,
 }: Props) {
+	const {visibleMessages} = useProgressiveHistoryReplay(messages);
+
 	return (
 		<>
 			<Static
@@ -75,7 +82,7 @@ export default function ChatScreenConversationView({
 						simpleMode={simpleMode}
 						workingDirectory={workingDirectory}
 					/>,
-					...messages
+					...visibleMessages
 						.filter(m => !m.streaming)
 						.map((message, index, filteredMessages) => (
 							<MessageRenderer
@@ -85,6 +92,8 @@ export default function ChatScreenConversationView({
 								filteredMessages={filteredMessages}
 								terminalWidth={terminalWidth}
 								showThinking={showThinking}
+								thinkingPanelExpanded={thinkingPanelExpanded}
+								toolPanelExpanded={toolPanelExpanded}
 							/>
 						)),
 				]}
