@@ -6,6 +6,7 @@ import {
 	getSystemPromptConfig,
 	getCustomHeadersConfig,
 	type BackendMode,
+	type GeminiThinkingLevel,
 	type ToolTransport,
 	type RequestMethod,
 	type ApiConfig,
@@ -101,7 +102,8 @@ export function useConfigState() {
 		'low' | 'medium' | 'high' | 'max'
 	>('high');
 	const [geminiThinkingEnabled, setGeminiThinkingEnabled] = useState(false);
-	const [geminiThinkingBudget, setGeminiThinkingBudget] = useState(1024);
+	const [geminiThinkingLevel, setGeminiThinkingLevel] =
+		useState<GeminiThinkingLevel>('high');
 	const [responsesReasoningEnabled, setResponsesReasoningEnabled] =
 		useState(false);
 	const [responsesReasoningEffort, setResponsesReasoningEffort] = useState<
@@ -184,7 +186,7 @@ export function useConfigState() {
 					: {type: 'enabled' as const, budget_tokens: thinkingBudgetTokens}
 				: undefined,
 			geminiThinking: geminiThinkingEnabled
-				? {enabled: true, budget: geminiThinkingBudget}
+				? {enabled: true, thinkingLevel: geminiThinkingLevel}
 				: undefined,
 			responsesReasoning: {
 				enabled: responsesReasoningEnabled,
@@ -240,7 +242,7 @@ export function useConfigState() {
 				: requestMethod === 'gemini'
 				? [
 						'geminiThinkingEnabled' as ConfigField,
-						'geminiThinkingBudget' as ConfigField,
+						'geminiThinkingLevel' as ConfigField,
 				  ]
 				: requestMethod === 'responses'
 				? [
@@ -314,7 +316,7 @@ export function useConfigState() {
 		if (
 			requestMethod !== 'gemini' &&
 			(currentField === 'geminiThinkingEnabled' ||
-				currentField === 'geminiThinkingBudget')
+				currentField === 'geminiThinkingLevel')
 		) {
 			setCurrentField('advancedModel');
 		}
@@ -399,7 +401,7 @@ export function useConfigState() {
 		setThinkingBudgetTokens(config.thinking?.budget_tokens || 10000);
 		setThinkingEffort(config.thinking?.effort || 'high');
 		setGeminiThinkingEnabled(config.geminiThinking?.enabled || false);
-		setGeminiThinkingBudget(config.geminiThinking?.budget || 1024);
+		setGeminiThinkingLevel(config.geminiThinking?.thinkingLevel || 'high');
 		setResponsesReasoningEnabled(config.responsesReasoning?.enabled || false);
 		setResponsesReasoningEffort(config.responsesReasoning?.effort || 'high');
 		setResponsesVerbosity(config.responsesVerbosity || 'medium');
@@ -493,8 +495,7 @@ export function useConfigState() {
 			return thinkingBudgetTokens.toString();
 		if (currentField === 'thinkingMode') return thinkingMode;
 		if (currentField === 'thinkingEffort') return thinkingEffort;
-		if (currentField === 'geminiThinkingBudget')
-			return geminiThinkingBudget.toString();
+		if (currentField === 'geminiThinkingLevel') return geminiThinkingLevel;
 		if (currentField === 'responsesReasoningEffort')
 			return responsesReasoningEffort;
 		if (currentField === 'anthropicSpeed') return anthropicSpeed || '';
@@ -800,15 +801,15 @@ export function useConfigState() {
 			}
 
 			if (geminiThinkingEnabled) {
-				(config as any).geminiThinking = {
+				config.geminiThinking = {
 					enabled: true,
-					budget: geminiThinkingBudget,
+					thinkingLevel: geminiThinkingLevel,
 				};
 			} else {
-				(config as any).geminiThinking = undefined;
+				config.geminiThinking = undefined;
 			}
 
-			(config as any).responsesReasoning = {
+			config.responsesReasoning = {
 				enabled: responsesReasoningEnabled,
 				effort: responsesReasoningEffort,
 			};
@@ -903,8 +904,8 @@ export function useConfigState() {
 		setThinkingEffort,
 		geminiThinkingEnabled,
 		setGeminiThinkingEnabled,
-		geminiThinkingBudget,
-		setGeminiThinkingBudget,
+		geminiThinkingLevel,
+		setGeminiThinkingLevel,
 		responsesReasoningEnabled,
 		setResponsesReasoningEnabled,
 		responsesReasoningEffort,

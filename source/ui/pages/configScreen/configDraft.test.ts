@@ -15,7 +15,7 @@ test('build snow config draft keeps bridge and reasoning fields', t => {
 		bridgeToolProfile: 'writer-mode',
 		geminiThinking: {
 			enabled: true,
-			budget: 2048,
+			thinkingLevel: 'high',
 		},
 		responsesReasoning: {
 			enabled: true,
@@ -35,7 +35,7 @@ test('build snow config draft keeps bridge and reasoning fields', t => {
 	t.is(draft.snowcfg.bridgeToolProfile, 'writer-mode');
 	t.deepEqual(draft.snowcfg.geminiThinking, {
 		enabled: true,
-		budget: 2048,
+		thinkingLevel: 'high',
 	});
 	t.deepEqual(draft.snowcfg.responsesReasoning, {
 		enabled: true,

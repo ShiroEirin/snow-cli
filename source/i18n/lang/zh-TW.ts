@@ -183,6 +183,10 @@ export const zhTW: TranslationKeys = {
 		enablePromptOptimization: '啟用提示詞優化:',
 		enableAutoCompress: '啟用自動壓縮:',
 		autoCompressThreshold: '自動壓縮閾值 (%):',
+		autoCompressThresholdHint:
+			'算法: maxContextTokens × {percentage}% = {actualThreshold} tokens',
+		autoCompressThresholdDesc:
+			'當上下文超過此閾值時自動觸發壓縮 (推薦 60-80%, 過低頻繁壓縮影響性能, 過高則失去壓縮意義)',
 		showThinking: '顯示思考過程:',
 		streamingDisplay: '流式逐行顯示:',
 		thinkingEnabled: '啟用思考模式:',
@@ -192,7 +196,7 @@ export const zhTW: TranslationKeys = {
 		thinkingBudgetTokens: '思考預算令牌數:',
 		thinkingEffort: '思考強度:',
 		geminiThinkingEnabled: '啟用 Gemini 思考:',
-		geminiThinkingBudget: 'Gemini 思考預算:',
+		geminiThinkingLevel: 'Gemini 思考級別:',
 		responsesReasoningEnabled: '啟用 Responses 推理:',
 		responsesReasoningEffort: 'Responses 推理強度:',
 		responsesVerbosity: 'Responses 輸出詳細度:',
@@ -207,7 +211,6 @@ export const zhTW: TranslationKeys = {
 			'算法: maxContextTokens × {percentage}% = {actualLimit} tokens',
 		toolResultTokenLimitDesc:
 			'限制單個工具返回結果佔上下文窗口的比例 (推薦 20-40%, 過低會截斷, 過高會佔滿上下文)',
-		editSimilarityThreshold: '檔案編輯相似度閾值(0-1, 非必要不改):',
 		notSet: '未設定',
 		enabled: '[✓] 已啟用',
 		disabled: '[ ] 已停用',
@@ -1049,7 +1052,7 @@ export const zhTW: TranslationKeys = {
 		fileSearchHint:
 			'輸入以過濾檔案 • Tab/Enter 選擇 • Ctrl+T 切換檢視 • ESC 取消',
 		expandedViewHint: '展開檢視 • Ctrl+T 切換',
-		yoloModeActive: '❁ YOLO 模式已啟用 - 所有工具將自動批准無需確認',
+		yoloModeActive: '⧴ YOLO 模式已啟用 - 所有工具將自動批准無需確認',
 		planModeActive: '⚐ Plan 模式已啟用 - 專業規劃與協調助手',
 		vulnerabilityHuntingModeActive:
 			'⍨ Vulnerability Hunting 模式已啟用 - 專注漏洞挖掘與安全分析',
@@ -1277,7 +1280,10 @@ export const zhTW: TranslationKeys = {
 		keyboardHints: "提示: 按 'Enter' 選擇 | 按 'e' 編輯當前選項",
 		multiSelectHint: '多選模式',
 		multiSelectKeyboardHints:
-			'↑↓ 移動 | 空格 切換 | 1-9 快速切換 | 回車 確認 | e 編輯',
+			'↑↓ 移動 | Tab 切換(自訂/取消) | 空格 切換 | 1-9 快速切換 | 回車 確認 | e 編輯',
+		optionListScrollHint: '↑↓ 捲動',
+		optionListMoreAbove: '上方還有 {count} 項',
+		optionListMoreBelow: '下方還有 {count} 項',
 	},
 	toolConfirmation: {
 		header: '[工具確認]',

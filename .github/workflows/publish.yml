@@ -56,11 +56,12 @@ jobs:
 
             ### What's New
 
-            - Fixed some known bugs
-            - Fixed display bug in `/btw` component
-            - Decoupled part of the sub-agent code
-            - Optimized some UI display effects and added prompts
-            - Optimized Hooks system
+            - Add batch processing function to tools like TODO
+            - Optimize part of UI display to avoid icon display anomalies and terminal jitter
+            - Update Gemini thinking strength parameters
+            - Persistent context information
+            - Enhance robustness of `/btw` command
+            - Remove outdated API setting parameters
 
             ### Installation
             ```bash

@@ -182,35 +182,44 @@ export async function fetchAvailableModels(): Promise<Model[]> {
 
 	try {
 		let models: Model[];
+		const defaultOpenAiBaseUrl = 'https://api.openai.com/v1';
+		const trimmedBaseUrl = config.baseUrl.replace(/\/$/, '');
+		const isDefaultBaseUrl =
+			!trimmedBaseUrl || trimmedBaseUrl === defaultOpenAiBaseUrl;
 
 		switch (requestMethod) {
-			case 'gemini':
+			case 'gemini': {
 				if (!config.apiKey) {
 					throw new Error('API key is required for Gemini API');
 				}
-				models = await fetchGeminiModels(
-					config.baseUrl.replace(/\/$/, ''),
-					config.apiKey,
-				);
+				const geminiBaseUrl = isDefaultBaseUrl
+					? 'https://generativelanguage.googleapis.com/v1beta'
+					: trimmedBaseUrl;
+				models = await fetchGeminiModels(geminiBaseUrl, config.apiKey);
 				break;
+			}
 
-			case 'anthropic':
+			case 'anthropic': {
 				if (!config.apiKey) {
 					throw new Error('API key is required for Anthropic API');
 				}
+				const anthropicBaseUrl = isDefaultBaseUrl
+					? 'https://api.anthropic.com/v1'
+					: trimmedBaseUrl;
 				models = await fetchAnthropicModels(
-					config.baseUrl.replace(/\/$/, ''),
+					anthropicBaseUrl,
 					config.apiKey,
 					customHeaders,
 				);
 				break;
+			}
 
 			case 'chat':
 			case 'responses':
 			default:
 				// OpenAI-compatible API
 				models = await fetchOpenAIModels(
-					config.baseUrl.replace(/\/$/, ''),
+					trimmedBaseUrl,
 					config.apiKey,
 					customHeaders,
 				);

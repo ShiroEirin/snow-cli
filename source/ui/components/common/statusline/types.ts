@@ -119,7 +119,7 @@ export interface StatusLineSystemState {
 		thinkingBudgetTokens?: number;
 		thinkingEffort?: string;
 		geminiThinkingEnabled?: boolean;
-		geminiThinkingBudget?: number;
+		geminiThinkingLevel?: string;
 		responsesReasoningEnabled?: boolean;
 		responsesReasoningEffort?: string;
 		responsesFastMode?: boolean;
@@ -132,7 +132,6 @@ export interface StatusLineSystemState {
 		streamIdleTimeoutSec?: number;
 		systemPromptId?: string | string[];
 		customHeadersSchemeId?: string;
-		editSimilarityThreshold?: number;
 		toolResultTokenLimit?: number;
 		streamingDisplay?: boolean;
 	};

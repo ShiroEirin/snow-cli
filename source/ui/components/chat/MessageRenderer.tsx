@@ -479,7 +479,7 @@ export default function MessageRenderer({
 	return (
 		<Box
 			key={`msg-${index}`}
-			marginTop={0}
+			marginTop={message.role === 'user' ? 1 : 0}
 			marginBottom={1}
 			paddingX={1}
 			flexDirection="column"

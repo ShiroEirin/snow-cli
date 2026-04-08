@@ -71,8 +71,6 @@ export function useConfigInput(
 		setThinkingBudgetTokens,
 		autoCompressThreshold,
 		setAutoCompressThreshold,
-		geminiThinkingBudget,
-		setGeminiThinkingBudget,
 		editSimilarityThreshold,
 		setEditSimilarityThreshold,
 		editingThresholdValue,
@@ -371,11 +369,11 @@ export function useConfigInput(
 				min: 50,
 				max: 95,
 			},
-			geminiThinkingBudget: {
-				get: () => geminiThinkingBudget,
-				set: setGeminiThinkingBudget,
-				min: 1,
-				max: Infinity,
+			editSimilarityThreshold: {
+				get: () => Math.round(editSimilarityThreshold * 100),
+				set: value => setEditSimilarityThreshold(value / 100),
+				min: 10,
+				max: 100,
 			},
 		};
 
@@ -413,17 +411,25 @@ export function useConfigInput(
 			if (currentField === 'anthropicBeta') {
 				setAnthropicBeta(!anthropicBeta);
 			} else if (currentField === 'enableAutoCompress') {
-				setEnableAutoCompress(!enableAutoCompress);
+				const next = !enableAutoCompress;
+				setEnableAutoCompress(next);
+				if (!next) setShowThinking(false);
 			} else if (currentField === 'showThinking') {
 				setShowThinking(!showThinking);
 			} else if (currentField === 'streamingDisplay') {
 				setStreamingDisplay(!streamingDisplay);
 			} else if (currentField === 'thinkingEnabled') {
-				setThinkingEnabled(!thinkingEnabled);
+				const next = !thinkingEnabled;
+				setThinkingEnabled(next);
+				if (!next) setShowThinking(false);
 			} else if (currentField === 'geminiThinkingEnabled') {
-				setGeminiThinkingEnabled(!geminiThinkingEnabled);
+				const next = !geminiThinkingEnabled;
+				setGeminiThinkingEnabled(next);
+				if (!next) setShowThinking(false);
 			} else if (currentField === 'responsesReasoningEnabled') {
-				setResponsesReasoningEnabled(!responsesReasoningEnabled);
+				const next = !responsesReasoningEnabled;
+				setResponsesReasoningEnabled(next);
+				if (!next) setShowThinking(false);
 			} else if (currentField === 'responsesFastMode') {
 				setResponsesFastMode(!responsesFastMode);
 			}
@@ -437,9 +443,6 @@ export function useConfigInput(
 		) {
 			setIsEditing(true);
 		} else if (isNumericField(currentField)) {
-			setIsEditing(true);
-		} else if (currentField === 'editSimilarityThreshold') {
-			setEditingThresholdValue('');
 			setIsEditing(true);
 		} else if (
 			currentField === 'advancedModel' ||

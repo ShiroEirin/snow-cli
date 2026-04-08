@@ -183,6 +183,8 @@ export type TranslationKeys = {
 		enablePromptOptimization: string;
 		enableAutoCompress: string;
 		autoCompressThreshold: string;
+		autoCompressThresholdHint: string;
+		autoCompressThresholdDesc: string;
 		showThinking: string;
 		streamingDisplay: string;
 		thinkingEnabled: string;
@@ -192,7 +194,7 @@ export type TranslationKeys = {
 		thinkingBudgetTokens: string;
 		thinkingEffort: string;
 		geminiThinkingEnabled: string;
-		geminiThinkingBudget: string;
+		geminiThinkingLevel: string;
 		responsesReasoningEnabled: string;
 		responsesReasoningEffort: string;
 		responsesVerbosity: string;
@@ -205,7 +207,6 @@ export type TranslationKeys = {
 		toolResultTokenLimit: string;
 		toolResultTokenLimitHint: string;
 		toolResultTokenLimitDesc: string;
-		editSimilarityThreshold: string;
 		notSet: string;
 		enabled: string;
 		disabled: string;
@@ -1261,6 +1262,10 @@ export type TranslationKeys = {
 		keyboardHints: string;
 		multiSelectHint: string;
 		multiSelectKeyboardHints: string;
+		/** 可滚动选项列表底部汇总（与 mcpInfoPanel.scrollHint / more* 一致） */
+		optionListScrollHint: string;
+		optionListMoreAbove: string;
+		optionListMoreBelow: string;
 	};
 	toolConfirmation: {
 		header: string;

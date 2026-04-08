@@ -29,7 +29,7 @@ export type ConfigField =
 	| 'thinkingBudgetTokens'
 	| 'thinkingEffort'
 	| 'geminiThinkingEnabled'
-	| 'geminiThinkingBudget'
+	| 'geminiThinkingLevel'
 	| 'responsesReasoningEnabled'
 	| 'responsesReasoningEffort'
 	| 'responsesVerbosity'
@@ -107,6 +107,7 @@ export const SELECT_FIELDS: ConfigField[] = [
 	'basicModel',
 	'thinkingMode',
 	'thinkingEffort',
+	'geminiThinkingLevel',
 	'responsesReasoningEffort',
 	'responsesVerbosity',
 	'anthropicSpeed',
@@ -156,7 +157,6 @@ export const NUMERIC_FIELDS: ConfigField[] = [
 	'streamIdleTimeoutSec',
 	'toolResultTokenLimit',
 	'thinkingBudgetTokens',
-	'geminiThinkingBudget',
 	'autoCompressThreshold',
 	'editSimilarityThreshold',
 ];
