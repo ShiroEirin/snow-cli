@@ -45,13 +45,19 @@ import {
 import {createStreamingResponse} from '../../api/responses.js';
 import {createStreamingAnthropicCompletion} from '../../api/anthropic.js';
 import {createStreamingGeminiCompletion} from '../../api/gemini.js';
-import {collectAllMCPTools} from '../execution/mcpToolsManager.js';
 import {getOpenAiConfig} from '../config/apiConfig.js';
 import type {ResponseStreamChunk} from '../../api/responses.js';
 import type {AnthropicStreamChunk} from '../../api/anthropic.js';
 import type {GeminiStreamChunk} from '../../api/gemini.js';
 import type {StreamChunk} from '../../api/chat.js';
 import {executeToolCall, type ToolCall} from '../execution/toolExecutor.js';
+import {prepareToolPlane} from '../session/vcpCompatibility/toolPlaneFacade.js';
+import {
+	clearBridgeToolSnapshotSession,
+} from '../session/vcpCompatibility/toolSnapshot.js';
+import {
+	clearToolExecutionBindingsSession,
+} from '../session/vcpCompatibility/toolExecutionBinding.js';
 
 // ACP 协议版本
 const ACP_PROTOCOL_VERSION: ProtocolVersion = 1;
@@ -76,6 +82,11 @@ type ToolCallStatus = 'pending' | 'running' | 'completed' | 'failed';
 class AcpManager {
 	private connection: AgentSideConnection | null = null;
 	private sessions: Map<string, AcpSession> = new Map();
+
+	private cleanupToolPlaneSession(sessionId: string): void {
+		clearToolExecutionBindingsSession(sessionId);
+		clearBridgeToolSnapshotSession(sessionId);
+	}
 
 	/**
 	 * 启动 ACP 服务
@@ -267,6 +278,7 @@ class AcpManager {
 				} finally {
 					session.controller = null;
 					session.prompting = false;
+					this.cleanupToolPlaneSession(session.id);
 				}
 			},
 
@@ -323,8 +335,11 @@ class AcpManager {
 		const config = getOpenAiConfig();
 		const model = config.advancedModel || 'claude-sonnet-4-20250514';
 
-		// 收集 MCP 工具
-		const mcpTools = await collectAllMCPTools();
+		const preparedToolPlane = await prepareToolPlane({
+			config,
+			sessionKey: session.id,
+		});
+		const mcpTools = preparedToolPlane.tools;
 
 		// 流式响应处理
 		let fullContent = '';
@@ -605,6 +620,7 @@ class AcpManager {
 						false,
 						addToAlwaysApproved,
 						undefined,
+						preparedToolPlane.toolPlaneKey,
 					);
 					if (result) {
 						// 添加工具结果到消息
@@ -781,6 +797,7 @@ class AcpManager {
 			if (session.controller) {
 				session.controller.abort();
 			}
+			this.cleanupToolPlaneSession(session.id);
 		}
 		this.sessions.clear();
 		this.connection = null;

@@ -1,4 +1,6 @@
 import anyTest from 'ava';
+import {resolve as resolvePath} from 'node:path';
+import {pathToFileURL} from 'node:url';
 
 const test = anyTest as any;
 
@@ -9,9 +11,17 @@ import {
 	filterToolExecutionBindings,
 	getToolExecutionBinding,
 	normalizeBridgeArgumentAliases,
+	registerToolExecutionBindings,
 	rotateToolExecutionBindingsSession,
 } from './toolExecutionBinding.js';
 import {DEFAULT_TOOL_PLANE_KEY} from './constants.js';
+
+const FIXTURES_DEMO_FILE_URL = pathToFileURL(
+	resolvePath('fixtures/demo.png'),
+).toString();
+const ASSETS_REFERENCE_FILE_URL = pathToFileURL(
+	resolvePath('../assets/reference.png'),
+).toString();
 
 test.afterEach(() => {
 	clearToolExecutionBindings(DEFAULT_TOOL_PLANE_KEY);
@@ -24,7 +34,7 @@ test.afterEach(() => {
 	clearToolExecutionBindingsSession('review-session');
 });
 
-test('resolve execution binding from explicit tool plane key', (t: any) => {
+test.serial('resolve execution binding from explicit tool plane key', (t: any) => {
 	rotateToolExecutionBindingsSession({
 		sessionKey: 'chat-session',
 		nextToolPlaneKey: 'plane-a',
@@ -53,7 +63,7 @@ test('resolve execution binding from explicit tool plane key', (t: any) => {
 	);
 });
 
-test('resolve execution binding from latest session plane key fallback', (t: any) => {
+test.serial('resolve execution binding from latest session plane key fallback', (t: any) => {
 	rotateToolExecutionBindingsSession({
 		sessionKey: 'chat-session',
 		nextToolPlaneKey: 'plane-b',
@@ -82,7 +92,7 @@ test('resolve execution binding from latest session plane key fallback', (t: any
 	);
 });
 
-test('drop stale session fallback after explicit plane cleanup', (t: any) => {
+test.serial('drop stale session fallback after explicit plane cleanup', (t: any) => {
 	rotateToolExecutionBindingsSession({
 		sessionKey: 'chat-session',
 		nextToolPlaneKey: 'plane-b',
@@ -106,7 +116,46 @@ test('drop stale session fallback after explicit plane cleanup', (t: any) => {
 	);
 });
 
-test('resolve latest registered binding when teammate worktree rewrite has no explicit plane key', (t: any) => {
+test.serial('resolve fallback binding from default tool plane when no explicit plane key exists', (t: any) => {
+	registerToolExecutionBindings(undefined, [
+		{
+			kind: 'bridge',
+			toolName: 'vcp-imagecomposer-editimage',
+			pluginName: 'ImageComposer',
+			displayName: 'ImageComposer',
+			commandName: 'EditImage',
+			stringifyArgumentNames: [],
+			argumentBindings: [
+				{
+					name: 'imageUrl',
+					aliases: ['fileUrl'],
+					fileUrlCompatible: true,
+				},
+			],
+		},
+	]);
+
+	t.deepEqual(
+		getToolExecutionBinding('vcp-imagecomposer-editimage'),
+		{
+			kind: 'bridge',
+			toolName: 'vcp-imagecomposer-editimage',
+			pluginName: 'ImageComposer',
+			displayName: 'ImageComposer',
+			commandName: 'EditImage',
+			stringifyArgumentNames: [],
+			argumentBindings: [
+				{
+					name: 'imageUrl',
+					aliases: ['fileUrl'],
+					fileUrlCompatible: true,
+				},
+			],
+		},
+	);
+});
+
+test.serial('do not leak session scoped bindings into undefined key fallback lookups', (t: any) => {
 	rotateToolExecutionBindingsSession({
 		sessionKey: 'chat-session',
 		nextToolPlaneKey: 'plane-b',
@@ -129,27 +178,10 @@ test('resolve latest registered binding when teammate worktree rewrite has no ex
 		],
 	});
 
-	t.deepEqual(
-		getToolExecutionBinding('vcp-imagecomposer-editimage'),
-		{
-			kind: 'bridge',
-			toolName: 'vcp-imagecomposer-editimage',
-			pluginName: 'ImageComposer',
-			displayName: 'ImageComposer',
-			commandName: 'EditImage',
-			stringifyArgumentNames: [],
-			argumentBindings: [
-				{
-					name: 'imageUrl',
-					aliases: ['fileUrl'],
-					fileUrlCompatible: true,
-				},
-			],
-		},
-	);
+	t.is(getToolExecutionBinding('vcp-imagecomposer-editimage'), undefined);
 });
 
-test('keep session-scoped bindings isolated across multiple planes for the same tool name', (t: any) => {
+test.serial('keep session-scoped bindings isolated across multiple planes for the same tool name', (t: any) => {
 	rotateToolExecutionBindingsSession({
 		sessionKey: 'design-session',
 		nextToolPlaneKey: 'design-plane',
@@ -231,7 +263,7 @@ test('keep session-scoped bindings isolated across multiple planes for the same 
 	);
 });
 
-test('filter execution bindings down to the retained tool plane', (t: any) => {
+test.serial('filter execution bindings down to the retained tool plane', (t: any) => {
 	rotateToolExecutionBindingsSession({
 		sessionKey: 'chat-session',
 		nextToolPlaneKey: 'plane-b',
@@ -269,7 +301,7 @@ test('filter execution bindings down to the retained tool plane', (t: any) => {
 	);
 });
 
-test('coerce description-derived bridge arguments to strings before execution', (t: any) => {
+test.serial('coerce description-derived bridge arguments to strings before execution', (t: any) => {
 	const normalizedArgs = coerceBridgeExecutionArguments(
 		{
 			query: 'router',
@@ -295,7 +327,7 @@ test('coerce description-derived bridge arguments to strings before execution', 
 	});
 });
 
-test('leave structured bridge arguments untouched when no stringify contract exists', (t: any) => {
+test.serial('leave structured bridge arguments untouched when no stringify contract exists', (t: any) => {
 	const originalArgs = {
 		query: 'router',
 		context_lines: 2,
@@ -313,7 +345,7 @@ test('leave structured bridge arguments untouched when no stringify contract exi
 	t.deepEqual(normalizedArgs, originalArgs);
 });
 
-test('normalize bridge argument aliases and local file paths before execution', (t: any) => {
+test.serial('normalize bridge argument aliases and local file paths before execution', (t: any) => {
 	const normalizedArgs = coerceBridgeExecutionArguments(
 		{
 			fileUrl: 'H:/repo/assets/cover.png',
@@ -341,7 +373,7 @@ test('normalize bridge argument aliases and local file paths before execution', 
 	t.is(normalizedArgs['prompt'], 'make it brighter');
 });
 
-test('normalize bridge argument aliases without coercing file-url compatible values yet', (t: any) => {
+test.serial('normalize bridge argument aliases without coercing file-url compatible values yet', (t: any) => {
 	const normalizedArgs = normalizeBridgeArgumentAliases(
 		{
 			fileUrl: 'assets/cover.png',
@@ -369,7 +401,7 @@ test('normalize bridge argument aliases without coercing file-url compatible val
 	t.is(normalizedArgs['prompt'], 'make it brighter');
 });
 
-test('apply alias normalization before description-derived stringify coercion', (t: any) => {
+test.serial('apply alias normalization before description-derived stringify coercion', (t: any) => {
 	const normalizedArgs = coerceBridgeExecutionArguments(
 		{
 			image_path: './fixtures/demo.png',
@@ -396,12 +428,12 @@ test('apply alias normalization before description-derived stringify coercion', 
 
 	t.is(
 		normalizedArgs['imageUrl'],
-		'file:///H:/github/VCP/snow-cli/fixtures/demo.png',
+		FIXTURES_DEMO_FILE_URL,
 	);
 	t.is(normalizedArgs['options'], '{"mode":"fast"}');
 });
 
-test('normalize nested file-url compatible objects without rewriting unrelated nested strings', (t: any) => {
+test.serial('normalize nested file-url compatible objects without rewriting unrelated nested strings', (t: any) => {
 	const normalizedArgs = coerceBridgeExecutionArguments(
 		{
 			payload: {
@@ -433,11 +465,11 @@ test('normalize nested file-url compatible objects without rewriting unrelated n
 
 	t.deepEqual(normalizedArgs, {
 		payload: {
-			imageUrl: 'file:///H:/github/VCP/snow-cli/fixtures/demo.png',
+			imageUrl: FIXTURES_DEMO_FILE_URL,
 			prompt: 'keep.colors.warm',
 			items: [
 				{
-					filePath: 'file:///H:/github/VCP/assets/reference.png',
+					filePath: ASSETS_REFERENCE_FILE_URL,
 					label: 'reference.image',
 				},
 			],

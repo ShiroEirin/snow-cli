@@ -50,15 +50,12 @@ function resolveBindingLookupKey(key?: string): string {
 }
 
 function rebuildFallbackBindings(): void {
-	const nextFallbackBindings = new Map<string, ToolExecutionBinding>();
-
-	for (const bindingPlane of bindingPlaneRegistry.values()) {
-		for (const [toolName, binding] of bindingPlane.entries()) {
-			nextFallbackBindings.set(toolName, binding);
-		}
-	}
-
-	fallbackBindingsByToolName = nextFallbackBindings;
+	const defaultBindingPlane = bindingPlaneRegistry.get(
+		DEFAULT_TOOL_PLANE_LOOKUP_KEY,
+	);
+	fallbackBindingsByToolName = defaultBindingPlane
+		? new Map(defaultBindingPlane)
+		: new Map<string, ToolExecutionBinding>();
 }
 
 function registerBindingPlane(
@@ -152,13 +149,9 @@ export function getToolExecutionBinding(
 	toolName: string,
 	toolPlaneKey?: string,
 ): ToolExecutionBinding | undefined {
-	const binding = bindingLeaseStore.getResource(toolPlaneKey)?.get(toolName);
-	if (binding) {
-		return binding;
-	}
-
-	if (toolPlaneKey && toolPlaneKey.trim()) {
-		return undefined;
+	const normalizedToolPlaneKey = toolPlaneKey?.trim();
+	if (normalizedToolPlaneKey) {
+		return bindingLeaseStore.getResource(normalizedToolPlaneKey)?.get(toolName);
 	}
 
 	return fallbackBindingsByToolName.get(toolName);

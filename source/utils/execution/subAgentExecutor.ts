@@ -1,4 +1,3 @@
-import {collectAllMCPTools} from './mcpToolsManager.js';
 import {getOpenAiConfig} from '../config/apiConfig.js';
 import {sessionManager} from '../session/sessionManager.js';
 import {unifiedHooksExecutor} from './unifiedHooksExecutor.js';
@@ -121,7 +120,7 @@ export async function executeSubAgent(
 		instanceId || `subagent-${agentId}-${Date.now()}`;
 	const rootConfig = getOpenAiConfig();
 	const useDedicatedToolPlane = shouldUseSubAgentToolPlane(rootConfig);
-	let shouldCleanupDedicatedPlane = false;
+	let shouldCleanupToolPlane = false;
 
 	try {
 		// 1. Resolve agent
@@ -131,14 +130,18 @@ export async function executeSubAgent(
 		}
 
 		// 2. Filter tools. Only bridge / hybrid sub-agents need a dedicated tool plane.
-		let allowedTools: MCPTool[];
+		const preparedToolPlane = await prepareToolPlane({
+			config: rootConfig,
+			sessionKey: toolPlaneSessionKey,
+		});
+		shouldCleanupToolPlane = true;
+
+		let allowedTools: MCPTool[] = filterAllowedTools(
+			agent,
+			preparedToolPlane.tools,
+		);
 		let subAgentToolPlaneKey: string | undefined;
 		if (useDedicatedToolPlane) {
-			const preparedToolPlane = await prepareToolPlane({
-				config: rootConfig,
-				sessionKey: toolPlaneSessionKey,
-			});
-			allowedTools = filterAllowedTools(agent, preparedToolPlane.tools);
 			const allowedExecutionBindings = filterToolExecutionBindings(
 				allowedTools.map(tool => tool.function.name),
 				preparedToolPlane.toolPlaneKey,
@@ -148,10 +151,6 @@ export async function executeSubAgent(
 				nextToolPlaneKey: `${preparedToolPlane.toolPlaneKey}:allowed`,
 				bindings: allowedExecutionBindings,
 			});
-			shouldCleanupDedicatedPlane = true;
-		} else {
-			const allTools = await collectAllMCPTools();
-			allowedTools = filterAllowedTools(agent, allTools);
 		}
 
 		if (allowedTools.length === 0) {
@@ -311,7 +310,7 @@ export async function executeSubAgent(
 			error: error instanceof Error ? error.message : 'Unknown error',
 		};
 	} finally {
-		if (shouldCleanupDedicatedPlane) {
+		if (shouldCleanupToolPlane) {
 			const [
 				{clearToolExecutionBindingsSession},
 				{clearBridgeToolSnapshotSession},
