@@ -5,7 +5,10 @@ import {tmpdir} from 'os';
 import {join} from 'path';
 import {fileURLToPath} from 'url';
 
-import {resolveBackendModeWithMigration} from './apiConfig.js';
+import {
+	resolveBackendModeWithMigration,
+	splitApiConfig,
+} from './apiConfig.js';
 
 const API_CONFIG_MODULE_URL = new URL('./apiConfig.ts', import.meta.url).href;
 const TS_NODE_LOADER_URL = new URL(
@@ -95,6 +98,36 @@ test('migrate missing backend mode to explicit native mode', t => {
 			migrated: true,
 		},
 	);
+});
+
+test('splitApiConfig isolates VCP-only fields from core config', t => {
+	const result = splitApiConfig({
+		baseUrl: 'http://127.0.0.1:6005/v1',
+		apiKey: 'test-key',
+		requestMethod: 'chat',
+		advancedModel: 'gpt-5',
+		backendMode: 'vcp',
+		toolTransport: 'bridge',
+		bridgeWsUrl: 'wss://bridge.example.com/socket',
+		bridgeVcpKey: 'Snow',
+		enableVcpTimeBridge: true,
+	});
+
+	t.deepEqual(result.apiConfig, {
+		baseUrl: 'http://127.0.0.1:6005/v1',
+		apiKey: 'test-key',
+		requestMethod: 'chat',
+		advancedModel: 'gpt-5',
+	});
+	t.deepEqual(result.vcpConfig, {
+		backendMode: 'vcp',
+		toolTransport: 'bridge',
+		bridgeWsUrl: 'wss://bridge.example.com/socket',
+		bridgeVcpKey: 'Snow',
+		bridgeAccessToken: undefined,
+		bridgeToolProfile: undefined,
+		enableVcpTimeBridge: true,
+	});
 });
 
 test.serial(

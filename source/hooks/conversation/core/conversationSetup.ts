@@ -9,16 +9,20 @@ import {prepareToolPlane} from '../../../utils/session/vcpCompatibility/toolPlan
 import {initializeConversationSession} from './sessionInitializer.js';
 import {buildEditorContextContent} from './editorContextBuilder.js';
 import {cleanOrphanedToolCalls} from '../utils/messageCleanup.js';
-import type {ConversationHandlerOptions} from './conversationTypes.js';
-import type {PreparedToolPlane} from '../../../utils/session/vcpCompatibility/toolPlaneFacade.js';
+import type {
+	ConversationHandlerOptions,
+	ConversationToolContext,
+} from './conversationTypes.js';
+
+export type ToolPlaneRuntimeState =
+	Awaited<ReturnType<typeof prepareToolPlane>>['runtimeState'];
 
 export type PreparedConversationSetup = {
 	conversationMessages: ChatMessage[];
 	activeTools: MCPTool[];
 	discoveredToolNames: Set<string>;
 	useToolSearch: boolean;
-	toolSnapshotKey?: string;
-	toolPlaneRuntimeState: PreparedToolPlane['runtimeState'];
+	toolContext: ConversationToolContext;
 };
 
 export async function prepareConversationSetup(
@@ -76,8 +80,10 @@ export async function prepareConversationSetup(
 		activeTools,
 		discoveredToolNames,
 		useToolSearch,
-		toolSnapshotKey: toolPlaneKey,
-		toolPlaneRuntimeState: runtimeState,
+		toolContext: {
+			toolSnapshotKey: toolPlaneKey,
+			toolPlaneRuntimeState: runtimeState,
+		},
 	};
 }
 

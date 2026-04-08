@@ -4,7 +4,10 @@ import {
 	type MCPServiceTools,
 	type MCPTool,
 } from '../../execution/mcpToolsManager.js';
-import type {ApiConfig} from '../../config/apiConfig.js';
+import type {
+	SnowBridgeApiConfig,
+	VcpApiConfig,
+} from '../../config/apiConfig.js';
 import {
 	snowBridgeClient,
 	type BridgeManifestToolFilters,
@@ -35,6 +38,17 @@ export type PreparedToolPlane = {
 	runtimeState: ToolPlaneRuntimeState;
 };
 
+export function appendSyntheticToolPlaneTools(
+	tools: MCPTool[],
+	syntheticTools?: readonly MCPTool[],
+): MCPTool[] {
+	if (!syntheticTools || syntheticTools.length === 0) {
+		return tools;
+	}
+
+	return [...tools, ...syntheticTools];
+}
+
 type LocalToolPlane = {
 	localTools: MCPTool[];
 	localServicesInfo: MCPServiceTools[];
@@ -45,8 +59,11 @@ const EMPTY_LOCAL_TOOL_PLANE: LocalToolPlane = {
 	localServicesInfo: [],
 };
 
+type PreparedToolPlaneConfig = SnowBridgeApiConfig &
+	Pick<VcpApiConfig, 'bridgeToolProfile'>;
+
 export function buildBridgeManifestToolFilters(options: {
-	config?: Pick<ApiConfig, 'bridgeToolProfile'>;
+	config?: Pick<VcpApiConfig, 'bridgeToolProfile'>;
 	transport: ReturnType<typeof resolveToolTransport>;
 	localTools: MCPTool[];
 }): BridgeManifestToolFilters | undefined {
@@ -73,7 +90,7 @@ export function buildBridgeManifestToolFilters(options: {
 }
 
 export function buildPreparedToolPlaneRuntimeState(options: {
-	config: Pick<ApiConfig, 'toolTransport'>;
+	config: Pick<VcpApiConfig, 'toolTransport'>;
 	registry: Pick<ReturnType<typeof resolveToolRegistry>, 'retainedToolCounts'>;
 	localDiscoveredToolCount: number;
 	bridgeDiscoveredToolCount: number;
@@ -94,8 +111,9 @@ function resolveFallbackToolPlaneKey(sessionKey?: string): string {
 }
 
 export async function prepareToolPlane(options: {
-	config: ApiConfig;
+	config: PreparedToolPlaneConfig;
 	sessionKey?: string;
+	syntheticTools?: readonly MCPTool[];
 }): Promise<PreparedToolPlane> {
 	const transport = resolveToolTransport(options.config);
 	const shouldLoadBridge = transport === 'bridge' || transport === 'hybrid';
@@ -133,7 +151,7 @@ export async function prepareToolPlane(options: {
 					localTools,
 					localServicesInfo,
 				}),
-			)
+		  )
 		: Promise.resolve(EMPTY_LOCAL_TOOL_PLANE);
 
 	const [bridgeResult, localResult] = await Promise.allSettled([
@@ -174,8 +192,7 @@ export async function prepareToolPlane(options: {
 		registry,
 		localDiscoveredToolCount: localTools.length,
 		bridgeDiscoveredToolCount: bridgeSnapshot?.modelTools.length || 0,
-		bridgeLoadFailed:
-			shouldLoadBridge && bridgeResult.status === 'rejected',
+		bridgeLoadFailed: shouldLoadBridge && bridgeResult.status === 'rejected',
 	});
 	const toolPlaneKey = rotateToolExecutionBindingsSession({
 		sessionKey: options.sessionKey,
@@ -186,7 +203,10 @@ export async function prepareToolPlane(options: {
 	});
 
 	return {
-		tools: registry.tools,
+		tools: appendSyntheticToolPlaneTools(
+			registry.tools,
+			options.syntheticTools,
+		),
 		servicesInfo: registry.servicesInfo,
 		duplicateToolNames: registry.duplicateToolNames,
 		toolPlaneKey,

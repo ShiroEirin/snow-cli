@@ -21,6 +21,11 @@ import {
 import {rewriteToolArgsForWorktree} from '../team/teamWorktree.js';
 import {projectToolMessagesForContext} from '../session/toolMessageProjection.js';
 import {compressionCoordinator} from '../core/compressionCoordinator.js';
+import {
+	buildTeammateSyntheticTools,
+	TEAMMATE_SYNTHETIC_TOOL_NAMES,
+	WAIT_FOR_MESSAGES_TOOL_NAME,
+} from './teammateSyntheticTools.js';
 
 export interface TeammateExecutionOptions {
 	onMessage?: (message: SubAgentMessage) => void;
@@ -28,7 +33,9 @@ export interface TeammateExecutionOptions {
 	requestToolConfirmation?: (
 		toolName: string,
 		toolArgs: any,
-	) => Promise<import('../../ui/components/tools/ToolConfirmation.js').ConfirmationResult>;
+	) => Promise<
+		import('../../ui/components/tools/ToolConfirmation.js').ConfirmationResult
+	>;
 	isToolAutoApproved?: (toolName: string) => boolean;
 	yoloMode?: boolean;
 	addToAlwaysApproved?: (toolName: string) => void;
@@ -59,11 +66,7 @@ export function createTeammateUserQuestionAdapter(
 	}
 
 	return async (question: string, options: string[], multiSelect?: boolean) => {
-		const response = await requestUserQuestion(
-			question,
-			options,
-			multiSelect,
-		);
+		const response = await requestUserQuestion(question, options, multiSelect);
 		return {
 			selected: response.selected,
 			customInput: response.customInput,
@@ -164,9 +167,7 @@ export async function executeTeammate(
 	try {
 		const {getOpenAiConfig} = await import('../config/apiConfig.js');
 		const {sessionManager} = await import('../session/sessionManager.js');
-		const {createStreamingChatCompletion} = await import(
-			'../../api/chat.js'
-		);
+		const {createStreamingChatCompletion} = await import('../../api/chat.js');
 		const {createStreamingAnthropicCompletion} = await import(
 			// @ts-ignore - generated at build time
 			'../../api/anthropic.js'
@@ -174,9 +175,7 @@ export async function executeTeammate(
 		const {createStreamingGeminiCompletion} = await import(
 			'../../api/gemini.js'
 		);
-		const {createStreamingResponse} = await import(
-			'../../api/responses.js'
-		);
+		const {createStreamingResponse} = await import('../../api/responses.js');
 		const {resolveVcpModeRequest} = await import(
 			'../session/vcpCompatibility/mode.js'
 		);
@@ -196,137 +195,13 @@ export async function executeTeammate(
 		const preparedToolPlane = await prepareToolPlane({
 			config,
 			sessionKey: instanceId,
+			syntheticTools: buildTeammateSyntheticTools({
+				requirePlanApproval,
+			}),
 		});
 		const allowedTools: MCPTool[] = [...preparedToolPlane.tools];
-
-		// Build teammate-specific synthetic tools
-		const messageTeammateTool: MCPTool = {
-			type: 'function' as const,
-			function: {
-				name: 'message_teammate',
-				description:
-					'Send a message to another teammate or the team lead. Use to share findings, coordinate work, or request help.',
-				parameters: {
-					type: 'object',
-					properties: {
-						target: {
-							type: 'string',
-							description:
-								'The name or member ID of the target teammate, or "lead" to message the team lead.',
-						},
-						content: {
-							type: 'string',
-							description: 'The message content to send.',
-						},
-					},
-					required: ['target', 'content'],
-				},
-			},
-		};
-
-		const claimTaskTool: MCPTool = {
-			type: 'function' as const,
-			function: {
-				name: 'claim_task',
-				description:
-					'Claim a pending task from the shared task list. The task must be pending and have no unresolved dependencies.',
-				parameters: {
-					type: 'object',
-					properties: {
-						task_id: {
-							type: 'string',
-							description: 'The ID of the task to claim.',
-						},
-					},
-					required: ['task_id'],
-				},
-			},
-		};
-
-		const completeTaskTool: MCPTool = {
-			type: 'function' as const,
-			function: {
-				name: 'complete_task',
-				description:
-					'Mark a task as completed after finishing the work.',
-				parameters: {
-					type: 'object',
-					properties: {
-						task_id: {
-							type: 'string',
-							description: 'The ID of the task to mark as completed.',
-						},
-					},
-					required: ['task_id'],
-				},
-			},
-		};
-
-		const listTasksTool: MCPTool = {
-			type: 'function' as const,
-			function: {
-				name: 'list_team_tasks',
-				description:
-					'View all tasks in the shared task list with their status, assignees, and dependencies.',
-				parameters: {
-					type: 'object',
-					properties: {},
-					required: [],
-				},
-			},
-		};
-
-		const requestPlanApprovalTool: MCPTool = {
-			type: 'function' as const,
-			function: {
-				name: 'request_plan_approval',
-				description:
-					'Submit your implementation plan to the team lead for review and approval. Required when the lead specified plan approval for this teammate.',
-				parameters: {
-					type: 'object',
-					properties: {
-						plan: {
-							type: 'string',
-							description:
-								'Your detailed implementation plan in markdown format.',
-						},
-					},
-					required: ['plan'],
-				},
-			},
-		};
-
-	const waitForMessagesTool: MCPTool = {
-		type: 'function' as const,
-		function: {
-			name: 'wait_for_messages',
-			description:
-				'Block and wait for incoming messages from the lead, user, or other teammates. Call this when you have finished all current work and are waiting for further instructions. This is efficient — no resources are consumed while waiting. Returns immediately if messages are already queued.',
-			parameters: {
-				type: 'object',
-				properties: {
-					summary: {
-						type: 'string',
-						description: 'Brief summary of work completed so far, sent to the lead.',
-					},
-				},
-				required: ['summary'],
-			},
-		},
-	};
-
-	allowedTools.push(
-		messageTeammateTool,
-		claimTaskTool,
-		completeTaskTool,
-		listTasksTool,
-		waitForMessagesTool,
-	);
 		const userQuestionAdapter =
 			createTeammateUserQuestionAdapter(requestUserQuestion);
-		if (requirePlanApproval) {
-			allowedTools.push(requestPlanApprovalTool);
-		}
 
 		// Build initial prompt with team context
 		const otherTeammates = teamTracker
@@ -350,24 +225,35 @@ ${role ? `Your role: ${role}` : ''}
 ### Other Teammates`;
 
 		if (otherTeammates.length > 0) {
-			teamContext += '\n' + otherTeammates
-				.map(t => `- ${t.memberName}${t.role ? ` (${t.role})` : ''} [ID: ${t.memberId}]`)
-				.join('\n');
+			teamContext +=
+				'\n' +
+				otherTeammates
+					.map(
+						t =>
+							`- ${t.memberName}${t.role ? ` (${t.role})` : ''} [ID: ${
+								t.memberId
+							}]`,
+					)
+					.join('\n');
 		} else {
 			teamContext += '\nNo other teammates are currently active.';
 		}
 
 		teamContext += '\n\n### Shared Task List';
 		if (tasks.length > 0) {
-			teamContext += '\n' + tasks
-				.map(t => {
-					const deps = t.dependencies?.length
-						? ` (depends on: ${t.dependencies.join(', ')})`
-						: '';
-					const assignee = t.assigneeName ? ` [assigned to: ${t.assigneeName}]` : '';
-					return `- [${t.status}] ${t.id}: ${t.title}${deps}${assignee}`;
-				})
-				.join('\n');
+			teamContext +=
+				'\n' +
+				tasks
+					.map(t => {
+						const deps = t.dependencies?.length
+							? ` (depends on: ${t.dependencies.join(', ')})`
+							: '';
+						const assignee = t.assigneeName
+							? ` [assigned to: ${t.assigneeName}]`
+							: '';
+						return `- [${t.status}] ${t.id}: ${t.title}${deps}${assignee}`;
+					})
+					.join('\n');
 		} else {
 			teamContext += '\nNo tasks defined yet.';
 		}
@@ -392,9 +278,7 @@ ${role ? `Your role: ${role}` : ''}
 
 		const finalPrompt = `${prompt}${teamContext}`;
 
-		const messages: ChatMessage[] = [
-			{role: 'user', content: finalPrompt},
-		];
+		const messages: ChatMessage[] = [{role: 'user', content: finalPrompt}];
 
 		let finalResponse = '';
 		let totalUsage: TokenUsage | undefined;
@@ -502,9 +386,13 @@ ${role ? `Your role: ${role}` : ''}
 
 			let currentContent = '';
 			let toolCalls: any[] = [];
-			let currentThinking: {type: 'thinking'; thinking: string; signature?: string} | undefined;
+			let currentThinking:
+				| {type: 'thinking'; thinking: string; signature?: string}
+				| undefined;
 			let currentReasoningContent: string | undefined;
-			let currentReasoning: {summary?: any; content?: any; encrypted_content?: string} | undefined;
+			let currentReasoning:
+				| {summary?: any; content?: any; encrypted_content?: string}
+				| undefined;
 
 			for await (const event of stream) {
 				if (onMessage) {
@@ -518,7 +406,9 @@ ${role ? `Your role: ${role}` : ''}
 
 				if (event.type === 'usage' && event.usage) {
 					const eu = event.usage;
-					latestTotalTokens = eu.total_tokens || (eu.prompt_tokens || 0) + (eu.completion_tokens || 0);
+					latestTotalTokens =
+						eu.total_tokens ||
+						(eu.prompt_tokens || 0) + (eu.completion_tokens || 0);
 
 					if (!totalUsage) {
 						totalUsage = {
@@ -533,7 +423,10 @@ ${role ? `Your role: ${role}` : ''}
 					}
 
 					if (onMessage && config.maxContextTokens && latestTotalTokens > 0) {
-						const ctxPct = getContextPercentage(latestTotalTokens, config.maxContextTokens);
+						const ctxPct = getContextPercentage(
+							latestTotalTokens,
+							config.maxContextTokens,
+						);
 						onMessage({
 							type: 'sub_agent_message',
 							agentId: `teammate-${memberId}`,
@@ -568,7 +461,10 @@ ${role ? `Your role: ${role}` : ''}
 			if (latestTotalTokens === 0 && config.maxContextTokens) {
 				latestTotalTokens = countMessagesTokens(projectMessagesForModel());
 				if (onMessage && latestTotalTokens > 0) {
-					const ctxPct = getContextPercentage(latestTotalTokens, config.maxContextTokens);
+					const ctxPct = getContextPercentage(
+						latestTotalTokens,
+						config.maxContextTokens,
+					);
 					onMessage({
 						type: 'sub_agent_message',
 						agentId: `teammate-${memberId}`,
@@ -590,8 +486,10 @@ ${role ? `Your role: ${role}` : ''}
 					content: currentContent || '',
 				};
 				if (currentThinking) assistantMessage.thinking = currentThinking;
-				if (currentReasoningContent) (assistantMessage as any).reasoning_content = currentReasoningContent;
-				if (currentReasoning) (assistantMessage as any).reasoning = currentReasoning;
+				if (currentReasoningContent)
+					(assistantMessage as any).reasoning_content = currentReasoningContent;
+				if (currentReasoning)
+					(assistantMessage as any).reasoning = currentReasoning;
 				if (toolCalls.length > 0) assistantMessage.tool_calls = toolCalls;
 				messages.push(assistantMessage);
 				finalResponse = currentContent;
@@ -600,8 +498,16 @@ ${role ? `Your role: ${role}` : ''}
 			// Context compression
 			let justCompressed = false;
 			if (latestTotalTokens > 0 && config.maxContextTokens) {
-				if (shouldCompressSubAgentContext(latestTotalTokens, config.maxContextTokens)) {
-					const ctxPercentage = getContextPercentage(latestTotalTokens, config.maxContextTokens);
+				if (
+					shouldCompressSubAgentContext(
+						latestTotalTokens,
+						config.maxContextTokens,
+					)
+				) {
+					const ctxPercentage = getContextPercentage(
+						latestTotalTokens,
+						config.maxContextTokens,
+					);
 
 					if (onMessage) {
 						onMessage({
@@ -618,8 +524,14 @@ ${role ? `Your role: ${role}` : ''}
 					await compressionCoordinator.acquireLock(instanceId);
 					try {
 						const compressionResult = await compressSubAgentContext(
-							messages, latestTotalTokens, config.maxContextTokens,
-							{model, requestMethod: config.requestMethod, maxTokens: config.maxTokens},
+							messages,
+							latestTotalTokens,
+							config.maxContextTokens,
+							{
+								model,
+								requestMethod: config.requestMethod,
+								maxTokens: config.maxTokens,
+							},
 						);
 						if (compressionResult.compressed) {
 							messages.length = 0;
@@ -644,7 +556,7 @@ ${role ? `Your role: ${role}` : ''}
 
 							console.log(
 								`[Teammate:${memberName}] Context compressed: ` +
-								`${compressionResult.beforeTokens} → ~${compressionResult.afterTokensEstimate} tokens`,
+									`${compressionResult.beforeTokens} → ~${compressionResult.afterTokensEstimate} tokens`,
 							);
 						}
 					} catch (compressError) {
@@ -659,44 +571,54 @@ ${role ? `Your role: ${role}` : ''}
 			}
 
 			if (justCompressed && toolCalls.length === 0) {
-				while (messages.length > 0 && messages[messages.length - 1]?.role === 'assistant') {
+				while (
+					messages.length > 0 &&
+					messages[messages.length - 1]?.role === 'assistant'
+				) {
 					messages.pop();
 				}
 				messages.push({
 					role: 'user',
-					content: '[System] Context has been auto-compressed. Your task is NOT finished. Continue working.',
+					content:
+						'[System] Context has been auto-compressed. Your task is NOT finished. Continue working.',
 				});
 				continue;
 			}
 
-		// No tool calls = AI forgot to call wait_for_messages. Prompt it to do so.
-		if (toolCalls.length === 0) {
-			messages.push({
-				role: 'user',
-				content: '[System] Your work appears complete, but you did not call `wait_for_messages`. You MUST call `wait_for_messages` with a summary instead of ending your turn. This keeps you available for follow-up instructions from the lead or other teammates.',
-			});
-			continue;
-		}
+			// No tool calls = AI forgot to call wait_for_messages. Prompt it to do so.
+			if (toolCalls.length === 0) {
+				messages.push({
+					role: 'user',
+					content:
+						'[System] Your work appears complete, but you did not call `wait_for_messages`. You MUST call `wait_for_messages` with a summary instead of ending your turn. This keeps you available for follow-up instructions from the lead or other teammates.',
+				});
+				continue;
+			}
 
-		// Handle synthetic team tools internally
-		const syntheticToolNames = new Set([
-			'message_teammate', 'claim_task', 'complete_task',
-			'list_team_tasks', 'request_plan_approval', 'wait_for_messages',
-		]);
+			// Handle synthetic team tools internally
+			const syntheticCalls = toolCalls.filter(tc =>
+				TEAMMATE_SYNTHETIC_TOOL_NAMES.has(tc.function.name),
+			);
+			const regularCalls = toolCalls.filter(
+				tc => !TEAMMATE_SYNTHETIC_TOOL_NAMES.has(tc.function.name),
+			);
 
-		const syntheticCalls = toolCalls.filter(tc => syntheticToolNames.has(tc.function.name));
-		const regularCalls = toolCalls.filter(tc => !syntheticToolNames.has(tc.function.name));
+			// Handle wait_for_messages separately — it's async and blocks
+			const waitCall = syntheticCalls.find(
+				tc => tc.function.name === WAIT_FOR_MESSAGES_TOOL_NAME,
+			);
+			const otherSyntheticCalls = syntheticCalls.filter(
+				tc => tc.function.name !== WAIT_FOR_MESSAGES_TOOL_NAME,
+			);
 
-		// Handle wait_for_messages separately — it's async and blocks
-		const waitCall = syntheticCalls.find(tc => tc.function.name === 'wait_for_messages');
-		const otherSyntheticCalls = syntheticCalls.filter(tc => tc.function.name !== 'wait_for_messages');
-
-		// Process non-blocking synthetic tools first
-		for (const tc of otherSyntheticCalls) {
+			// Process non-blocking synthetic tools first
+			for (const tc of otherSyntheticCalls) {
 				let args: any = {};
 				try {
 					args = JSON.parse(tc.function.arguments);
-				} catch { /* empty */ }
+				} catch {
+					/* empty */
+				}
 
 				let resultContent = '';
 
@@ -711,13 +633,16 @@ ${role ? `Your role: ${role}` : ''}
 								? 'Message sent to team lead.'
 								: 'Failed to send message to team lead.';
 						} else {
-							let targetTeammate = teamTracker.findByMemberName(target)
-								|| teamTracker.findByMemberId(target)
-								|| teamTracker.getTeammate(target);
+							let targetTeammate =
+								teamTracker.findByMemberName(target) ||
+								teamTracker.findByMemberId(target) ||
+								teamTracker.getTeammate(target);
 
 							if (targetTeammate) {
 								const sent = teamTracker.sendMessageToTeammate(
-									instanceId, targetTeammate.instanceId, content,
+									instanceId,
+									targetTeammate.instanceId,
+									content,
 								);
 								resultContent = sent
 									? `Message sent to ${targetTeammate.memberName}.`
@@ -731,7 +656,12 @@ ${role ? `Your role: ${role}` : ''}
 
 					case 'claim_task': {
 						try {
-							const task = claimTask(teamName, args.task_id, memberId, memberName);
+							const task = claimTask(
+								teamName,
+								args.task_id,
+								memberId,
+								memberName,
+							);
 							if (task) {
 								teamTracker.setCurrentTask(instanceId, task.id);
 								resultContent = `Successfully claimed task "${task.title}" (${task.id}).`;
@@ -770,7 +700,9 @@ ${role ? `Your role: ${role}` : ''}
 						} else {
 							resultContent = currentTasks
 								.map(t => {
-									const deps = t.dependencies?.length ? ` (deps: ${t.dependencies.join(', ')})` : '';
+									const deps = t.dependencies?.length
+										? ` (deps: ${t.dependencies.join(', ')})`
+										: '';
 									const assignee = t.assigneeName ? ` [${t.assigneeName}]` : '';
 									return `[${t.status}] ${t.id}: ${t.title}${assignee}${deps}`;
 								})
@@ -781,10 +713,10 @@ ${role ? `Your role: ${role}` : ''}
 
 					case 'request_plan_approval': {
 						teamTracker.requestPlanApproval(instanceId, args.plan);
-						resultContent = 'Plan submitted for approval. Waiting for lead response...';
+						resultContent =
+							'Plan submitted for approval. Waiting for lead response...';
 						break;
 					}
-
 				}
 
 				messages.push({
@@ -802,49 +734,72 @@ ${role ? `Your role: ${role}` : ''}
 				});
 			}
 
-		// Handle wait_for_messages: notify lead, mark standby, then block until messages arrive
-		if (waitCall) {
-			let waitArgs: any = {};
-			try { waitArgs = JSON.parse(waitCall.function.arguments); } catch { /* empty */ }
+			// Handle wait_for_messages: notify lead, mark standby, then block until messages arrive
+			if (waitCall) {
+				let waitArgs: any = {};
+				try {
+					waitArgs = JSON.parse(waitCall.function.arguments);
+				} catch {
+					/* empty */
+				}
 
-			const summary = waitArgs.summary || 'Work completed.';
+				const summary = waitArgs.summary || 'Work completed.';
 
-			// Mark as standby so wait_for_teammates knows this teammate is idle
-			teamTracker.setStandby(instanceId);
+				// Mark as standby so wait_for_teammates knows this teammate is idle
+				teamTracker.setStandby(instanceId);
 
-			teamTracker.sendMessageToLead(
-				instanceId,
-				`[Standby] ${memberName} has completed current work. Summary: ${summary}`,
-			);
+				teamTracker.sendMessageToLead(
+					instanceId,
+					`[Standby] ${memberName} has completed current work. Summary: ${summary}`,
+				);
 
-			if (onMessage) {
-				onMessage({
-					type: 'sub_agent_message',
-					agentId: `teammate-${memberId}`,
-					agentName: memberName,
-					message: {type: 'status', status: 'standby'} as any,
-				});
-			}
+				if (onMessage) {
+					onMessage({
+						type: 'sub_agent_message',
+						agentId: `teammate-${memberId}`,
+						agentName: memberName,
+						message: {type: 'status', status: 'standby'} as any,
+					});
+				}
 
-			// Block until messages arrive or aborted
-			let receivedMessages: typeof teammateMessages = [];
-			while (!abortSignal?.aborted) {
-				const incoming = teamTracker.dequeueTeammateMessages(instanceId);
-				if (incoming.length > 0) {
-					receivedMessages = incoming;
+				// Block until messages arrive or aborted
+				let receivedMessages: typeof teammateMessages = [];
+				while (!abortSignal?.aborted) {
+					const incoming = teamTracker.dequeueTeammateMessages(instanceId);
+					if (incoming.length > 0) {
+						receivedMessages = incoming;
+						break;
+					}
+					await new Promise(resolve => setTimeout(resolve, 500));
+				}
+
+				// Clear standby — teammate is resuming or exiting
+				teamTracker.clearStandby(instanceId);
+
+				if (abortSignal?.aborted) {
+					messages.push({
+						role: 'tool' as const,
+						tool_call_id: waitCall.id,
+						content: 'Session terminated by team lead.',
+					});
+					emitTeammateToolResult({
+						onMessage,
+						memberId,
+						memberName,
+						toolCallId: waitCall.id,
+						toolName: waitCall.function.name,
+						content: 'Session terminated by team lead.',
+					});
 					break;
 				}
-				await new Promise(resolve => setTimeout(resolve, 500));
-			}
 
-			// Clear standby — teammate is resuming or exiting
-			teamTracker.clearStandby(instanceId);
-
-			if (abortSignal?.aborted) {
+				const msgSummary = receivedMessages
+					.map(m => `[${m.fromMemberName}]: ${m.content}`)
+					.join('\n');
 				messages.push({
 					role: 'tool' as const,
 					tool_call_id: waitCall.id,
-					content: 'Session terminated by team lead.',
+					content: `Received ${receivedMessages.length} message(s):\n${msgSummary}`,
 				});
 				emitTeammateToolResult({
 					onMessage,
@@ -852,33 +807,14 @@ ${role ? `Your role: ${role}` : ''}
 					memberName,
 					toolCallId: waitCall.id,
 					toolName: waitCall.function.name,
-					content: 'Session terminated by team lead.',
+					content: `Received ${receivedMessages.length} message(s):\n${msgSummary}`,
 				});
-				break;
+
+				// Skip regular tool calls this iteration — the AI should process the messages first
+				continue;
 			}
 
-			const msgSummary = receivedMessages
-				.map(m => `[${m.fromMemberName}]: ${m.content}`)
-				.join('\n');
-			messages.push({
-				role: 'tool' as const,
-				tool_call_id: waitCall.id,
-				content: `Received ${receivedMessages.length} message(s):\n${msgSummary}`,
-			});
-			emitTeammateToolResult({
-				onMessage,
-				memberId,
-				memberName,
-				toolCallId: waitCall.id,
-				toolName: waitCall.function.name,
-				content: `Received ${receivedMessages.length} message(s):\n${msgSummary}`,
-			});
-
-			// Skip regular tool calls this iteration — the AI should process the messages first
-			continue;
-		}
-
-		// Process regular MCP tool calls
+			// Process regular MCP tool calls
 			if (regularCalls.length > 0) {
 				// Plan approval gate: block file-modifying tools until approved
 				if (!planApproved) {
@@ -895,11 +831,14 @@ ${role ? `Your role: ${role}` : ''}
 							messages.push({
 								role: 'tool' as const,
 								tool_call_id: tc.id,
-								content: 'Error: Plan approval required before making changes. Use request_plan_approval first.',
+								content:
+									'Error: Plan approval required before making changes. Use request_plan_approval first.',
 							});
 						}
 						// Only execute non-blocked regular calls
-						const nonBlockedCalls = regularCalls.filter(tc => !blockedTools.includes(tc));
+						const nonBlockedCalls = regularCalls.filter(
+							tc => !blockedTools.includes(tc),
+						);
 						if (nonBlockedCalls.length === 0 && syntheticCalls.length > 0) {
 							continue;
 						}
@@ -993,23 +932,33 @@ ${role ? `Your role: ${role}` : ''}
 					let toolArgs: any = {};
 					try {
 						toolArgs = JSON.parse(tc.function.arguments || '{}');
-					} catch { /* empty */ }
+					} catch {
+						/* empty */
+					}
 
 					let approved = yoloMode || false;
 					if (!approved && isToolAutoApproved) {
 						approved = isToolAutoApproved(toolName);
 					}
 					if (!approved && requestToolConfirmation) {
-						const confirmResult = await requestToolConfirmation(toolName, toolArgs);
-						if (confirmResult === 'approve' || confirmResult === 'approve_always') {
+						const confirmResult = await requestToolConfirmation(
+							toolName,
+							toolArgs,
+						);
+						if (
+							confirmResult === 'approve' ||
+							confirmResult === 'approve_always'
+						) {
 							approved = true;
 							if (confirmResult === 'approve_always' && addToAlwaysApproved) {
 								addToAlwaysApproved(toolName);
 							}
 						} else {
-							const feedback = typeof confirmResult === 'object' && confirmResult.type === 'reject_with_reply'
-								? confirmResult.reason
-								: 'Tool execution denied by user.';
+							const feedback =
+								typeof confirmResult === 'object' &&
+								confirmResult.type === 'reject_with_reply'
+									? confirmResult.reason
+									: 'Tool execution denied by user.';
 							messages.push({
 								role: 'tool' as const,
 								tool_call_id: tc.id,
@@ -1107,7 +1056,8 @@ ${role ? `Your role: ${role}` : ''}
 			}
 
 			// If plan approval was requested and approved, mark it
-			const approvalCheck = teamTracker.getPendingApprovals()
+			const approvalCheck = teamTracker
+				.getPendingApprovals()
 				.find(a => a.fromInstanceId === instanceId && a.status === 'approved');
 			if (approvalCheck) {
 				planApproved = true;
@@ -1156,22 +1106,33 @@ ${role ? `Your role: ${role}` : ''}
 		};
 	} finally {
 		try {
-			const [{clearToolExecutionBindingsSession}, {clearBridgeToolSnapshotSession}] =
-				await Promise.all([
-					import('../session/vcpCompatibility/toolExecutionBinding.js'),
-					import('../session/vcpCompatibility/toolSnapshot.js'),
-				]);
+			const [
+				{clearToolExecutionBindingsSession},
+				{clearBridgeToolSnapshotSession},
+			] = await Promise.all([
+				import('../session/vcpCompatibility/toolExecutionBinding.js'),
+				import('../session/vcpCompatibility/toolSnapshot.js'),
+			]);
 			clearToolExecutionBindingsSession(instanceId);
 			clearBridgeToolSnapshotSession(instanceId);
-		} catch { /* best effort */ }
+		} catch {
+			/* best effort */
+		}
 
 		// Auto-commit any uncommitted work before unregistering
 		try {
-			const {autoCommitWorktreeChanges} = await import('../team/teamWorktree.js');
+			const {autoCommitWorktreeChanges} = await import(
+				'../team/teamWorktree.js'
+			);
 			autoCommitWorktreeChanges(worktreePath, memberName);
-		} catch { /* best effort */ }
+		} catch {
+			/* best effort */
+		}
 
-		updateMember(teamName, memberId, {status: 'shutdown', shutdownAt: new Date().toISOString()});
+		updateMember(teamName, memberId, {
+			status: 'shutdown',
+			shutdownAt: new Date().toISOString(),
+		});
 		teamTracker.unregister(instanceId);
 	}
 }

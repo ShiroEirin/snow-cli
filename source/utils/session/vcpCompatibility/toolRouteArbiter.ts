@@ -1,5 +1,5 @@
 import type {MCPServiceTools, MCPTool} from '../../execution/mcpToolsManager.js';
-import type {ApiConfig, ToolTransport} from '../../config/apiConfig.js';
+import type {ToolTransport, VcpApiConfig} from '../../config/apiConfig.js';
 import type {BridgeModelToolDescriptor} from './bridgeManifestTranslator.js';
 import type {SessionBridgeToolSnapshot} from './toolSnapshot.js';
 import {
@@ -156,7 +156,7 @@ function dedupeRegistryTools(
 }
 
 export function resolveToolTransport(
-	config: Pick<ApiConfig, 'toolTransport'>,
+	config: Pick<VcpApiConfig, 'toolTransport'>,
 ): ToolTransport {
 	if (
 		config.toolTransport === 'bridge' ||
@@ -169,21 +169,21 @@ export function resolveToolTransport(
 }
 
 export function shouldIncludeBridgeTools(
-	config: Pick<ApiConfig, 'toolTransport'>,
+	config: Pick<VcpApiConfig, 'toolTransport'>,
 ): boolean {
 	const transport = resolveToolTransport(config);
 	return transport === 'bridge' || transport === 'hybrid';
 }
 
 export function shouldIncludeLocalTools(
-	config: Pick<ApiConfig, 'toolTransport'>,
+	config: Pick<VcpApiConfig, 'toolTransport'>,
 ): boolean {
 	const transport = resolveToolTransport(config);
 	return transport === 'local' || transport === 'hybrid';
 }
 
 export function resolveToolRegistry(options: {
-	config: Pick<ApiConfig, 'toolTransport'>;
+	config: Pick<VcpApiConfig, 'toolTransport'>;
 	localTools: MCPTool[];
 	localServicesInfo: MCPServiceTools[];
 	bridgeSnapshot?: Pick<
@@ -238,7 +238,7 @@ export function resolveToolRegistry(options: {
 }
 
 export function buildToolPlaneRuntimeState(options: {
-	config: Pick<ApiConfig, 'toolTransport'>;
+	config: Pick<VcpApiConfig, 'toolTransport'>;
 	localDiscoveredToolCount: number;
 	localRetainedToolCount: number;
 	bridgeDiscoveredToolCount: number;

@@ -1,6 +1,7 @@
 import anyTest from 'ava';
 import type {MCPTool} from '../../execution/mcpToolsManager.js';
 import {
+	appendSyntheticToolPlaneTools,
 	buildBridgeManifestToolFilters,
 	buildPreparedToolPlaneRuntimeState,
 } from './toolPlaneFacade.js';
@@ -136,4 +137,38 @@ test('buildPreparedToolPlaneRuntimeState marks bridge tools as shadowed when dup
 	t.is(runtimeState.sidecar.reasonCode, 'bridge_tools_shadowed');
 	t.is(runtimeState.snapshot.bridge.discoveredToolCount, 3);
 	t.is(runtimeState.snapshot.bridge.retainedToolCount, 0);
+});
+
+test('appendSyntheticToolPlaneTools appends synthetic teammate tools without mutating base tools', (t: any) => {
+	const baseTools: MCPTool[] = [
+		{
+			type: 'function',
+			function: {
+				name: 'filesystem-read',
+				description: 'Read a file.',
+				parameters: {type: 'object'},
+			},
+		},
+	];
+	const syntheticTools: MCPTool[] = [
+		{
+			type: 'function',
+			function: {
+				name: 'wait_for_messages',
+				description: 'Wait for teammate messages.',
+				parameters: {type: 'object'},
+			},
+		},
+	];
+
+	const mergedTools = appendSyntheticToolPlaneTools(baseTools, syntheticTools);
+
+	t.deepEqual(
+		mergedTools.map(tool => tool.function.name),
+		['filesystem-read', 'wait_for_messages'],
+	);
+	t.deepEqual(
+		baseTools.map(tool => tool.function.name),
+		['filesystem-read'],
+	);
 });

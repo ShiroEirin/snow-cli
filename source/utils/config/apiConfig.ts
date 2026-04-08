@@ -29,16 +29,21 @@ export interface ResponsesReasoningConfig {
 	effort: 'none' | 'low' | 'medium' | 'high' | 'xhigh';
 }
 
-export interface ApiConfig {
-	baseUrl: string;
-	apiKey: string;
-	requestMethod: RequestMethod;
+export interface VcpApiConfig {
 	backendMode?: BackendMode;
 	toolTransport?: ToolTransport;
 	bridgeWsUrl?: string;
 	bridgeVcpKey?: string;
 	bridgeAccessToken?: string;
 	bridgeToolProfile?: string;
+	// 显式启用 Snow 侧的 VCP ::Time 兼容桥接。未设置时仅对 localhost 链路做保守判断。
+	enableVcpTimeBridge?: boolean;
+}
+
+export interface ApiCoreConfig {
+	baseUrl: string;
+	apiKey: string;
+	requestMethod: RequestMethod;
 	advancedModel?: string;
 	basicModel?: string;
 	maxContextTokens?: number;
@@ -57,8 +62,6 @@ export interface ApiConfig {
 	showThinking?: boolean; // Show AI thinking process in UI (default: true)
 	// 流式长时无返回超时(单位: 秒,默认: 180)
 	streamIdleTimeoutSec?: number;
-	// 显式启用 Snow 侧的 VCP ::Time 兼容桥接。未设置时仅对 localhost 链路做保守判断。
-	enableVcpTimeBridge?: boolean;
 	// 选填：覆盖 system-prompt.json 的 active（undefined=跟随全局；''=不使用；string=按ID选择；string[]=多选）
 	systemPromptId?: string | string[];
 	// 选填：覆盖 custom-headers.json 的 active（undefined=跟随全局；''=不使用；其它=按ID选择）
@@ -70,6 +73,23 @@ export interface ApiConfig {
 	// 流式逐行显示 AI 回复 (默认: false)
 	streamingDisplay?: boolean;
 }
+
+export interface ApiConfig extends ApiCoreConfig, VcpApiConfig {}
+
+export type VcpCompatibilityApiConfig = Partial<
+	Pick<ApiCoreConfig, 'baseUrl' | 'requestMethod'>
+> &
+	VcpApiConfig;
+
+export type SnowBridgeApiConfig = Pick<ApiCoreConfig, 'baseUrl'> &
+	Pick<
+		VcpApiConfig,
+		| 'bridgeWsUrl'
+		| 'bridgeVcpKey'
+		| 'bridgeAccessToken'
+		| 'bridgeToolProfile'
+		| 'toolTransport'
+	>;
 
 export interface MCPServer {
 	type?: 'http' | 'stdio' | 'local'; // 传输类型，未指定时根据 url/command 自动推断。'local' 是 'stdio' 的别名
@@ -96,6 +116,35 @@ export type BackendModeResolution = {
 	backendMode: BackendMode;
 	migrated: boolean;
 };
+
+export function splitApiConfig(config: Partial<ApiConfig>): {
+	apiConfig: Partial<ApiCoreConfig>;
+	vcpConfig: VcpApiConfig;
+} {
+	const {
+		backendMode,
+		toolTransport,
+		bridgeWsUrl,
+		bridgeVcpKey,
+		bridgeAccessToken,
+		bridgeToolProfile,
+		enableVcpTimeBridge,
+		...apiConfig
+	} = config;
+
+	return {
+		apiConfig,
+		vcpConfig: {
+			backendMode,
+			toolTransport,
+			bridgeWsUrl,
+			bridgeVcpKey,
+			bridgeAccessToken,
+			bridgeToolProfile,
+			enableVcpTimeBridge,
+		},
+	};
+}
 
 /**
  * 系统提示词配置项
@@ -481,16 +530,17 @@ export function getOpenAiConfig(): ApiConfig {
 
 export function validateApiConfig(config: Partial<ApiConfig>): string[] {
 	const errors: string[] = [];
+	const {apiConfig, vcpConfig} = splitApiConfig(config);
 
-	if (config.baseUrl && !isValidUrl(config.baseUrl)) {
+	if (apiConfig.baseUrl && !isValidUrl(apiConfig.baseUrl)) {
 		errors.push('Invalid base URL format');
 	}
 
-	if (config.bridgeWsUrl) {
-		if (!isValidUrl(config.bridgeWsUrl)) {
+	if (vcpConfig.bridgeWsUrl) {
+		if (!isValidUrl(vcpConfig.bridgeWsUrl)) {
 			errors.push('Invalid SnowBridge WebSocket URL format');
 		} else {
-			const protocol = new URL(config.bridgeWsUrl).protocol;
+			const protocol = new URL(vcpConfig.bridgeWsUrl).protocol;
 			if (protocol !== 'ws:' && protocol !== 'wss:') {
 				errors.push(
 					'SnowBridge WebSocket URL must use ws:// or wss:// protocol',
@@ -499,20 +549,21 @@ export function validateApiConfig(config: Partial<ApiConfig>): string[] {
 		}
 	}
 
-	if (config.apiKey && config.apiKey.trim().length === 0) {
+	if (apiConfig.apiKey && apiConfig.apiKey.trim().length === 0) {
 		errors.push('API key cannot be empty');
 	}
 
 	if (
-		config.toolTransport === 'bridge' ||
-		config.toolTransport === 'hybrid'
+		vcpConfig.toolTransport === 'bridge' ||
+		vcpConfig.toolTransport === 'hybrid'
 	) {
 		const hasBridgeWsOverride =
-			typeof config.bridgeWsUrl === 'string' &&
-			config.bridgeWsUrl.trim().length > 0;
+			typeof vcpConfig.bridgeWsUrl === 'string' &&
+			vcpConfig.bridgeWsUrl.trim().length > 0;
 		if (
 			!hasBridgeWsOverride &&
-			(!config.bridgeVcpKey || config.bridgeVcpKey.trim().length === 0)
+			(!vcpConfig.bridgeVcpKey ||
+				vcpConfig.bridgeVcpKey.trim().length === 0)
 		) {
 			errors.push(
 				'bridgeVcpKey is required when toolTransport is set to bridge or hybrid unless bridgeWsUrl is provided',

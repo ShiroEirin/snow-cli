@@ -10,8 +10,10 @@ import {createStreamingChatCompletion} from '../../api/chat.js';
 import {createStreamingResponse} from '../../api/responses.js';
 import {createStreamingGeminiCompletion} from '../../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../../api/anthropic.js';
-import {formatVcpContentForTranscript} from '../session/vcpCompatibility/display.js';
-import {resolveVcpModeRequest} from '../session/vcpCompatibility/mode.js';
+import {
+	formatCompatibilityContentForTranscript,
+	resolveCompatibilityRequestMethod,
+} from './vcpCompatibilityAdapter.js';
 
 /**
  * Clean thinking content by removing XML-like tags
@@ -328,7 +330,7 @@ function formatMessageForTranscript(msg: ChatMessage): string | null {
 	const parts: string[] = [];
 	const roleLabel = msg.role === 'user' ? '[User]' : '[Assistant]';
 	const normalizedContent = msg.content
-		? formatVcpContentForTranscript(msg.content)
+		? formatCompatibilityContentForTranscript(msg.content)
 		: '';
 
 	// For assistant messages with tool_calls, record the tool call events
@@ -356,9 +358,8 @@ function formatMessageForTranscript(msg: ChatMessage): string | null {
 
 	// Include thinking/reasoning if present (important context)
 	if (msg.thinking) {
-		const thinkingContent = typeof msg.thinking === 'string'
-			? msg.thinking
-			: msg.thinking.thinking;
+		const thinkingContent =
+			typeof msg.thinking === 'string' ? msg.thinking : msg.thinking.thinking;
 		if (thinkingContent) {
 			parts.push(`[Thinking]\n${cleanThinkingContent(thinkingContent)}`);
 		}
@@ -693,9 +694,7 @@ export async function compressContext(
 	}
 
 	const modelName = config.advancedModel;
-	const requestMethod = resolveVcpModeRequest(config, {
-		model: modelName,
-	}).requestMethod;
+	const requestMethod = resolveCompatibilityRequestMethod(config, modelName);
 
 	// Get custom system prompt if configured
 	const customSystemPrompt = getCustomSystemPrompt();

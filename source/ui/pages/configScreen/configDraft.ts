@@ -1,17 +1,15 @@
-import type {ApiConfig, AppConfig} from '../../../utils/config/apiConfig.js';
+import {
+	splitApiConfig,
+	type ApiCoreConfig,
+	type AppConfig,
+	type VcpApiConfig,
+} from '../../../utils/config/apiConfig.js';
 
 export type ConfigDraftInput = Pick<
-	ApiConfig,
+	ApiCoreConfig,
 	| 'baseUrl'
 	| 'apiKey'
 	| 'requestMethod'
-	| 'enableVcpTimeBridge'
-	| 'backendMode'
-	| 'toolTransport'
-	| 'bridgeWsUrl'
-	| 'bridgeVcpKey'
-	| 'bridgeAccessToken'
-	| 'bridgeToolProfile'
 	| 'systemPromptId'
 	| 'customHeadersSchemeId'
 	| 'anthropicBeta'
@@ -33,12 +31,25 @@ export type ConfigDraftInput = Pick<
 	| 'streamIdleTimeoutSec'
 	| 'toolResultTokenLimit'
 	| 'editSimilarityThreshold'
+> &
+	Pick<
+		VcpApiConfig,
+	| 'enableVcpTimeBridge'
+	| 'backendMode'
+	| 'toolTransport'
+	| 'bridgeWsUrl'
+	| 'bridgeVcpKey'
+	| 'bridgeAccessToken'
+	| 'bridgeToolProfile'
 >;
 
 export function buildSnowConfigDraft(input: ConfigDraftInput): AppConfig {
+	const {apiConfig, vcpConfig} = splitApiConfig(input);
+
 	return {
 		snowcfg: {
-			...input,
-		},
+			...apiConfig,
+			...vcpConfig,
+		} as AppConfig['snowcfg'],
 	};
 }

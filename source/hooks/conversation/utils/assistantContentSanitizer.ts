@@ -1,4 +1,4 @@
-import {stripVcpDisplayBlocks} from '../../../utils/session/vcpCompatibility/display.js';
+import {stripCompatibilityDisplayBlocks} from '../../../utils/core/vcpCompatibilityAdapter.js';
 
 const THINK_TAG_REGEX = /<\/?think(?:ing)?>/gi;
 
@@ -47,7 +47,7 @@ export function sanitizeAssistantContent(content: string): string {
 		return '';
 	}
 
-	return stripThinkingLeaks(stripVcpDisplayBlocks(content))
+	return stripThinkingLeaks(stripCompatibilityDisplayBlocks(content))
 		.replace(/[ \t]+\n/g, '\n')
 		.replace(/\n[ \t]*\n+/g, '\n')
 		.trim();

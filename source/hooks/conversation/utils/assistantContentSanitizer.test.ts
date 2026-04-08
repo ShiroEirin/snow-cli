@@ -1,6 +1,15 @@
 import test from 'ava';
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 
 import {sanitizeAssistantContent} from './assistantContentSanitizer.js';
+
+function readAssistantContentSanitizerSource(): string {
+	return readFileSync(
+		fileURLToPath(new URL('./assistantContentSanitizer.ts', import.meta.url)),
+		'utf8',
+	);
+}
 
 test('drops leaked thinking prefix before a stray closing tag', t => {
 	const input =
@@ -34,4 +43,17 @@ tool_name:「始」LightMemo「末」
 最终结果`;
 
 	t.is(sanitizeAssistantContent(input), '继续检索\n最终结果');
+});
+
+test('assistantContentSanitizer uses the thin VCP compatibility adapter seam', t => {
+	const source = readAssistantContentSanitizerSource();
+
+	t.true(
+		source.includes("from '../../../utils/core/vcpCompatibilityAdapter.js'"),
+	);
+	t.false(
+		source.includes(
+			"from '../../../utils/session/vcpCompatibility/display.js'",
+		),
+	);
 });

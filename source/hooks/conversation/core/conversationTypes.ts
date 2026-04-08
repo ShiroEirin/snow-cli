@@ -2,9 +2,7 @@ import type {ConfirmationResult} from '../../../ui/components/tools/ToolConfirma
 import type {CompressionStatus} from '../../../ui/components/compression/CompressionStatus.js';
 import type {Message} from '../../../ui/components/chat/MessageList.js';
 import type {ToolCall} from '../../../utils/execution/toolExecutor.js';
-import type {PreparedToolPlane} from '../../../utils/session/vcpCompatibility/toolPlaneFacade.js';
-
-type ToolPlaneRuntimeState = PreparedToolPlane['runtimeState'];
+import type {ToolPlaneRuntimeState} from './conversationSetup.js';
 
 export type UserQuestionResult = {
 	selected: string | string[];

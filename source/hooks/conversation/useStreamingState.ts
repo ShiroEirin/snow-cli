@@ -1,8 +1,6 @@
 import {useState, useEffect} from 'react';
 import type {UsageInfo} from '../../api/chat.js';
-import type {PreparedToolPlane} from '../../utils/session/vcpCompatibility/toolPlaneFacade.js';
-
-type ToolPlaneRuntimeState = PreparedToolPlane['runtimeState'];
+import type {ToolPlaneRuntimeState} from './core/conversationSetup.js';
 
 export type RetryStatus = {
 	isRetrying: boolean;

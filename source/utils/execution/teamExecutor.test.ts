@@ -6,6 +6,7 @@ import {
 	createTeammateUserQuestionAdapter,
 	isPlanApprovalProtectedTool,
 } from './teamExecutor.js';
+import {buildTeammateSyntheticTools} from './teammateSyntheticTools.js';
 
 test('teammate askuser adapter preserves cancelled responses', async (t: any) => {
 	const adapter = createTeammateUserQuestionAdapter(
@@ -48,4 +49,22 @@ test('plan approval keeps read-only and bridge tools outside the block list', (t
 			commandName: 'FindNote',
 		}),
 	);
+});
+
+test('teammate synthetic tools keep stable order and gate plan approval tool', (t: any) => {
+	const defaultToolNames = buildTeammateSyntheticTools().map(
+		tool => tool.function.name,
+	);
+	const gatedToolNames = buildTeammateSyntheticTools({
+		requirePlanApproval: true,
+	}).map(tool => tool.function.name);
+
+	t.deepEqual(defaultToolNames, [
+		'message_teammate',
+		'claim_task',
+		'complete_task',
+		'list_team_tasks',
+		'wait_for_messages',
+	]);
+	t.deepEqual(gatedToolNames, [...defaultToolNames, 'request_plan_approval']);
 });

@@ -135,8 +135,7 @@ export async function handleConversationWithTools(
 		activeTools,
 		discoveredToolNames,
 		useToolSearch,
-		toolSnapshotKey,
-		toolPlaneRuntimeState,
+		toolContext,
 	} = await prepareConversationSetup({
 		planMode: options.planMode,
 		vulnerabilityHuntingMode: options.vulnerabilityHuntingMode,
@@ -165,7 +164,7 @@ export async function handleConversationWithTools(
 		: config.advancedModel || 'gpt-5';
 
 	options.setCurrentModel?.(model);
-	options.setToolPlaneRuntimeState?.(toolPlaneRuntimeState);
+	options.setToolPlaneRuntimeState?.(toolContext.toolPlaneRuntimeState ?? null);
 
 	let accumulatedUsage: ConversationUsage | null = null;
 	const sessionApprovedTools = new Set<string>();
@@ -205,7 +204,7 @@ export async function handleConversationWithTools(
 					activeTools,
 					discoveredToolNames,
 					useToolSearch,
-					toolSnapshotKey,
+					toolSnapshotKey: toolContext.toolSnapshotKey,
 					controller,
 					encoder: encoderManager,
 					accumulatedUsage,
