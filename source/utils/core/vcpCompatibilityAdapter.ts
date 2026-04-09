@@ -1,7 +1,11 @@
 import type {ApiConfig, RequestMethod} from '../config/apiConfig.js';
-import {formatVcpContentForTranscript} from '../session/vcpCompatibility/display.js';
+import {
+	formatVcpContentForTranscript,
+	getVcpStreamingSuppressionDecision,
+	type VcpStreamingSuppressionState,
+	stripVcpDisplayBlocks,
+} from '../session/vcpCompatibility/display.js';
 import {resolveVcpModeRequest} from '../session/vcpCompatibility/mode.js';
-import {stripVcpDisplayBlocks} from '../session/vcpCompatibility/display.js';
 
 /**
  * Formats assistant or user content into a transcript-safe string while
@@ -24,6 +28,43 @@ export function formatCompatibilityContentForTranscript(
  */
 export function stripCompatibilityDisplayBlocks(content: string): string {
 	return stripVcpDisplayBlocks(content);
+}
+
+export interface CompatibilityStreamingSuppressor {
+	/**
+	 * Consumes a streaming line and reports whether it should stay hidden until
+	 * the final VCP-aware render path takes over.
+	 *
+	 * @param line - Streaming line candidate.
+	 * @returns Whether the line should be suppressed from incremental UI output.
+	 */
+	shouldSuppress(line: string): boolean;
+
+	/**
+	 * Resets the suppressor to its initial state for the next streaming round.
+	 */
+	reset(): void;
+}
+
+/**
+ * Creates a thin streaming suppression adapter so conversation core can keep
+ * VCP display protocol details behind the compatibility seam.
+ *
+ * @returns Stateful suppressor for incremental streaming output.
+ */
+export function createCompatibilityStreamingSuppressor(): CompatibilityStreamingSuppressor {
+	let currentState: VcpStreamingSuppressionState = null;
+
+	return {
+		shouldSuppress(line: string): boolean {
+			const decision = getVcpStreamingSuppressionDecision(line, currentState);
+			currentState = decision.nextState;
+			return decision.suppress;
+		},
+		reset(): void {
+			currentState = null;
+		},
+	};
 }
 
 /**

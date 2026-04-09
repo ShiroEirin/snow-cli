@@ -12,6 +12,11 @@ import {
 	type ToolResult,
 	type ToolCall,
 } from './toolExecutor.js';
+import {
+	extractToolResultSidecar,
+	normalizeBridgeIngressPayload,
+	normalizeBridgePhaseValue,
+} from './bridgeIngress.js';
 import {buildToolHistoryArtifacts} from './toolHistoryArtifacts.js';
 import {
 	clearToolExecutionBindings,
@@ -354,6 +359,52 @@ test('buildToolHistoryArtifacts honors bridge-provided sidecar summaries', (t: a
 		topItems: ['src/a.ts', 'src/b.ts', 'src/c.ts'],
 		truncated: true,
 	});
+});
+
+test('bridge ingress helpers normalize accepted payloads and preserve sidecars', (t: any) => {
+	const normalizedPayload = normalizeBridgeIngressPayload({
+		status: 'queued',
+		historyContent: 'keep history sidecar',
+		previewContent: '{"summary":"queued"}',
+		accepted: {
+			stage: 'Submitted',
+			asyncStatus: {
+				event: 'result',
+			},
+			taskId: 'task-accepted-1',
+			result: {
+				ok: true,
+			},
+		},
+	}) as Record<string, any>;
+
+	t.is(normalizeBridgePhaseValue('Final Result'), 'final_result');
+	t.is(normalizedPayload['status'], 'accepted');
+	t.deepEqual(normalizedPayload['asyncStatus'], {
+		enabled: true,
+		state: 'accepted',
+		event: 'lifecycle',
+		taskId: 'task-accepted-1',
+	});
+	t.is(normalizedPayload['historyContent'], 'keep history sidecar');
+	t.is(normalizedPayload['previewContent'], '{"summary":"queued"}');
+	t.false('accepted' in normalizedPayload);
+	t.deepEqual(normalizedPayload['result'], {
+		ok: true,
+	});
+});
+
+test('extractToolResultSidecar only returns non-empty bridge sidecars', (t: any) => {
+	t.deepEqual(
+		extractToolResultSidecar({
+			historyContent: 'history kept',
+			previewContent: '   ',
+		}),
+		{
+			historyContent: 'history kept',
+		},
+	);
+	t.deepEqual(extractToolResultSidecar(null), {});
 });
 
 test('buildToolHistoryArtifacts omits image_url payloads from history sidecar', (t: any) => {

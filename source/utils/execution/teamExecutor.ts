@@ -12,20 +12,30 @@ import type {ChatMessage} from '../../api/chat.js';
 import type {MCPTool} from './mcpToolsManager.js';
 import {teamTracker} from './teamTracker.js';
 import type {SubAgentMessage, TokenUsage} from './subAgentExecutor.js';
+import type {
+	AddToAlwaysApprovedCallback,
+	ToolApprovalChecker,
+	ToolCall,
+	ToolConfirmationCallback,
+	UserInteractionCallback,
+} from './toolExecutor.js';
 import {prepareToolPlane} from '../session/vcpCompatibility/toolPlaneFacade.js';
-import {applyVcpOutboundMessageTransforms} from '../session/vcpCompatibility/applyOutboundMessageTransforms.js';
-import {
-	getToolExecutionBinding,
-	type ToolExecutionBinding,
-} from '../session/vcpCompatibility/toolExecutionBinding.js';
+import type {ToolExecutionBinding} from '../session/vcpCompatibility/toolExecutionBinding.js';
 import {rewriteToolArgsForWorktree} from '../team/teamWorktree.js';
 import {projectToolMessagesForContext} from '../session/toolMessageProjection.js';
 import {compressionCoordinator} from '../core/compressionCoordinator.js';
 import {
 	buildTeammateSyntheticTools,
-	TEAMMATE_SYNTHETIC_TOOL_NAMES,
-	WAIT_FOR_MESSAGES_TOOL_NAME,
+	dispatchTeammateSyntheticToolCall,
+	partitionTeammateToolCalls,
 } from './teammateSyntheticTools.js';
+import {createTeammateProviderStream} from './teamExecutorProvider.js';
+import {
+	executeAndRecordTeammateRegularToolCall,
+	parseTeammateToolArgsResult,
+	partitionPlanApprovalRegularCalls,
+	resolveTeammateRegularToolApproval,
+} from './teamExecutorRegularCalls.js';
 
 export interface TeammateExecutionOptions {
 	onMessage?: (message: SubAgentMessage) => void;
@@ -50,7 +60,6 @@ export interface TeammateExecutionOptions {
 	}>;
 	requirePlanApproval?: boolean;
 }
-
 export interface TeammateExecutionResult {
 	success: boolean;
 	result: string;
@@ -73,6 +82,101 @@ export function createTeammateUserQuestionAdapter(
 			cancelled: response.cancelled,
 		};
 	};
+}
+
+type ExecuteToolCallLike = (
+	toolCall: ToolCall,
+	abortSignal?: AbortSignal,
+	onTokenUpdate?: (tokenCount: number) => void,
+	onSubAgentMessage?: (message: SubAgentMessage) => void,
+	requestToolConfirmation?: ToolConfirmationCallback,
+	isToolAutoApproved?: ToolApprovalChecker,
+	yoloMode?: boolean,
+	addToAlwaysApproved?: AddToAlwaysApprovedCallback,
+	onUserInteractionNeeded?: UserInteractionCallback,
+	toolSnapshotKey?: string,
+) => Promise<{
+	content: string;
+	historyContent?: string;
+	previewContent?: string;
+}>;
+
+export async function executeTeammateRegularToolCall(options: {
+	toolCall: ToolCall;
+	toolArgs: Record<string, any>;
+	worktreePath: string;
+	toolPlaneKey: string;
+	abortSignal?: AbortSignal;
+	onMessage?: TeammateExecutionOptions['onMessage'];
+	userQuestionAdapter?: ReturnType<typeof createTeammateUserQuestionAdapter>;
+	executeToolCall: ExecuteToolCallLike;
+	rewriteToolArgsForWorktreeImpl?: typeof rewriteToolArgsForWorktree;
+}): Promise<{
+	message: ChatMessage;
+	emitContent: string;
+}> {
+	const rewriteToolArgs =
+		options.rewriteToolArgsForWorktreeImpl || rewriteToolArgsForWorktree;
+
+	try {
+		const rewrittenArgsResult = rewriteToolArgs(
+			options.toolCall.function.name,
+			options.toolArgs,
+			options.worktreePath,
+			options.toolPlaneKey,
+		);
+		if (rewrittenArgsResult.error) {
+			return {
+				message: {
+					role: 'tool',
+					tool_call_id: options.toolCall.id,
+					content: `Error: ${rewrittenArgsResult.error}`,
+				},
+				emitContent: `Error: ${rewrittenArgsResult.error}`,
+			};
+		}
+
+		const rewrittenCall: ToolCall = {
+			...options.toolCall,
+			type: options.toolCall.type,
+			function: {
+				...options.toolCall.function,
+				arguments: JSON.stringify(rewrittenArgsResult.args),
+			},
+		};
+		const result = await options.executeToolCall(
+			rewrittenCall,
+			options.abortSignal,
+			undefined,
+			options.onMessage,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			options.userQuestionAdapter,
+			options.toolPlaneKey,
+		);
+
+		return {
+			message: {
+				role: 'tool',
+				tool_call_id: options.toolCall.id,
+				content: result.content,
+				historyContent: result.historyContent,
+				previewContent: result.previewContent,
+			} as ChatMessage,
+			emitContent: result.content,
+		};
+	} catch (error: any) {
+		return {
+			message: {
+				role: 'tool',
+				tool_call_id: options.toolCall.id,
+				content: `Error: ${error.message}`,
+			},
+			emitContent: `Error: ${error.message}`,
+		};
+	}
 }
 
 function emitTeammateToolResult(options: {
@@ -100,10 +204,52 @@ function emitTeammateToolResult(options: {
 	});
 }
 
+function appendTeammateToolFeedback(options: {
+	messages: ChatMessage[];
+	toolCallId: string;
+	content: string;
+	onMessage?: TeammateExecutionOptions['onMessage'];
+	memberId: string;
+	memberName: string;
+	toolName: string;
+}): void {
+	options.messages.push({
+		role: 'tool',
+		tool_call_id: options.toolCallId,
+		content: options.content,
+	});
+	emitTeammateToolResult({
+		onMessage: options.onMessage,
+		memberId: options.memberId,
+		memberName: options.memberName,
+		toolCallId: options.toolCallId,
+		toolName: options.toolName,
+		content: options.content,
+	});
+}
+
+function appendMalformedTeammateToolArgsError(options: {
+	messages: ChatMessage[];
+	toolCall: ToolCall;
+	error: string;
+	onMessage?: TeammateExecutionOptions['onMessage'];
+	memberId: string;
+	memberName: string;
+}): void {
+	appendTeammateToolFeedback({
+		messages: options.messages,
+		toolCallId: options.toolCall.id,
+		content: `Error: ${options.error}`,
+		onMessage: options.onMessage,
+		memberId: options.memberId,
+		memberName: options.memberName,
+		toolName: options.toolCall.function.name,
+	});
+}
+
 const PLAN_APPROVAL_PROTECTED_LOCAL_TOOLS = new Set([
 	'filesystem-create',
 	'filesystem-edit',
-	'filesystem-edit_search',
 	'terminal-execute',
 	'todo-add',
 	'todo-update',
@@ -185,9 +331,7 @@ export async function executeTeammate(
 			getContextPercentage,
 			countMessagesTokens,
 		} = await import('../core/subAgentContextCompressor.js');
-		const {listTasks, claimTask, completeTask} = await import(
-			'../team/teamTaskList.js'
-		);
+		const {listTasks} = await import('../team/teamTaskList.js');
 		const {executeToolCall} = await import('./toolExecutor.js');
 
 		const config = getOpenAiConfig();
@@ -199,6 +343,7 @@ export async function executeTeammate(
 				requirePlanApproval,
 			}),
 		});
+		const toolPlaneKey = preparedToolPlane.toolPlaneKey;
 		const allowedTools: MCPTool[] = [...preparedToolPlane.tools];
 		const userQuestionAdapter =
 			createTeammateUserQuestionAdapter(requestUserQuestion);
@@ -214,7 +359,7 @@ You are teammate "${memberName}" in team "${teamName}".
 Your working directory (Git worktree): ${worktreePath}
 ${role ? `Your role: ${role}` : ''}
 
-### ⚠️ Worktree Path Rules (ENFORCED)
+### Worktree Path Rules (ENFORCED)
 - ALL file operations are restricted to YOUR worktree: \`${worktreePath}\`
 - Use **relative paths** (e.g., \`src/utils/foo.ts\`) — they are automatically resolved to your worktree.
 - You CANNOT read or write files in the main workspace or other teammates' worktrees.
@@ -324,65 +469,22 @@ ${role ? `Your role: ${role}` : ''}
 			const model = config.advancedModel || 'gpt-5';
 			const projectMessagesForModel = () =>
 				projectToolMessagesForContext(messages);
-			const resolvedRequest = resolveVcpModeRequest(config, {
-				model,
-				tools: allowedTools,
-				toolChoice: 'auto',
-			});
 			const projectedMessages = projectMessagesForModel();
-			const transformedMessages = applyVcpOutboundMessageTransforms({
-				config: {
-					...config,
-					requestMethod: resolvedRequest.requestMethod,
-				},
+			const stream = createTeammateProviderStream({
+				config,
+				model,
+				allowedTools,
 				messages: projectedMessages,
+				currentSessionId: currentSession?.id,
+				abortSignal,
+				resolveVcpModeRequest,
+				streamFactories: {
+					createStreamingChatCompletion,
+					createStreamingAnthropicCompletion,
+					createStreamingGeminiCompletion,
+					createStreamingResponse,
+				},
 			});
-
-			const stream =
-				resolvedRequest.requestMethod === 'anthropic'
-					? createStreamingAnthropicCompletion(
-							{
-								model,
-								messages: transformedMessages,
-								temperature: 0,
-								max_tokens: config.maxTokens || 4096,
-								tools: resolvedRequest.tools,
-								sessionId: currentSession?.id,
-							},
-							abortSignal,
-					  )
-					: resolvedRequest.requestMethod === 'gemini'
-					? createStreamingGeminiCompletion(
-							{
-								model,
-								messages: transformedMessages,
-								temperature: 0,
-								tools: resolvedRequest.tools,
-							},
-							abortSignal,
-					  )
-					: resolvedRequest.requestMethod === 'responses'
-					? createStreamingResponse(
-							{
-								model,
-								messages: transformedMessages,
-								temperature: 0,
-								tools: resolvedRequest.tools,
-								tool_choice: resolvedRequest.toolChoice,
-								prompt_cache_key: currentSession?.id,
-							},
-							abortSignal,
-					  )
-					: createStreamingChatCompletion(
-							{
-								model,
-								messages: transformedMessages,
-								temperature: 0,
-								tools: resolvedRequest.tools,
-								tool_choice: resolvedRequest.toolChoice,
-							},
-							abortSignal,
-					  );
 
 			let currentContent = '';
 			let toolCalls: any[] = [];
@@ -556,7 +658,7 @@ ${role ? `Your role: ${role}` : ''}
 
 							console.log(
 								`[Teammate:${memberName}] Context compressed: ` +
-									`${compressionResult.beforeTokens} → ~${compressionResult.afterTokensEstimate} tokens`,
+									`${compressionResult.beforeTokens} 鈫?~${compressionResult.afterTokensEstimate} tokens`,
 							);
 						}
 					} catch (compressError) {
@@ -596,127 +698,36 @@ ${role ? `Your role: ${role}` : ''}
 			}
 
 			// Handle synthetic team tools internally
-			const syntheticCalls = toolCalls.filter(tc =>
-				TEAMMATE_SYNTHETIC_TOOL_NAMES.has(tc.function.name),
-			);
-			const regularCalls = toolCalls.filter(
-				tc => !TEAMMATE_SYNTHETIC_TOOL_NAMES.has(tc.function.name),
-			);
-
-			// Handle wait_for_messages separately — it's async and blocks
-			const waitCall = syntheticCalls.find(
-				tc => tc.function.name === WAIT_FOR_MESSAGES_TOOL_NAME,
-			);
-			const otherSyntheticCalls = syntheticCalls.filter(
-				tc => tc.function.name !== WAIT_FOR_MESSAGES_TOOL_NAME,
-			);
+			const {syntheticCalls, regularCalls, waitCall, otherSyntheticCalls} =
+				partitionTeammateToolCalls(toolCalls);
 
 			// Process non-blocking synthetic tools first
 			for (const tc of otherSyntheticCalls) {
-				let args: any = {};
-				try {
-					args = JSON.parse(tc.function.arguments);
-				} catch {
-					/* empty */
+				const parsedArgs = parseTeammateToolArgsResult(tc);
+				if (!parsedArgs.ok) {
+					appendMalformedTeammateToolArgsError({
+						messages,
+						toolCall: tc,
+						error: parsedArgs.error,
+						onMessage,
+						memberId,
+						memberName,
+					});
+					continue;
 				}
 
 				let resultContent = '';
-
-				switch (tc.function.name) {
-					case 'message_teammate': {
-						const target = args.target as string;
-						const content = args.content as string;
-
-						if (target === 'lead' || target === 'Team Lead') {
-							const sent = teamTracker.sendMessageToLead(instanceId, content);
-							resultContent = sent
-								? 'Message sent to team lead.'
-								: 'Failed to send message to team lead.';
-						} else {
-							let targetTeammate =
-								teamTracker.findByMemberName(target) ||
-								teamTracker.findByMemberId(target) ||
-								teamTracker.getTeammate(target);
-
-							if (targetTeammate) {
-								const sent = teamTracker.sendMessageToTeammate(
-									instanceId,
-									targetTeammate.instanceId,
-									content,
-								);
-								resultContent = sent
-									? `Message sent to ${targetTeammate.memberName}.`
-									: `Failed to send message to ${target}.`;
-							} else {
-								resultContent = `Teammate "${target}" not found. Use list_team_tasks to see current teammates.`;
-							}
-						}
-						break;
-					}
-
-					case 'claim_task': {
-						try {
-							const task = claimTask(
-								teamName,
-								args.task_id,
-								memberId,
-								memberName,
-							);
-							if (task) {
-								teamTracker.setCurrentTask(instanceId, task.id);
-								resultContent = `Successfully claimed task "${task.title}" (${task.id}).`;
-							} else {
-								resultContent = `Task "${args.task_id}" not found.`;
-							}
-						} catch (e: any) {
-							resultContent = `Failed to claim task: ${e.message}`;
-						}
-						break;
-					}
-
-					case 'complete_task': {
-						try {
-							const task = completeTask(teamName, args.task_id);
-							if (task) {
-								teamTracker.setCurrentTask(instanceId, undefined);
-								teamTracker.sendMessageToLead(
-									instanceId,
-									`Task completed: "${task.title}" (${task.id})`,
-								);
-								resultContent = `Task "${task.title}" marked as completed.`;
-							} else {
-								resultContent = `Task "${args.task_id}" not found.`;
-							}
-						} catch (e: any) {
-							resultContent = `Failed to complete task: ${e.message}`;
-						}
-						break;
-					}
-
-					case 'list_team_tasks': {
-						const currentTasks = listTasks(teamName);
-						if (currentTasks.length === 0) {
-							resultContent = 'No tasks in the task list.';
-						} else {
-							resultContent = currentTasks
-								.map(t => {
-									const deps = t.dependencies?.length
-										? ` (deps: ${t.dependencies.join(', ')})`
-										: '';
-									const assignee = t.assigneeName ? ` [${t.assigneeName}]` : '';
-									return `[${t.status}] ${t.id}: ${t.title}${assignee}${deps}`;
-								})
-								.join('\n');
-						}
-						break;
-					}
-
-					case 'request_plan_approval': {
-						teamTracker.requestPlanApproval(instanceId, args.plan);
-						resultContent =
-							'Plan submitted for approval. Waiting for lead response...';
-						break;
-					}
+				try {
+					resultContent = dispatchTeammateSyntheticToolCall({
+						toolName: tc.function.name,
+						args: parsedArgs.args,
+						teamName,
+						memberId,
+						memberName,
+						instanceId,
+					});
+				} catch (error: any) {
+					resultContent = `Failed to execute ${tc.function.name}: ${error.message}`;
 				}
 
 				messages.push({
@@ -736,14 +747,20 @@ ${role ? `Your role: ${role}` : ''}
 
 			// Handle wait_for_messages: notify lead, mark standby, then block until messages arrive
 			if (waitCall) {
-				let waitArgs: any = {};
-				try {
-					waitArgs = JSON.parse(waitCall.function.arguments);
-				} catch {
-					/* empty */
+				const parsedWaitArgs = parseTeammateToolArgsResult(waitCall);
+				if (!parsedWaitArgs.ok) {
+					appendMalformedTeammateToolArgsError({
+						messages,
+						toolCall: waitCall,
+						error: parsedWaitArgs.error,
+						onMessage,
+						memberId,
+						memberName,
+					});
+					continue;
 				}
 
-				const summary = waitArgs.summary || 'Work completed.';
+				const summary = parsedWaitArgs.args['summary'] || 'Work completed.';
 
 				// Mark as standby so wait_for_teammates knows this teammate is idle
 				teamTracker.setStandby(instanceId);
@@ -816,242 +833,137 @@ ${role ? `Your role: ${role}` : ''}
 
 			// Process regular MCP tool calls
 			if (regularCalls.length > 0) {
+				const executeRegularToolCall = (
+					toolCall: ToolCall,
+					toolArgs: Record<string, any>,
+				) =>
+					executeTeammateRegularToolCall({
+						toolCall,
+						toolArgs,
+						worktreePath,
+						toolPlaneKey,
+						abortSignal,
+						onMessage,
+						userQuestionAdapter,
+						executeToolCall,
+					});
+				const emitRegularToolResult = (toolCall: ToolCall, content: string) => {
+					emitTeammateToolResult({
+						onMessage,
+						memberId,
+						memberName,
+						toolCallId: toolCall.id,
+						toolName: toolCall.function.name,
+						content,
+					});
+				};
+
 				// Plan approval gate: block file-modifying tools until approved
 				if (!planApproved) {
-					const blockedTools = regularCalls.filter(tc => {
-						const binding = getToolExecutionBinding(
-							tc.function.name,
-							instanceId,
-						);
-						return isPlanApprovalProtectedTool(tc.function.name, binding);
-					});
+					const {blockedCalls, executableCalls} =
+						partitionPlanApprovalRegularCalls({
+							toolCalls: regularCalls,
+							toolPlaneKey,
+							isPlanApprovalProtectedTool,
+						});
 
-					if (blockedTools.length > 0) {
-						for (const tc of blockedTools) {
-							messages.push({
-								role: 'tool' as const,
-								tool_call_id: tc.id,
+					if (blockedCalls.length > 0) {
+						for (const toolCall of blockedCalls) {
+							appendTeammateToolFeedback({
+								messages,
+								toolCallId: toolCall.id,
 								content:
 									'Error: Plan approval required before making changes. Use request_plan_approval first.',
+								onMessage,
+								memberId,
+								memberName,
+								toolName: toolCall.function.name,
 							});
 						}
+
 						// Only execute non-blocked regular calls
-						const nonBlockedCalls = regularCalls.filter(
-							tc => !blockedTools.includes(tc),
-						);
-						if (nonBlockedCalls.length === 0 && syntheticCalls.length > 0) {
+						if (executableCalls.length === 0 && syntheticCalls.length > 0) {
 							continue;
 						}
+
 						// Fall through to execute non-blocked calls
-						for (const tc of nonBlockedCalls) {
-							try {
-								let toolArgs: any = {};
-								try {
-									toolArgs = JSON.parse(tc.function.arguments || '{}');
-								} catch {
-									toolArgs = {};
-								}
-								const rwResult = rewriteToolArgsForWorktree(
-									tc.function.name,
-									toolArgs,
-									worktreePath,
-									instanceId,
-								);
-								if (rwResult.error) {
-									messages.push({
-										role: 'tool' as const,
-										tool_call_id: tc.id,
-										content: `Error: ${rwResult.error}`,
-									});
-									emitTeammateToolResult({
-										onMessage,
-										memberId,
-										memberName,
-										toolCallId: tc.id,
-										toolName: tc.function.name,
-										content: `Error: ${rwResult.error}`,
-									});
-									continue;
-								}
-								const rewrittenCall = {
-									...tc,
-									function: {
-										...tc.function,
-										arguments: JSON.stringify(rwResult.args),
-									},
-								};
-								const result = await executeToolCall(
-									rewrittenCall,
-									abortSignal,
-									undefined,
-									onMessage,
-									undefined,
-									undefined,
-									undefined,
-									undefined,
-									userQuestionAdapter,
-									instanceId,
-								);
-								messages.push({
-									role: 'tool' as const,
-									tool_call_id: tc.id,
-									content: result.content,
-									historyContent: result.historyContent,
-									previewContent: result.previewContent,
-								} as ChatMessage);
-								emitTeammateToolResult({
+						for (const toolCall of executableCalls) {
+							const parsedArgs = parseTeammateToolArgsResult(toolCall);
+							if (!parsedArgs.ok) {
+								appendTeammateToolFeedback({
+									messages,
+									toolCallId: toolCall.id,
+									content: `Error: ${parsedArgs.error}`,
 									onMessage,
 									memberId,
 									memberName,
-									toolCallId: tc.id,
-									toolName: tc.function.name,
-									content: result.content,
+									toolName: toolCall.function.name,
 								});
-							} catch (e: any) {
-								messages.push({
-									role: 'tool' as const,
-									tool_call_id: tc.id,
-									content: `Error: ${e.message}`,
-								});
-								emitTeammateToolResult({
-									onMessage,
-									memberId,
-									memberName,
-									toolCallId: tc.id,
-									toolName: tc.function.name,
-									content: `Error: ${e.message}`,
-								});
+								continue;
 							}
+
+							await executeAndRecordTeammateRegularToolCall({
+								toolCall,
+								toolArgs: parsedArgs.args,
+								messages,
+								executeRegularToolCall,
+								emitToolResult: content =>
+									emitRegularToolResult(toolCall, content),
+							});
 						}
+
 						continue;
 					}
 				}
 
-				for (const tc of regularCalls) {
-					const toolName = tc.function.name;
-					let toolArgs: any = {};
-					try {
-						toolArgs = JSON.parse(tc.function.arguments || '{}');
-					} catch {
-						/* empty */
+				for (const toolCall of regularCalls) {
+					const parsedArgs = parseTeammateToolArgsResult(toolCall);
+					if (!parsedArgs.ok) {
+						appendTeammateToolFeedback({
+							messages,
+							toolCallId: toolCall.id,
+							content: `Error: ${parsedArgs.error}`,
+							onMessage,
+							memberId,
+							memberName,
+							toolName: toolCall.function.name,
+						});
+						continue;
 					}
 
-					let approved = yoloMode || false;
-					if (!approved && isToolAutoApproved) {
-						approved = isToolAutoApproved(toolName);
-					}
-					if (!approved && requestToolConfirmation) {
-						const confirmResult = await requestToolConfirmation(
-							toolName,
-							toolArgs,
-						);
-						if (
-							confirmResult === 'approve' ||
-							confirmResult === 'approve_always'
-						) {
-							approved = true;
-							if (confirmResult === 'approve_always' && addToAlwaysApproved) {
-								addToAlwaysApproved(toolName);
-							}
-						} else {
-							const feedback =
-								typeof confirmResult === 'object' &&
-								confirmResult.type === 'reject_with_reply'
-									? confirmResult.reason
-									: 'Tool execution denied by user.';
-							messages.push({
-								role: 'tool' as const,
-								tool_call_id: tc.id,
-								content: feedback,
-							});
-							emitTeammateToolResult({
-								onMessage,
-								memberId,
-								memberName,
-								toolCallId: tc.id,
-								toolName: tc.function.name,
-								content: feedback,
-							});
-							continue;
-						}
-					} else {
-						approved = true;
+					const toolArgs = parsedArgs.args;
+					const approval = await resolveTeammateRegularToolApproval({
+						toolCall,
+						toolArgs,
+						requestToolConfirmation,
+						isToolAutoApproved,
+						yoloMode,
+						addToAlwaysApproved,
+					});
+					if (!approval.approved) {
+						const feedback =
+							'feedback' in approval
+								? approval.feedback
+								: 'Tool execution denied by user.';
+						appendTeammateToolFeedback({
+							messages,
+							toolCallId: toolCall.id,
+							content: feedback,
+							onMessage,
+							memberId,
+							memberName,
+							toolName: toolCall.function.name,
+						});
+						continue;
 					}
 
-					if (approved) {
-						try {
-							const rwResult = rewriteToolArgsForWorktree(
-								toolName,
-								toolArgs,
-								worktreePath,
-								instanceId,
-							);
-							if (rwResult.error) {
-								messages.push({
-									role: 'tool' as const,
-									tool_call_id: tc.id,
-									content: `Error: ${rwResult.error}`,
-								});
-								emitTeammateToolResult({
-									onMessage,
-									memberId,
-									memberName,
-									toolCallId: tc.id,
-									toolName: tc.function.name,
-									content: `Error: ${rwResult.error}`,
-								});
-								continue;
-							}
-							const rewrittenCall = {
-								...tc,
-								function: {
-									...tc.function,
-									arguments: JSON.stringify(rwResult.args),
-								},
-							};
-							const result = await executeToolCall(
-								rewrittenCall,
-								abortSignal,
-								undefined,
-								onMessage,
-								undefined,
-								undefined,
-								undefined,
-								undefined,
-								userQuestionAdapter,
-								instanceId,
-							);
-							messages.push({
-								role: 'tool' as const,
-								tool_call_id: tc.id,
-								content: result.content,
-								historyContent: result.historyContent,
-								previewContent: result.previewContent,
-							} as ChatMessage);
-							emitTeammateToolResult({
-								onMessage,
-								memberId,
-								memberName,
-								toolCallId: tc.id,
-								toolName: tc.function.name,
-								content: result.content,
-							});
-						} catch (e: any) {
-							messages.push({
-								role: 'tool' as const,
-								tool_call_id: tc.id,
-								content: `Error: ${e.message}`,
-							});
-							emitTeammateToolResult({
-								onMessage,
-								memberId,
-								memberName,
-								toolCallId: tc.id,
-								toolName: tc.function.name,
-								content: `Error: ${e.message}`,
-							});
-						}
-					}
+					await executeAndRecordTeammateRegularToolCall({
+						toolCall,
+						toolArgs,
+						messages,
+						executeRegularToolCall,
+						emitToolResult: content => emitRegularToolResult(toolCall, content),
+					});
 				}
 			}
 

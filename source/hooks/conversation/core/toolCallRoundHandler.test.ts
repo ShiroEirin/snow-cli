@@ -5,7 +5,7 @@ const test = anyTest as any;
 import {
 	applyBridgeToolStatusUpdate,
 	replacePendingToolMessages,
-} from './toolCallRoundHandler.js';
+} from './toolRoundMessageAdapter.js';
 
 test('applyBridgeToolStatusUpdate settles terminal bridge updates without leaving pending state behind', (t: any) => {
 	const updatedMessages = applyBridgeToolStatusUpdate(

@@ -3,9 +3,9 @@ import type {SubAgentMessage} from '../../../utils/execution/subAgentExecutor.js
 import {formatToolCallMessage} from '../../../utils/ui/messageFormatter.js';
 import {isToolNeedTwoStepDisplay} from '../../../utils/config/toolDisplayConfig.js';
 import {
-	getVcpStreamingSuppressionDecision,
-	type VcpStreamingSuppressionState,
-} from '../../../utils/session/vcpCompatibility/display.js';
+	createCompatibilityStreamingSuppressor,
+	type CompatibilityStreamingSuppressor,
+} from '../../../utils/core/vcpCompatibilityAdapter.js';
 
 // ── Module-level store: per-teammate streaming data (useSyncExternalStore compatible) ──
 
@@ -31,7 +31,11 @@ const _NOTIFY_THROTTLE_MS = 200;
 
 function notifyTeammateStreamListeners(): void {
 	for (const listener of _teammateStreamListeners) {
-		try { listener(); } catch { /* noop */ }
+		try {
+			listener();
+		} catch {
+			/* noop */
+		}
 	}
 }
 
@@ -45,10 +49,28 @@ function rebuildTeammateSnapshot(): void {
 	}
 }
 
-function setTeammateStreamEntry(agentId: string, agentName: string, tokenCount: number, isReasoning: boolean, ctxUsage?: TeammateCtxUsage): void {
+function setTeammateStreamEntry(
+	agentId: string,
+	agentName: string,
+	tokenCount: number,
+	isReasoning: boolean,
+	ctxUsage?: TeammateCtxUsage,
+): void {
 	const prev = _teammateStreamMap.get(agentId);
-	if (prev && prev.tokenCount === tokenCount && prev.isReasoning === isReasoning && prev.ctxUsage?.percentage === ctxUsage?.percentage) return;
-	_teammateStreamMap.set(agentId, {agentId, agentName, tokenCount, isReasoning, ctxUsage});
+	if (
+		prev &&
+		prev.tokenCount === tokenCount &&
+		prev.isReasoning === isReasoning &&
+		prev.ctxUsage?.percentage === ctxUsage?.percentage
+	)
+		return;
+	_teammateStreamMap.set(agentId, {
+		agentId,
+		agentName,
+		tokenCount,
+		isReasoning,
+		ctxUsage,
+	});
 	rebuildTeammateSnapshot();
 }
 
@@ -60,7 +82,9 @@ function removeTeammateStreamEntry(agentId: string): void {
 
 export function subscribeTeammateStream(listener: () => void): () => void {
 	_teammateStreamListeners.add(listener);
-	return () => { _teammateStreamListeners.delete(listener); };
+	return () => {
+		_teammateStreamListeners.delete(listener);
+	};
 }
 
 export function getTeammateStreamSnapshot(): TeammateStreamInfo[] {
@@ -93,7 +117,7 @@ type StreamState = {
 	codeBlockBuffer: string;
 	tableBuffer: string;
 	listBuffer: string;
-	vcpStreamingSuppressionState: VcpStreamingSuppressionState;
+	vcpStreamingSuppressor: CompatibilityStreamingSuppressor;
 };
 
 /**
@@ -200,7 +224,7 @@ export class SubAgentUIHandler {
 			codeBlockBuffer: '',
 			tableBuffer: '',
 			listBuffer: '',
-			vcpStreamingSuppressionState: null,
+			vcpStreamingSuppressor: createCompatibilityStreamingSuppressor(),
 		};
 	}
 
@@ -325,7 +349,10 @@ export class SubAgentUIHandler {
 		}
 	}
 
-	private emitAgentTitle(lines: Message[], subAgentMessage: SubAgentMessage): void {
+	private emitAgentTitle(
+		lines: Message[],
+		subAgentMessage: SubAgentMessage,
+	): void {
 		const name = subAgentMessage.agentName;
 		lines.push({
 			role: 'subagent' as const,
@@ -368,9 +395,11 @@ export class SubAgentUIHandler {
 			if (this.streamStates[nextId]) break;
 		}
 
-		if (this.displayQueue.length === 0 &&
+		if (
+			this.displayQueue.length === 0 &&
 			this.activeDisplayAgentId &&
-			!this.streamStates[this.activeDisplayAgentId]) {
+			!this.streamStates[this.activeDisplayAgentId]
+		) {
 			this.activeDisplayAgentId = null;
 		}
 
@@ -433,11 +462,7 @@ export class SubAgentUIHandler {
 			return;
 		}
 
-		const suppressionDecision = getVcpStreamingSuppressionDecision(
-			line,
-			state.vcpStreamingSuppressionState,
-		);
-		if (suppressionDecision.suppress) {
+		if (state.vcpStreamingSuppressor.shouldSuppress(line)) {
 			if (state.tableBuffer) {
 				this.emitStreamLine(
 					lines,
@@ -460,7 +485,6 @@ export class SubAgentUIHandler {
 				state.listBuffer = '';
 			}
 
-			state.vcpStreamingSuppressionState = suppressionDecision.nextState;
 			return;
 		}
 
@@ -634,7 +658,7 @@ export class SubAgentUIHandler {
 		state.codeBlockBuffer = '';
 		state.tableBuffer = '';
 		state.listBuffer = '';
-		state.vcpStreamingSuppressionState = null;
+		state.vcpStreamingSuppressor.reset();
 		this.updateGlobalTokenCount();
 	}
 
@@ -1170,10 +1194,7 @@ export class SubAgentUIHandler {
 							contextStartLine: resultData.contextStartLine,
 						},
 					};
-				} else if (
-					resultData.results &&
-					Array.isArray(resultData.results)
-				) {
+				} else if (resultData.results && Array.isArray(resultData.results)) {
 					fileToolData = {
 						name: msg.tool_name,
 						arguments: {

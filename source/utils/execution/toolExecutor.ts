@@ -2,15 +2,10 @@ import {executeMCPTool} from './mcpToolsManager.js';
 import {subAgentService} from '../../mcp/subagent.js';
 import {teamService} from '../../mcp/team.js';
 import {runningSubAgentTracker} from './runningSubAgentTracker.js';
-import {getOpenAiConfig} from '../config/apiConfig.js';
 import {parseJsonWithFix} from '../core/retryUtils.js';
 import {logger} from '../core/logger.js';
 import {sessionManager} from '../session/sessionManager.js';
-import {snowBridgeClient} from '../session/vcpCompatibility/bridgeClient.js';
-import {
-	coerceBridgeExecutionArguments,
-	getToolExecutionBinding,
-} from '../session/vcpCompatibility/toolExecutionBinding.js';
+import {getToolExecutionBinding} from '../session/vcpCompatibility/toolExecutionBinding.js';
 import {
 	summarizeBridgeStatusPayload,
 	type BridgeStatusSummary,
@@ -23,6 +18,11 @@ import type {MultimodalContent} from '../../mcp/types/filesystem.types.js';
 import {
 	buildToolHistoryArtifacts,
 } from './toolHistoryArtifacts.js';
+import {
+	extractToolResultSidecar,
+	normalizeBridgeIngressPayload,
+} from './bridgeIngress.js';
+import {executeBridgeToolCall} from './bridgeToolExecution.js';
 
 export {buildToolHistoryContent} from './toolHistoryArtifacts.js';
 
@@ -160,192 +160,6 @@ export function createTeamUserQuestionAdapter(
 			customInput: response.customInput,
 			cancelled: response.cancelled,
 		};
-	};
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null;
-}
-
-function normalizeBridgePhaseValue(value: unknown): string | undefined {
-	if (typeof value !== 'string') {
-		return undefined;
-	}
-
-	const normalizedValue = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
-	return normalizedValue || undefined;
-}
-
-function mergeBridgeIngressPayload(
-	basePayload: Record<string, unknown>,
-	segment: Record<string, unknown>,
-): Record<string, unknown> {
-	const mergedPayload: Record<string, unknown> = {
-		...basePayload,
-		...segment,
-	};
-	delete mergedPayload['accepted'];
-	delete mergedPayload['final'];
-	delete mergedPayload['finalResult'];
-
-	for (const sidecarKey of ['historyContent', 'previewContent', 'statusEvents']) {
-		if (
-			mergedPayload[sidecarKey] === undefined &&
-			basePayload[sidecarKey] !== undefined
-		) {
-			mergedPayload[sidecarKey] = basePayload[sidecarKey];
-		}
-	}
-
-	return mergedPayload;
-}
-
-function normalizeBridgeIngressPayload(payload: unknown): unknown {
-	if (!isRecord(payload)) {
-		return payload;
-	}
-
-	let normalizedPayload: Record<string, unknown> = {...payload};
-	const finalSegment = isRecord(payload['final'])
-		? payload['final']
-		: isRecord(payload['finalResult'])
-		? payload['finalResult']
-		: undefined;
-	const acceptedSegment = isRecord(payload['accepted'])
-		? payload['accepted']
-		: undefined;
-
-	if (finalSegment) {
-		normalizedPayload = mergeBridgeIngressPayload(normalizedPayload, finalSegment);
-	} else if (acceptedSegment) {
-		normalizedPayload = mergeBridgeIngressPayload(
-			normalizedPayload,
-			acceptedSegment,
-		);
-	}
-
-	const phaseHints = [
-		finalSegment ? 'final' : undefined,
-		payload['accepted'] === true || acceptedSegment ? 'accepted' : undefined,
-		normalizedPayload['phase'],
-		normalizedPayload['stage'],
-		normalizedPayload['state'],
-		normalizedPayload['kind'],
-		normalizedPayload['status'],
-	];
-	const normalizedPhase =
-		phaseHints
-			.map(hint => normalizeBridgePhaseValue(hint))
-			.find(Boolean) || undefined;
-
-	const asyncStatus = isRecord(normalizedPayload['asyncStatus'])
-		? {...normalizedPayload['asyncStatus']}
-		: {};
-	const taskId =
-		String(
-			normalizedPayload['taskId'] ||
-				asyncStatus['taskId'] ||
-				'',
-		).trim() || undefined;
-
-	const isAcceptedIngress =
-		normalizedPhase === 'accepted' ||
-		normalizedPhase === 'queued' ||
-		normalizedPhase === 'submitted';
-	const isFinalIngress =
-		normalizedPhase === 'final' ||
-		normalizedPhase === 'result' ||
-		normalizedPhase === 'completed' ||
-		normalizedPhase === 'done';
-
-	if (isAcceptedIngress) {
-		normalizedPayload = {
-			...normalizedPayload,
-			status: 'accepted',
-			asyncStatus: {
-				...asyncStatus,
-				enabled: true,
-				state: 'accepted',
-				event:
-					normalizeBridgePhaseValue(asyncStatus['event']) === 'result'
-						? 'lifecycle'
-						: asyncStatus['event'] || 'lifecycle',
-				...(taskId ? {taskId} : {}),
-			},
-		};
-	}
-
-	if (isFinalIngress) {
-		const hasError = normalizedPayload['error'] !== undefined;
-		normalizedPayload = {
-			...normalizedPayload,
-			status: hasError ? 'error' : 'success',
-			asyncStatus: {
-				...asyncStatus,
-				enabled:
-					asyncStatus['enabled'] === undefined
-						? Boolean(taskId)
-						: asyncStatus['enabled'],
-				state: hasError ? 'error' : 'completed',
-				event: 'result',
-				...(taskId ? {taskId} : {}),
-			},
-		};
-	}
-
-	return normalizedPayload;
-}
-
-async function executeBridgeToolCall(options: {
-	toolName: string;
-	args: Record<string, any>;
-	toolPlaneKey?: string;
-	abortSignal?: AbortSignal;
-	onStatus?: (payload: unknown) => void;
-}) {
-	const config = getOpenAiConfig();
-	const executionBinding = getToolExecutionBinding(
-		options.toolName,
-		options.toolPlaneKey,
-	);
-	if (!executionBinding || executionBinding.kind !== 'bridge') {
-		throw new Error(
-			`Bridge tool binding not found for ${options.toolName}`,
-		);
-	}
-
-	const bridgeArgs = coerceBridgeExecutionArguments(
-		options.args,
-		executionBinding,
-	);
-
-	return snowBridgeClient.executeTool({
-		config,
-		toolName: executionBinding.pluginName,
-		toolArgs: {
-			...bridgeArgs,
-			command: executionBinding.commandName,
-		},
-		abortSignal: options.abortSignal,
-		onStatus: options.onStatus,
-	});
-}
-
-function extractToolResultSidecar(result: any): {
-	historyContent?: string;
-	previewContent?: string;
-} {
-	if (!result || typeof result !== 'object') {
-		return {};
-	}
-
-	return {
-		...(typeof result.historyContent === 'string' && result.historyContent.trim()
-			? {historyContent: result.historyContent}
-			: {}),
-		...(typeof result.previewContent === 'string' && result.previewContent.trim()
-			? {previewContent: result.previewContent}
-			: {}),
 	};
 }
 

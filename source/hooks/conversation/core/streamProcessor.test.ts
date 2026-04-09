@@ -119,6 +119,59 @@ test('process stream round keeps VCP-looking protocol samples inside fenced code
 		),
 	);
 	t.true(
-		messageState.value.some(message => String(message.content || '').includes('后文')),
+		messageState.value.some(message =>
+			String(message.content || '').includes('后文'),
+		),
+	);
+});
+
+test('process stream round flushes buffered list content before suppressing VCP shells', async t => {
+	const messageState = createStateSetter<any[]>([]);
+	const tokenState = createStateSetter(0);
+	const contextUsageState = createStateSetter<any>(null);
+	const controller = new AbortController();
+
+	await processStreamRound({
+		config: {
+			streamingDisplay: true,
+		},
+		model: 'gpt-5',
+		conversationMessages: [],
+		activeTools: [],
+		controller,
+		encoder: {
+			encode(text: string) {
+				return Array.from(text).map((_, index) => index);
+			},
+		},
+		setStreamTokenCount: tokenState.setter as any,
+		setMessages: messageState.setter as any,
+		setContextUsage: contextUsageState.setter as any,
+		options: createConversationOptions(),
+		createStreamGeneratorImpl: () =>
+			createFakeStream([
+				{
+					type: 'content',
+					content: `1. item
+<<<[TOOL_REQUEST]>>>
+`,
+				},
+				{
+					type: 'content',
+					content: `tool_name=LightMemo
+`,
+				},
+				{
+					type: 'content',
+					content: `<<<[END_TOOL_REQUEST]>>>
+After`,
+				},
+				{type: 'done'},
+			]) as any,
+	});
+
+	t.deepEqual(
+		messageState.value.map(message => message.content),
+		['1. item', 'After'],
 	);
 });

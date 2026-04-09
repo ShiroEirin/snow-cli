@@ -1,6 +1,5 @@
 import {
 	executeToolCalls,
-	type BridgeToolStatusUpdate,
 	type ToolCall,
 } from '../../../utils/execution/toolExecutor.js';
 import {toolSearchService} from '../../../utils/execution/toolSearchService.js';
@@ -10,10 +9,6 @@ import {processToolCallsAfterStream} from './toolCallProcessor.js';
 import {resolveToolConfirmations} from './toolConfirmationFlow.js';
 import {handleAutoCompression} from './autoCompressHandler.js';
 import {buildToolResultMessages} from './toolResultDisplay.js';
-import {
-	buildConversationToolMessage,
-	buildHistoryToolMessage,
-} from '../../../utils/session/toolMessageProjection.js';
 import {SubAgentUIHandler} from './subAgentMessageHandler.js';
 import {handlePendingMessages} from './pendingMessagesHandler.js';
 import {connectionManager} from '../../../utils/connection/ConnectionManager.js';
@@ -28,126 +23,18 @@ import type {
 import type {MCPTool} from '../../../utils/execution/mcpToolsManager.js';
 import type {ConfirmationResult} from '../../../ui/components/tools/ToolConfirmation.js';
 import {
-	buildToolLifecycleSideband,
-	deriveBridgeLifecycleState,
-	shouldAdvanceBridgeLifecycle,
-} from '../../../utils/session/vcpCompatibility/toolLifecycleSideband.js';
+	applyBridgeToolStatusUpdate,
+	replacePendingToolMessages,
+} from './toolRoundMessageAdapter.js';
+import {
+	projectToolResultForPersistence,
+	resolveToolResultMessageStatus,
+} from './toolRoundPersistenceHelper.js';
 
-function findReplaceableToolMessageIndex(
-	existingMessages: Message[],
-	toolCallId: string | undefined,
-): number {
-	if (!toolCallId) {
-		return -1;
-	}
-
-	let fallbackIndex = -1;
-	for (let index = existingMessages.length - 1; index >= 0; index--) {
-		const message = existingMessages[index];
-		if (message?.toolCallId !== toolCallId) {
-			continue;
-		}
-
-		if (
-			message.toolPending === true ||
-			message.messageStatus === 'pending'
-		) {
-			return index;
-		}
-
-		if (fallbackIndex === -1) {
-			fallbackIndex = index;
-		}
-	}
-
-	return fallbackIndex;
-}
-
-export function replacePendingToolMessages(
-	existingMessages: Message[],
-	resultMessages: Message[],
-): Message[] {
-	const nextMessages = [...existingMessages];
-
-	for (const resultMessage of resultMessages) {
-		if (!resultMessage.toolCallId) {
-			nextMessages.push(resultMessage);
-			continue;
-		}
-
-		const pendingIndex = findReplaceableToolMessageIndex(
-			nextMessages,
-			resultMessage.toolCallId,
-		);
-
-		if (pendingIndex === -1) {
-			nextMessages.push(resultMessage);
-			continue;
-		}
-
-		nextMessages[pendingIndex] = {
-			...nextMessages[pendingIndex],
-			...resultMessage,
-			toolPending: false,
-		};
-	}
-
-	return nextMessages;
-}
-
-export function applyBridgeToolStatusUpdate(
-	existingMessages: Message[],
-	update: BridgeToolStatusUpdate,
-): Message[] {
-	let changed = false;
-	const nextMessages = existingMessages.map(message => {
-		if (message.toolCallId !== update.toolCallId) {
-			return message;
-		}
-
-		const nextLifecycleState = deriveBridgeLifecycleState(update);
-		const currentLifecycleState = message.toolLifecycleState;
-		const isSameLifecycleState =
-			currentLifecycleState === nextLifecycleState;
-		const canAdvance = shouldAdvanceBridgeLifecycle(currentLifecycleState, update);
-		if (!canAdvance && !isSameLifecycleState) {
-			return message;
-		}
-
-		const nextMessageStatus: Message['messageStatus'] =
-			update.isTerminal === true
-				? nextLifecycleState === 'error' || nextLifecycleState === 'cancelled'
-					? 'error'
-					: 'success'
-				: 'pending';
-		const nextToolPending = update.isTerminal !== true;
-		const nextSideband = buildToolLifecycleSideband({
-			toolName: message.toolName || update.toolName,
-			messageStatus: nextMessageStatus,
-			detail: update.detail,
-		});
-		if (
-			message.toolStatusDetail === nextSideband &&
-			message.messageStatus === nextMessageStatus &&
-			message.toolPending === nextToolPending &&
-			isSameLifecycleState
-		) {
-			return message;
-		}
-
-		changed = true;
-		return {
-			...message,
-			toolName: message.toolName || update.toolName,
-			messageStatus: nextMessageStatus,
-			toolPending: nextToolPending,
-			toolLifecycleState: nextLifecycleState,
-			toolStatusDetail: nextSideband,
-		};
-	});
-
-	return changed ? nextMessages : existingMessages;
-}
+export {
+	applyBridgeToolStatusUpdate,
+	replacePendingToolMessages,
+} from './toolRoundMessageAdapter.js';
 
 export async function handleToolCallRound(ctx: {
 	streamResult: StreamRoundResult;
@@ -351,8 +238,8 @@ export async function handleToolCallRound(ctx: {
 	if (hookFailedResult) {
 		for (const result of toolResults) {
 			const {hookFailed, ...resultWithoutFlag} = result;
-			const conversationMessage = buildConversationToolMessage(resultWithoutFlag);
-			const historyMessage = buildHistoryToolMessage(resultWithoutFlag);
+			const {conversationMessage, historyMessage} =
+				projectToolResultForPersistence(resultWithoutFlag);
 			conversationMessages.push(conversationMessage);
 			saveMessage(historyMessage).catch(error => {
 				console.error('Failed to save tool result:', error);
@@ -400,18 +287,15 @@ export async function handleToolCallRound(ctx: {
 	}
 
 	for (const result of toolResults) {
-		const isError = result.content.startsWith('Error:');
-		const conversationMessage = buildConversationToolMessage(
-			result,
-			isError ? 'error' : 'success',
-		);
-		const resultToSave = buildHistoryToolMessage(
-			result,
-			isError ? 'error' : 'success',
-		);
+		const messageStatus = resolveToolResultMessageStatus(result);
+		const {conversationMessage, historyMessage} =
+			projectToolResultForPersistence(
+				result,
+				messageStatus,
+			);
 		conversationMessages.push(conversationMessage);
 		try {
-			await saveMessage(resultToSave);
+			await saveMessage(historyMessage);
 		} catch (error) {
 			console.error('Failed to save tool result before compression:', error);
 		}

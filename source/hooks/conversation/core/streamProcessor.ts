@@ -2,10 +2,7 @@ import type {ChatMessage} from '../../../api/chat.js';
 import {sessionManager} from '../../../utils/session/sessionManager.js';
 import type {MCPTool} from '../../../utils/execution/mcpToolsManager.js';
 import type {Message} from '../../../ui/components/chat/MessageList.js';
-import {
-	getVcpStreamingSuppressionDecision,
-	type VcpStreamingSuppressionState,
-} from '../../../utils/session/vcpCompatibility/display.js';
+import {createCompatibilityStreamingSuppressor} from '../../../utils/core/vcpCompatibilityAdapter.js';
 import {createStreamGenerator} from './streamFactory.js';
 import type {
 	ConversationHandlerOptions,
@@ -88,7 +85,7 @@ export async function processStreamRound(ctx: {
 	let codeBlockBuffer = '';
 	let tableBuffer = '';
 	let listBuffer = '';
-	let vcpStreamingSuppressionState: VcpStreamingSuppressionState = null;
+	const vcpStreamingSuppressor = createCompatibilityStreamingSuppressor();
 	const pendingStreamLines: Message[] = [];
 	let lastFlushTime = 0;
 
@@ -172,14 +169,9 @@ export async function processStreamRound(ctx: {
 			return;
 		}
 
-		const suppressionDecision = getVcpStreamingSuppressionDecision(
-			line,
-			vcpStreamingSuppressionState,
-		);
-		if (suppressionDecision.suppress) {
+		if (vcpStreamingSuppressor.shouldSuppress(line)) {
 			flushTableBuffer();
 			flushListBuffer();
-			vcpStreamingSuppressionState = suppressionDecision.nextState;
 			return;
 		}
 
