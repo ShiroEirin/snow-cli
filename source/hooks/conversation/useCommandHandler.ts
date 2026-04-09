@@ -8,7 +8,10 @@ import {performHybridCompression} from '../../utils/core/subAgentContextCompress
 import {getOpenAiConfig} from '../../utils/config/apiConfig.js';
 import {getHybridCompressEnabled} from '../../utils/config/projectSettings.js';
 import {getTodoService} from '../../utils/execution/mcpToolsManager.js';
-import {projectToolMessagesForContext} from '../../utils/session/toolMessageProjection.js';
+import {
+	projectToolMessagesForContext,
+	shouldProjectToolContext,
+} from '../../utils/session/toolMessageProjection.js';
 import {navigateTo} from '../integration/useGlobalNavigation.js';
 import type {UsageInfo} from '../../api/chat.js';
 import {resetTerminal} from '../../utils/execution/terminal.js';
@@ -86,9 +89,14 @@ export async function executeContextCompression(
 
 		// 使用会话文件中的消息进行压缩（这是真实的对话记录）
 		const sessionMessages = currentSession.messages;
+		const apiConfig = getOpenAiConfig();
 
 		// 转换为 ChatMessage 格式（保留所有关键字段）
-		const chatMessages = projectToolMessagesForContext(sessionMessages).map(
+		const chatMessages = (
+			shouldProjectToolContext(apiConfig)
+				? projectToolMessagesForContext(sessionMessages)
+				: sessionMessages
+		).map(
 			projectedMessage => {
 			return {
 				role: projectedMessage.role,
@@ -109,7 +117,6 @@ export async function executeContextCompression(
 
 		// ── Hybrid Compress path: AI summary + preserved rounds with truncated tool results ──
 		if (useHybridCompress) {
-			const apiConfig = getOpenAiConfig();
 			const hybridResult = await performHybridCompression(
 				chatMessages,
 				{

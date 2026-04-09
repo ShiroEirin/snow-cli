@@ -6,6 +6,7 @@ import {
 	createTeammateUserQuestionAdapter,
 	executeTeammateRegularToolCall,
 	isPlanApprovalProtectedTool,
+	projectTeammateMessagesForModel,
 } from './teamExecutor.js';
 import {
 	createTeammateProviderStream,
@@ -544,5 +545,29 @@ test('regular teammate helpers keep approval and execution behavior stable', asy
 			content: 'ok',
 		},
 	]);
-	t.deepEqual(emitted, ['ok']);
+t.deepEqual(emitted, ['ok']);
+});
+
+test('projectTeammateMessagesForModel keeps local vcp teammate history raw', (t: any) => {
+	const messages = [
+		{
+			role: 'tool' as const,
+			content: `${'line\n'.repeat(24)}tail`,
+			historyContent: `${'line\n'.repeat(24)}tail`,
+		},
+	];
+
+	const localProjected = projectTeammateMessagesForModel(
+		{backendMode: 'vcp', toolTransport: 'local'},
+		messages as any,
+	);
+	const bridgeProjected = projectTeammateMessagesForModel(
+		{backendMode: 'vcp', toolTransport: 'bridge'},
+		messages as any,
+	);
+
+	t.is(localProjected[0]?.content, messages[0]?.content);
+	t.true(
+		bridgeProjected[0]?.content.includes('[projected tool context truncated]'),
+	);
 });

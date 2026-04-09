@@ -40,9 +40,16 @@ export function projectToolResultForPersistence<
 >(
 	result: T,
 	messageStatus?: ToolResultMessageStatus,
+	options?: {
+		projectConversationMessage?: boolean;
+	},
 ) {
+	const projectConversationMessage =
+		options?.projectConversationMessage !== false;
 	return {
-		conversationMessage: buildConversationToolMessage(result, messageStatus),
+		conversationMessage: projectConversationMessage
+			? buildConversationToolMessage(result, messageStatus)
+			: buildHistoryToolMessage(result, messageStatus),
 		historyMessage: buildHistoryToolMessage(result, messageStatus),
 	};
 }

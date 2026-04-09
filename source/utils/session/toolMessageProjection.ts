@@ -1,3 +1,5 @@
+import type {BackendMode, ToolTransport} from '../config/apiConfig.js';
+
 export function buildHistoryToolMessage<
 	T extends {
 		content: string;
@@ -179,4 +181,11 @@ export function projectToolMessagesForContext<
 		remainingBudget -= normalizedContent.length;
 		return projectedMessage;
 	});
+}
+
+export function shouldProjectToolContext(config: {
+	backendMode?: BackendMode;
+	toolTransport?: ToolTransport;
+}): boolean {
+	return !(config.backendMode === 'vcp' && config.toolTransport === 'local');
 }

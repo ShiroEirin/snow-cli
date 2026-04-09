@@ -133,6 +133,7 @@ export const vcpOutboundProjectionTransform: VcpOutboundTransform = {
 		return (
 			allowProjectionBridge &&
 			config.backendMode === 'vcp' &&
+			config.toolTransport !== 'local' &&
 			config.requestMethod === 'chat' &&
 			messages.length > RECENT_RAW_ASSISTANT_TOOL_MESSAGES
 		);

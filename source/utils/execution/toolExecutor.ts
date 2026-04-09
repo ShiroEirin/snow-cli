@@ -23,6 +23,10 @@ import {
 	normalizeBridgeIngressPayload,
 } from './bridgeIngress.js';
 import {executeBridgeToolCall} from './bridgeToolExecution.js';
+import {
+	shouldBuildStructuredToolArtifacts,
+	shouldRefreshStructuredToolArtifacts,
+} from './toolResultPolicy.js';
 
 export {buildToolHistoryContent} from './toolHistoryArtifacts.js';
 
@@ -354,17 +358,12 @@ export async function executeToolCall(
 						: undefined,
 					requestUserQuestion: teamUserQuestionAdapter,
 				});
-				const toolHistoryArtifacts = buildToolHistoryArtifacts(
-					teamResult,
-					JSON.stringify(teamResult),
-				);
+				const rawTeamContent = JSON.stringify(teamResult);
 
 				result = {
 					tool_call_id: toolCall.id,
 					role: 'tool',
-					content: JSON.stringify(teamResult),
-					historyContent: toolHistoryArtifacts.historyContent,
-					previewContent: toolHistoryArtifacts.previewContent,
+					content: rawTeamContent,
 				};
 			} catch (error: any) {
 				result = {
@@ -486,17 +485,10 @@ export async function executeToolCall(
 				} else {
 					subAgentContent = JSON.stringify(subAgentResult);
 				}
-				const toolHistoryArtifacts = buildToolHistoryArtifacts(
-					subAgentResult,
-					subAgentContent,
-				);
-
 				result = {
 					tool_call_id: toolCall.id,
 					role: 'tool',
 					content: subAgentContent,
-					historyContent: toolHistoryArtifacts.historyContent,
-					previewContent: toolHistoryArtifacts.previewContent,
 				};
 			} finally {
 				// Always unregister the sub-agent when it completes (success or error)
@@ -513,17 +505,11 @@ export async function executeToolCall(
 					onTokenUpdate,
 				);
 				const {textContent, images} = extractMultimodalContent(toolResult);
-				const toolHistoryArtifacts = buildToolHistoryArtifacts(
-					toolResult,
-					textContent,
-				);
 
 				result = {
 					tool_call_id: toolCall.id,
 					role: 'tool',
 					content: textContent,
-					historyContent: toolHistoryArtifacts.historyContent,
-					previewContent: toolHistoryArtifacts.previewContent,
 					images,
 				};
 				return result;
@@ -602,8 +588,12 @@ export async function executeToolCall(
 			// Extract multimodal content (text + images)
 			const {textContent, images} = extractMultimodalContent(normalizedToolResult);
 			const bridgeSidecar = extractToolResultSidecar(normalizedToolResult);
-			const toolHistoryArtifacts =
-				bridgeSidecar.historyContent || bridgeSidecar.previewContent
+			const shouldBuildStructuredArtifacts = shouldBuildStructuredToolArtifacts({
+				toolName: toolCall.function.name,
+				executionBinding,
+			});
+			const toolHistoryArtifacts = shouldBuildStructuredArtifacts
+				? bridgeSidecar.historyContent || bridgeSidecar.previewContent
 					? {
 							historyContent:
 								bridgeSidecar.historyContent ||
@@ -613,7 +603,8 @@ export async function executeToolCall(
 								).historyContent,
 							previewContent: bridgeSidecar.previewContent,
 					  }
-					: buildToolHistoryArtifacts(normalizedToolResult, textContent);
+					: buildToolHistoryArtifacts(normalizedToolResult, textContent)
+				: undefined;
 			const bridgeSummary =
 				executionBinding.kind === 'bridge'
 					? summarizeBridgeStatusPayload(normalizedToolResult)
@@ -623,8 +614,12 @@ export async function executeToolCall(
 				tool_call_id: toolCall.id,
 				role: 'tool',
 				content: textContent,
-				historyContent: toolHistoryArtifacts.historyContent,
-				previewContent: toolHistoryArtifacts.previewContent,
+				...(toolHistoryArtifacts
+					? {
+							historyContent: toolHistoryArtifacts.historyContent,
+							previewContent: toolHistoryArtifacts.previewContent,
+					  }
+					: {}),
 				toolStatusDetail: bridgeSummary?.detail,
 				toolLifecycleState: bridgeSummary?.state,
 				images,
@@ -744,7 +739,13 @@ export async function executeToolCall(
 			if (result) {
 				if (interpreted.action === 'replace') {
 					result.content = interpreted.replacedContent || result.content;
-					if (typeof result.content === 'string') {
+					if (
+						typeof result.content === 'string' &&
+						shouldRefreshStructuredToolArtifacts({
+							toolName: toolCall.function.name,
+							result,
+						})
+					) {
 						const toolHistoryArtifacts = buildToolHistoryArtifacts(
 							result.content,
 							result.content,

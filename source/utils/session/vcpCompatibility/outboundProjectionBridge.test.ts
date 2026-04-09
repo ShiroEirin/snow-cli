@@ -124,6 +124,30 @@ test('applyVcpOutboundMessageTransforms keeps helper disabled outside vcp chat m
 	t.is(nonChatTransformed[0]?.content, '<div>older assistant</div>');
 });
 
+test('applyVcpOutboundMessageTransforms keeps projection disabled in vcp local mode', t => {
+	const messages = [
+		{role: 'assistant' as const, content: '<div>older assistant</div>'},
+		{role: 'assistant' as const, content: 'assistant 1'},
+		{role: 'assistant' as const, content: 'assistant 2'},
+		{role: 'assistant' as const, content: 'assistant 3'},
+		{role: 'assistant' as const, content: 'assistant 4'},
+		{role: 'assistant' as const, content: 'assistant 5'},
+		{role: 'assistant' as const, content: 'assistant 6'},
+		{role: 'assistant' as const, content: 'assistant 7'},
+	];
+
+	const transformed = applyVcpOutboundMessageTransforms({
+		config: {
+			backendMode: 'vcp',
+			toolTransport: 'local',
+			requestMethod: 'chat',
+		},
+		messages: messages as any,
+	});
+
+	t.is(transformed[0]?.content, '<div>older assistant</div>');
+});
+
 test('applyVcpOutboundMessageTransforms respects allowProjectionBridge=false', t => {
 	const messages = [
 		{role: 'assistant' as const, content: '<div>older assistant</div>'},

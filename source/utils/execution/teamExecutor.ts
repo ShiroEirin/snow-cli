@@ -22,7 +22,10 @@ import type {
 import {prepareToolPlane} from '../session/vcpCompatibility/toolPlaneFacade.js';
 import type {ToolExecutionBinding} from '../session/vcpCompatibility/toolExecutionBinding.js';
 import {rewriteToolArgsForWorktree} from '../team/teamWorktree.js';
-import {projectToolMessagesForContext} from '../session/toolMessageProjection.js';
+import {
+	projectToolMessagesForContext,
+	shouldProjectToolContext,
+} from '../session/toolMessageProjection.js';
 import {compressionCoordinator} from '../core/compressionCoordinator.js';
 import {
 	buildTeammateSyntheticTools,
@@ -65,6 +68,15 @@ export interface TeammateExecutionResult {
 	result: string;
 	error?: string;
 	usage?: TokenUsage;
+}
+
+export function projectTeammateMessagesForModel(
+	config: {backendMode?: 'native' | 'vcp'; toolTransport?: 'local' | 'bridge' | 'hybrid'},
+	messages: ChatMessage[],
+): ChatMessage[] {
+	return shouldProjectToolContext(config)
+		? projectToolMessagesForContext(messages)
+		: messages;
 }
 
 export function createTeammateUserQuestionAdapter(
@@ -468,7 +480,7 @@ ${role ? `Your role: ${role}` : ''}
 			// API call
 			const model = config.advancedModel || 'gpt-5';
 			const projectMessagesForModel = () =>
-				projectToolMessagesForContext(messages);
+				projectTeammateMessagesForModel(config, messages);
 			const projectedMessages = projectMessagesForModel();
 			const stream = createTeammateProviderStream({
 				config,

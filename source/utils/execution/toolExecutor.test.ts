@@ -26,6 +26,7 @@ import {snowBridgeClient} from '../session/vcpCompatibility/bridgeClient.js';
 import {lineHash} from '../../mcp/utils/filesystem/hashline.utils.js';
 import {teamService} from '../../mcp/team.js';
 import {subAgentService} from '../../mcp/subagent.js';
+import {unifiedHooksExecutor} from './unifiedHooksExecutor.js';
 
 let toolPlaneSequence = 0;
 
@@ -92,6 +93,8 @@ test('tool_search bypasses regular execution binding lookup', async (t: any) => 
 	t.is(result.tool_call_id, 'tool-search-call');
 	t.false(result.content.startsWith('Error:'));
 	t.true(result.content.includes('subagent filesystem'));
+	t.is(result.historyContent, undefined);
+	t.is(result.previewContent, undefined);
 });
 
 test('invalid concatenated tool arguments fail instead of truncating payload', async (t: any) => {
@@ -702,7 +705,7 @@ test.serial(
 );
 
 test.serial(
-	'team top-level tool results carry summarized history sidecar',
+	'team top-level tool results keep raw upstream shape without summary sidecars',
 	async (t: any) => {
 		const originalExecute = teamService.execute;
 
@@ -727,15 +730,211 @@ test.serial(
 
 			const result = (await executeToolCall(toolCall)) as ToolResult;
 
-			t.truthy(result.historyContent);
-			t.truthy(result.previewContent);
+			t.is(result.historyContent, undefined);
+			t.is(result.previewContent, undefined);
+			t.true(result.content.includes('"summary":"Team finished work"'));
 			t.true(result.content.includes('"members"'));
-			t.false(result.historyContent!.includes('"summary":"Team finished work"'));
-			t.false(result.historyContent!.includes('"member-11"'));
-			t.true(result.previewContent!.includes('"summary":"Team finished work"'));
-			t.true(result.previewContent!.includes('"itemCount":12'));
+			t.true(result.content.includes('"member-11"'));
 		} finally {
 			teamService.execute = originalExecute;
+		}
+	},
+);
+
+test.serial(
+	'subagent top-level tool results keep raw upstream shape without summary sidecars',
+	async (t: any) => {
+		const originalExecute = subAgentService.execute;
+		subAgentService.execute = (async () => ({
+			success: true,
+			result: 'Sub-agent completed review.',
+			usage: {input_tokens: 12, output_tokens: 34},
+		})) as typeof subAgentService.execute;
+
+		try {
+			const toolCall: ToolCall = {
+				id: 'subagent-tool-call',
+				type: 'function',
+				function: {
+					name: 'subagent-agent_explore',
+					arguments: JSON.stringify({prompt: 'Read H:/github/VCP/.helloagents'}),
+				},
+			};
+
+			const result = (await executeToolCall(toolCall)) as ToolResult;
+
+			t.is(result.historyContent, undefined);
+			t.is(result.previewContent, undefined);
+			t.true(result.content.includes('Sub-agent completed review.'));
+			t.true(result.content.includes('"output_tokens":34'));
+		} finally {
+			subAgentService.execute = originalExecute;
+		}
+	},
+);
+
+test.serial(
+	'local MCP tool results keep raw upstream shape without summary sidecars',
+	async (t: any) => {
+		const tempDir = mkdtempSync(join(tmpdir(), 'snow-tool-read-'));
+		const filePath = join(tempDir, 'plain-read.txt');
+		const toolPlaneKey = registerLocalToolBindings(['filesystem-read']);
+		writeFileSync(filePath, 'line1\nline2\n', 'utf8');
+
+		try {
+			const result = await executeToolCallWithBindings(
+				{
+					id: 'local-read-call',
+					type: 'function',
+					function: {
+						name: 'filesystem-read',
+						arguments: JSON.stringify({filePath}),
+					},
+				},
+				toolPlaneKey,
+			);
+
+			t.true(result.content.includes('line1'));
+			t.is(result.historyContent, undefined);
+			t.is(result.previewContent, undefined);
+		} finally {
+			clearToolExecutionBindings(toolPlaneKey);
+			rmSync(tempDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'local MCP tool results stay raw when afterToolCall hook replaces content',
+	async (t: any) => {
+		const tempDir = mkdtempSync(join(tmpdir(), 'snow-tool-hook-local-'));
+		const filePath = join(tempDir, 'hook-local.txt');
+		const toolPlaneKey = registerLocalToolBindings(['filesystem-read']);
+		const originalExecuteHooks = unifiedHooksExecutor.executeHooks;
+		writeFileSync(filePath, 'alpha\nbeta\n', 'utf8');
+
+		unifiedHooksExecutor.executeHooks = (async hookType => {
+			if (hookType === 'afterToolCall') {
+				return {
+					success: false,
+					results: [
+						{
+							type: 'command' as const,
+							success: false,
+							command: 'echo local-hook',
+							exitCode: 1,
+							error: 'local hook replacement',
+						},
+					],
+					executedActions: 1,
+					skippedActions: 0,
+				};
+			}
+
+			return {
+				success: true,
+				results: [],
+				executedActions: 0,
+				skippedActions: 0,
+			};
+		}) as typeof unifiedHooksExecutor.executeHooks;
+
+		try {
+			const result = await executeToolCallWithBindings(
+				{
+					id: 'local-hook-call',
+					type: 'function',
+					function: {
+						name: 'filesystem-read',
+						arguments: JSON.stringify({filePath}),
+					},
+				},
+				toolPlaneKey,
+			);
+
+			t.is(result.content, 'local hook replacement');
+			t.is(result.historyContent, undefined);
+			t.is(result.previewContent, undefined);
+		} finally {
+			unifiedHooksExecutor.executeHooks = originalExecuteHooks;
+			clearToolExecutionBindings(toolPlaneKey);
+			rmSync(tempDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'bridge tool results rebuild structured sidecars when afterToolCall hook replaces content',
+	async (t: any) => {
+		const toolPlaneKey = `tool-executor-bridge-hook-${++toolPlaneSequence}`;
+		const originalExecuteTool = snowBridgeClient.executeTool;
+		const originalExecuteHooks = unifiedHooksExecutor.executeHooks;
+		registerToolExecutionBindings(toolPlaneKey, [
+			{
+				kind: 'bridge',
+				toolName: 'vcp-bridge-hook-tool',
+				pluginName: 'BridgeHookTool',
+				displayName: 'BridgeHookTool',
+				commandName: 'Run',
+			},
+		]);
+
+		snowBridgeClient.executeTool = (async () => ({
+			status: 'success',
+			result: {
+				summary: 'original bridge payload',
+				items: Array.from({length: 4}, (_, index) => ({
+					id: `item-${index}`,
+				})),
+			},
+		})) as typeof snowBridgeClient.executeTool;
+		unifiedHooksExecutor.executeHooks = (async hookType => {
+			if (hookType === 'afterToolCall') {
+				return {
+					success: false,
+					results: [
+						{
+							type: 'command' as const,
+							success: false,
+							command: 'echo bridge-hook',
+							exitCode: 1,
+							error: 'bridge hook replacement',
+						},
+					],
+					executedActions: 1,
+					skippedActions: 0,
+				};
+			}
+
+			return {
+				success: true,
+				results: [],
+				executedActions: 0,
+				skippedActions: 0,
+			};
+		}) as typeof unifiedHooksExecutor.executeHooks;
+
+		try {
+			const result = await executeToolCallWithBindings(
+				{
+					id: 'bridge-hook-call',
+					type: 'function',
+					function: {
+						name: 'vcp-bridge-hook-tool',
+						arguments: JSON.stringify({query: 'bridge'}),
+					},
+				},
+				toolPlaneKey,
+			);
+
+			t.is(result.content, 'bridge hook replacement');
+			t.truthy(result.historyContent);
+			t.true(result.historyContent!.includes('bridge hook replacement'));
+			t.is(result.previewContent, undefined);
+		} finally {
+			unifiedHooksExecutor.executeHooks = originalExecuteHooks;
+			snowBridgeClient.executeTool = originalExecuteTool;
+			clearToolExecutionBindings(toolPlaneKey);
 		}
 	},
 );

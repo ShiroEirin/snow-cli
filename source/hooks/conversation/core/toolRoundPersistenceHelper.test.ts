@@ -28,6 +28,25 @@ test('projectToolResultForPersistence keeps conversation and history projections
 	t.is(historyMessage.messageStatus, 'success');
 });
 
+test('projectToolResultForPersistence can keep raw conversation tool content when projection is disabled', t => {
+	const {conversationMessage, historyMessage} = projectToolResultForPersistence(
+		{
+			tool_call_id: 'tool-1',
+			role: 'tool',
+			content: 'raw tool result',
+			historyContent: 'summarized tool result',
+			previewContent: '{"summary":"ui preview"}',
+		},
+		'success',
+		{projectConversationMessage: false},
+	);
+
+	t.is(conversationMessage.content, 'raw tool result');
+	t.is(conversationMessage.historyContent, 'summarized tool result');
+	t.is(conversationMessage.previewContent, '{"summary":"ui preview"}');
+	t.is(historyMessage.content, 'raw tool result');
+});
+
 test('resolveToolResultMessageStatus marks executor errors as error messages', t => {
 	t.is(
 		resolveToolResultMessageStatus({content: 'Error: Tool execution aborted by user'}),

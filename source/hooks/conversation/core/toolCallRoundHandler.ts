@@ -30,6 +30,8 @@ import {
 	projectToolResultForPersistence,
 	resolveToolResultMessageStatus,
 } from './toolRoundPersistenceHelper.js';
+import {getOpenAiConfig} from '../../../utils/config/apiConfig.js';
+import {shouldProjectToolContext} from '../../../utils/session/toolMessageProjection.js';
 
 export {
 	applyBridgeToolStatusUpdate,
@@ -70,6 +72,9 @@ export async function handleToolCallRound(ctx: {
 	streamingEnabled: boolean;
 	options: ConversationHandlerOptions;
 }): Promise<ToolCallRoundResult> {
+	const shouldProjectConversationToolResults = shouldProjectToolContext(
+		getOpenAiConfig(),
+	);
 	const {
 		streamResult,
 		conversationMessages,
@@ -239,7 +244,9 @@ export async function handleToolCallRound(ctx: {
 		for (const result of toolResults) {
 			const {hookFailed, ...resultWithoutFlag} = result;
 			const {conversationMessage, historyMessage} =
-				projectToolResultForPersistence(resultWithoutFlag);
+				projectToolResultForPersistence(resultWithoutFlag, undefined, {
+					projectConversationMessage: shouldProjectConversationToolResults,
+				});
 			conversationMessages.push(conversationMessage);
 			saveMessage(historyMessage).catch(error => {
 				console.error('Failed to save tool result:', error);
@@ -292,6 +299,9 @@ export async function handleToolCallRound(ctx: {
 			projectToolResultForPersistence(
 				result,
 				messageStatus,
+				{
+					projectConversationMessage: shouldProjectConversationToolResults,
+				},
 			);
 		conversationMessages.push(conversationMessage);
 		try {

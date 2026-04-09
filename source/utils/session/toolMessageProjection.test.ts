@@ -3,6 +3,7 @@ import test from 'ava';
 import {
 	projectToolMessageForContext,
 	projectToolMessagesForContext,
+	shouldProjectToolContext,
 } from './toolMessageProjection.js';
 
 test('projectToolMessageForContext truncates oversized tool content', t => {
@@ -47,4 +48,19 @@ test('projectToolMessagesForContext still collapses duplicated repeats for the s
 	]);
 
 	t.is(projected[1]?.content, '[duplicate tool context omitted ×2]');
+});
+
+test('shouldProjectToolContext disables projection for vcp local mode only', t => {
+	t.false(
+		shouldProjectToolContext({backendMode: 'vcp', toolTransport: 'local'}),
+	);
+	t.true(
+		shouldProjectToolContext({backendMode: 'vcp', toolTransport: 'bridge'}),
+	);
+	t.true(
+		shouldProjectToolContext({backendMode: 'vcp', toolTransport: 'hybrid'}),
+	);
+	t.true(
+		shouldProjectToolContext({backendMode: 'native', toolTransport: 'local'}),
+	);
 });

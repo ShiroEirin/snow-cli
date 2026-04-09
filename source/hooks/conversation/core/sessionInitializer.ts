@@ -1,9 +1,13 @@
 import type {ChatMessage} from '../../../api/chat.js';
 import {sessionManager} from '../../../utils/session/sessionManager.js';
+import {getOpenAiConfig} from '../../../utils/config/apiConfig.js';
 import {getTodoService} from '../../../utils/execution/mcpToolsManager.js';
 import {formatTodoContext} from '../../../utils/core/todoPreprocessor.js';
 import {getSystemPromptForMode} from '../../../prompt/systemPrompt.js';
-import {projectToolMessagesForContext} from '../../../utils/session/toolMessageProjection.js';
+import {
+	projectToolMessagesForContext,
+	shouldProjectToolContext,
+} from '../../../utils/session/toolMessageProjection.js';
 
 /**
  * Initialize conversation session and TODO context
@@ -55,10 +59,15 @@ export async function initializeConversationSession(
 	// Filter out internal sub-agent messages (marked with subAgentInternal: true)
 	const session = sessionManager.getCurrentSession();
 	if (session && session.messages.length > 0) {
+		const apiConfig = getOpenAiConfig();
 		const filteredMessages = session.messages.filter(
 			msg => !msg.subAgentInternal,
 		);
-		conversationMessages.push(...projectToolMessagesForContext(filteredMessages));
+		conversationMessages.push(
+			...(shouldProjectToolContext(apiConfig)
+				? projectToolMessagesForContext(filteredMessages)
+				: filteredMessages),
+		);
 	}
 
 	return {conversationMessages, currentSession, existingTodoList};
