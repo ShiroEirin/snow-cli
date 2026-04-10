@@ -83,6 +83,10 @@ export type TranslationKeys = {
 		embeddingApiKey: string;
 		embeddingApiKeyOptional: string;
 		embeddingDimensions: string;
+		embeddingSettingsGroup: string;
+		embeddingSettingsExpandHint: string;
+		batchSettingsGroup: string;
+		batchSettingsExpandHint: string;
 		batchMaxLines: string;
 		batchConcurrency: string;
 		notSet: string;
@@ -104,6 +108,19 @@ export type TranslationKeys = {
 		chunkingMinLinesPerChunk: string;
 		chunkingMinCharsPerChunk: string;
 		chunkingOverlapLines: string;
+		rerankingToggle: string;
+		rerankingSettingsGroup: string;
+		rerankingSettingsExpandHint: string;
+		rerankingModelName: string;
+		rerankingBaseUrl: string;
+		rerankingApiKey: string;
+		rerankingContextLength: string;
+		rerankingTopN: string;
+		rerankingNotConfigured: string;
+		validationRerankingModelNameRequired: string;
+		validationRerankingBaseUrlRequired: string;
+		validationRerankingContextLengthPositive: string;
+		validationRerankingTopNPositive: string;
 		saveError: string;
 		gitignoreNotFound: string;
 		enterValue: string;
@@ -387,6 +404,16 @@ export type TranslationKeys = {
 		enabled: string;
 		disabled: string;
 		customLabel: string;
+		// Scope
+		scopeProject: string;
+		scopeGlobal: string;
+		scopeSelectTitle: string;
+		scopeSelectHint: string;
+		duplicatePattern: string;
+		resetScopeSelectTitle: string;
+		resetGlobalDesc: string;
+		resetProjectDesc: string;
+		confirmResetScopeMessage: string;
 		// Add view
 		addTitle: string;
 		patternLabel: string;
@@ -738,6 +765,8 @@ export type TranslationKeys = {
 		saveFailed: string;
 		modelSaveFailed: string;
 		tipLabel: string;
+		modelCount: string;
+		scrollHint: string;
 	};
 
 	// Hooks
@@ -1566,6 +1595,12 @@ export type TranslationKeys = {
 		actionClose: string;
 		errorPrefix: string;
 		scrollHint: string;
+	};
+	exitScreen: {
+		title: string;
+		goodbye: string;
+		thankYou: string;
+		version: string;
 	};
 };
 

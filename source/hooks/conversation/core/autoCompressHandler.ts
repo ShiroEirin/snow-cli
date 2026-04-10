@@ -70,7 +70,7 @@ export async function handleAutoCompression(
 		const session = sessionManager.getCurrentSession();
 
 		// Set up status callback for UI display
-		const onStatusUpdate = (status: CompressionStatus) => {
+		const onStatusUpdate = (status: CompressionStatus | null) => {
 			options.onCompressionStatus?.(status);
 		};
 
@@ -79,8 +79,11 @@ export async function handleAutoCompression(
 			onStatusUpdate,
 		);
 
-		// Clear status after completion
-		options.onCompressionStatus?.(null);
+		// Only clear status on success/hookFailed;
+		// failed status will auto-dismiss after 5s (handled by performAutoCompression)
+		if (compressionResult) {
+			options.onCompressionStatus?.(null);
+		}
 
 		// Check if beforeCompress hook failed
 		if (compressionResult && (compressionResult as any).hookFailed) {
@@ -129,6 +132,9 @@ export async function handleAutoCompression(
 			step: 'failed',
 			message: error instanceof Error ? error.message : 'Unknown error',
 		});
+		setTimeout(() => {
+			options.onCompressionStatus?.(null);
+		}, 5000);
 	} finally {
 		compressionCoordinator.releaseLock('main');
 	}

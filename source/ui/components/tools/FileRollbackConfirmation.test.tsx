@@ -3,6 +3,7 @@ import React from 'react';
 import {cleanup, render} from 'ink-testing-library';
 
 import {I18nProvider} from '../../../i18n/I18nContext.js';
+import {ThemeProvider} from '../../contexts/ThemeContext.js';
 import FileRollbackConfirmation, {
 	resolveCompactRollbackSelection,
 } from './FileRollbackConfirmation.js';
@@ -16,13 +17,15 @@ function renderConfirmation(
 ) {
 	const instance = render(
 		<I18nProvider defaultLanguage="en">
-			<FileRollbackConfirmation
-				fileCount={1}
-				filePaths={['src/example.ts']}
-				terminalWidth={80}
-				onConfirm={() => {}}
-				{...props}
-			/>
+			<ThemeProvider>
+				<FileRollbackConfirmation
+					fileCount={1}
+					filePaths={['src/example.ts']}
+					terminalWidth={80}
+					onConfirm={() => {}}
+					{...props}
+				/>
+			</ThemeProvider>
 		</I18nProvider>,
 	);
 

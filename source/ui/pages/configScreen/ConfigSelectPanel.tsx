@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useState} from 'react';
 import {Box, Text} from 'ink';
 import {Alert} from '@inkjs/ui';
 import ScrollableSelectInput from '../../components/common/ScrollableSelectInput.js';
@@ -51,7 +51,6 @@ export default function ConfigSelectPanel({state}: Props) {
 		toolTransport,
 		setToolTransport,
 		requestMethodOptions,
-		searchTerm,
 		thinkingMode,
 		setThinkingMode,
 		thinkingEffort,
@@ -62,12 +61,9 @@ export default function ConfigSelectPanel({state}: Props) {
 		setResponsesVerbosity,
 		anthropicSpeed,
 		setAnthropicSpeed,
-		getCurrentOptions,
-		getCurrentValue,
 		getCustomHeadersSchemeSelectItems,
 		getCustomHeadersSchemeSelectedValue,
 		applyCustomHeadersSchemeSelectValue,
-		handleModelChange,
 	} = state;
 
 	const getFieldLabel = () => {
@@ -236,28 +232,7 @@ export default function ConfigSelectPanel({state}: Props) {
 					})()}
 				{(currentField === 'advancedModel' ||
 					currentField === 'basicModel') && (
-					<Box flexDirection="column">
-						{searchTerm && (
-							<Text color={theme.colors.menuInfo}>
-								{t.configScreen.modelFilterLabel.replace('{term}', searchTerm)}
-							</Text>
-						)}
-						<ScrollableSelectInput
-							items={getCurrentOptions()}
-							limit={10}
-							disableNumberShortcuts={true}
-							initialIndex={Math.max(
-								0,
-								getCurrentOptions().findIndex(
-									opt => opt.value === getCurrentValue(),
-								),
-							)}
-							isFocused={true}
-							onSelect={item => {
-								handleModelChange(item.value);
-							}}
-						/>
-					</Box>
+					<ModelSelect state={state} />
 				)}
 				{currentField === 'thinkingMode' && (
 					<ScrollableSelectInput
@@ -551,6 +526,66 @@ function SystemPromptSelect({state}: Props) {
 					{t.configScreen.systemPromptMultiSelectHint}
 				</Text>
 			</Box>
+		</Box>
+	);
+}
+
+function ModelSelect({state}: Props) {
+	const {
+		t,
+		theme,
+		searchTerm,
+		getCurrentOptions,
+		getCurrentValue,
+		handleModelChange,
+	} = state;
+
+	const [highlightedIndex, setHighlightedIndex] = useState(0);
+	const options = getCurrentOptions();
+	const modelCount = options.length - 1;
+
+	return (
+		<Box flexDirection="column">
+			<Box>
+				{searchTerm && (
+					<Text color={theme.colors.menuInfo}>
+						{t.modelsPanel.filterLabel} {searchTerm}
+						{'  '}
+					</Text>
+				)}
+				<Text color={theme.colors.warning} bold>
+					{t.modelsPanel.modelCount.replace(
+						'{count}',
+						modelCount.toString(),
+					)}
+					{options.length > 10 &&
+						` (${highlightedIndex + 1}/${options.length})`}
+				</Text>
+			</Box>
+			<ScrollableSelectInput
+				items={options}
+				limit={10}
+				disableNumberShortcuts={true}
+				initialIndex={Math.max(
+					0,
+					options.findIndex(opt => opt.value === getCurrentValue()),
+				)}
+				isFocused={true}
+				onSelect={item => {
+					handleModelChange(item.value);
+				}}
+				onHighlight={item => {
+					const idx = options.findIndex(o => o.value === item.value);
+					if (idx >= 0) setHighlightedIndex(idx);
+				}}
+			/>
+			{options.length > 10 && (
+				<Box>
+					<Text dimColor color={theme.colors.menuSecondary}>
+						{t.modelsPanel.scrollHint}
+					</Text>
+				</Box>
+			)}
 		</Box>
 	);
 }

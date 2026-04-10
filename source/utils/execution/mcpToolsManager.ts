@@ -1417,6 +1417,7 @@ export async function executeMCPTool(
 						args.filePath,
 						args.content,
 						args.createDirectories,
+						args.overwrite,
 					);
 					break;
 				case 'edit':

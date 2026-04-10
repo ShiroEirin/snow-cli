@@ -355,25 +355,6 @@ const ChatFooter = React.memo(function ChatFooter(props: ChatFooterProps) {
 						toolPlaneRuntimeState={props.toolPlaneRuntimeState}
 					/>
 
-					{props.isCompressing && (
-						<Box marginTop={1}>
-							<Text color="cyan">
-								<Spinner type="dots" /> {t.chatScreen.compressionInProgress}
-							</Text>
-						</Box>
-					)}
-
-					{props.compressionError && (
-						<Box marginTop={1}>
-							<Text color="red">
-								{t.chatScreen.compressionFailed.replace(
-									'{error}',
-									props.compressionError,
-								)}
-							</Text>
-						</Box>
-					)}
-
 					{props.showBackgroundPanel && (
 						<BackgroundProcessPanel
 							processes={props.backgroundProcesses}

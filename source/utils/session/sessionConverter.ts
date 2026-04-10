@@ -521,6 +521,17 @@ export function convertSessionMessagesToUI(
 				  }
 				| undefined;
 
+			if (
+				toolName === 'filesystem-edit' &&
+				!isError &&
+				(msg as any).editDiffData &&
+				(typeof (msg as any).editDiffData.oldContent === 'string' ||
+					Array.isArray((msg as any).editDiffData.batchResults))
+			) {
+				editDiffData = (msg as any).editDiffData;
+				toolArgs = {...toolArgs, ...(msg as any).editDiffData};
+			}
+
 			// Extract edit diff data
 			if (toolName === 'filesystem-edit' && !isError) {
 				try {

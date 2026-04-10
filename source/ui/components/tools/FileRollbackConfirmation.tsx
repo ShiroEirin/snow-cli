@@ -1,6 +1,7 @@
 import React, {useState, useEffect} from 'react';
 import {Box, Text, useInput} from 'ink';
 import {useI18n} from '../../../i18n/I18nContext.js';
+import {useTheme} from '../../contexts/ThemeContext.js';
 import {vscodeConnection} from '../../../utils/ui/vscodeConnection.js';
 import {hashBasedSnapshotManager} from '../../../utils/codebase/hashBasedSnapshot.js';
 
@@ -49,6 +50,8 @@ export default function FileRollbackConfirmation({
 	onConfirm,
 }: Props) {
 	const {t} = useI18n();
+	const {theme} = useTheme();
+	const colors = theme.colors;
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const [showFullList, setShowFullList] = useState(false);
 	const [fileScrollIndex, setFileScrollIndex] = useState(0);
@@ -131,11 +134,9 @@ export default function FileRollbackConfirmation({
 		{label: t.fileRollback.filesOnly, value: 'files'},
 	];
 
-	const hasFiles = fileCount > 0;
-
 	useInput((input, key) => {
 		// Tab - toggle full file list view
-		if (key.tab && hasFiles) {
+		if (key.tab) {
 			// Leaving file list mode should close the diff
 			if (showFullList) {
 				closePreviewDiff();
@@ -221,13 +222,16 @@ export default function FileRollbackConfirmation({
 			// Enter - confirm selection (only when not in full list mode)
 			if (key.return) {
 				const mode = options[selectedIndex]?.value ?? 'conversation';
-				const [confirmedMode, confirmedFiles] = resolveCompactRollbackSelection(
-					hasFiles,
-					mode,
-					Array.from(selectedFiles),
-					filePaths.length,
-				);
-				onConfirm(confirmedMode, confirmedFiles);
+				if (mode === 'both' || mode === 'files') {
+					const selectedFilesArray = Array.from(selectedFiles);
+					if (selectedFilesArray.length === filePaths.length) {
+						onConfirm(mode);
+					} else {
+						onConfirm(mode, selectedFilesArray);
+					}
+				} else {
+					onConfirm('conversation');
+				}
 				return;
 			}
 		}
@@ -261,159 +265,178 @@ export default function FileRollbackConfirmation({
 		showFullList && fileScrollIndex + maxFilesToShowFull < filePaths.length;
 
 	const selectedCount = selectedFiles.size;
-	const hasNotebookRollback = notebookCount !== undefined && notebookCount > 0;
-	const hasTeamRollback = teamCount !== undefined && teamCount > 0;
-	const shouldShowNotebookRollback = hasFiles && hasNotebookRollback;
-	const separatorWidth = Math.max(0, terminalWidth - 4);
+
+	// Check if there are any files to rollback
+	const hasFiles = fileCount > 0;
 
 	return (
-		<Box flexDirection="column" marginX={1} marginBottom={1} padding={1}>
+		<Box flexDirection="column" marginX={1} marginBottom={1}>
 			{/* Top border separator */}
 			<Box height={1}>
-				<Text color="gray" dimColor>
-					{'─'.repeat(separatorWidth)}
+				<Text color={colors.menuSecondary} dimColor>
+					{'─'.repeat(terminalWidth - 2)}
 				</Text>
 			</Box>
-			<Box marginBottom={1}>
-				<Text color="yellow" bold>
-					⚠ {t.fileRollback.title}
-				</Text>
-			</Box>
-
-			{/* No files mode - simple confirmation */}
-			{!hasFiles && (
-				<>
-					<Box marginBottom={1}>
-						<Text color="white">{t.fileRollback.noFilesConfirm}</Text>
-					</Box>
-				</>
-			)}
-
-			{/* Notebook rollback info */}
-			{shouldShowNotebookRollback && (
-				<Box marginBottom={1} marginLeft={2}>
-					<Text color="magenta">
-						{t.fileRollback.notebookCount.replace(
-							'{count}',
-							String(notebookCount),
-						)}
+			<Box flexDirection="column" paddingX={1}>
+				<Box marginBottom={1}>
+					<Text color="yellow" bold>
+						⚠ {t.fileRollback.title}
 					</Text>
 				</Box>
-			)}
 
-			{/* Team cleanup info */}
-			{hasTeamRollback && (
-				<Box marginBottom={1} marginLeft={2}>
-					<Text color="cyan">
-						⚑ {t.fileRollback.teamCount.replace('{count}', String(teamCount))}
-					</Text>
-				</Box>
-			)}
+				{/* No files mode - simple confirmation */}
+				{!hasFiles && (
+					<>
+						<Box marginBottom={1}>
+							<Text color="white">{t.fileRollback.noFilesConfirm}</Text>
+						</Box>
 
-			{/* Has files mode - full file rollback UI */}
-			{hasFiles && (
-				<>
-					<Box marginBottom={1}>
-						<Text color="white">
-							{showFullList
-								? t.fileRollback.filesCountWithSelection
-										.replace('{count}', String(fileCount))
-										.replace('{selected}', String(selectedCount))
-										.replace('{total}', String(fileCount))
-								: t.fileRollback.filesCount.replace(
+						{teamCount !== undefined && teamCount > 0 && (
+							<Box marginBottom={1} marginLeft={2}>
+								<Text color="cyan">
+									⚠{' '}
+									{t.fileRollback.teamCount.replace(
 										'{count}',
-										String(fileCount),
-								  )}
-							:
-						</Text>
-					</Box>
-
-					{/* File list */}
-					<Box flexDirection="column" marginBottom={1} marginLeft={2}>
-						{hasMoreAbove && (
-							<Text color="gray" dimColor>
-								{fileScrollIndex} {t.fileRollback.moreAbove}
-							</Text>
-						)}
-						{displayFiles.map((file, index) => {
-							const actualIndex = showFullList
-								? fileScrollIndex + index
-								: index;
-							const isSelected = selectedFiles.has(file);
-							const isHighlighted =
-								showFullList && actualIndex === highlightedFileIndex;
-
-							return (
-								<Box key={index}>
-									<Text
-										color={
-											isHighlighted ? 'green' : isSelected ? 'cyan' : 'gray'
-										}
-										dimColor={!isHighlighted && !isSelected}
-										bold={isHighlighted}
-									>
-										{showFullList ? (isSelected ? '[x] ' : '[ ] ') : '• '}
-										{file}
-									</Text>
-								</Box>
-							);
-						})}
-						{hasMoreBelow && (
-							<Text color="gray" dimColor>
-								{filePaths.length - (fileScrollIndex + maxFilesToShowFull)}{' '}
-								{t.fileRollback.moreBelow}
-							</Text>
-						)}
-						{!showFullList && remainingCountCompact > 0 && (
-							<Text color="gray" dimColor>
-								... {t.fileRollback.andMoreFiles} {remainingCountCompact} more
-								file
-								{remainingCountCompact > 1 ? 's' : ''}
-							</Text>
-						)}
-					</Box>
-
-					{!showFullList && (
-						<>
-							<Box marginBottom={1}>
-								<Text color="gray" dimColor>
-									{t.fileRollback.question}
+										String(teamCount),
+									)}
 								</Text>
 							</Box>
+						)}
 
-							<Box flexDirection="column" marginBottom={1}>
-								{options.map((option, index) => (
+						<Box marginTop={1}>
+							<Text color="gray" dimColor>
+								{t.fileRollback.noFilesConfirmHint}
+							</Text>
+						</Box>
+					</>
+				)}
+
+				{/* Has files mode - full file rollback UI */}
+				{hasFiles && (
+					<>
+						<Box marginBottom={1}>
+							<Text color="white">
+								{showFullList
+									? t.fileRollback.filesCountWithSelection
+											.replace('{count}', String(fileCount))
+											.replace('{selected}', String(selectedCount))
+											.replace('{total}', String(fileCount))
+									: t.fileRollback.filesCount.replace(
+											'{count}',
+											String(fileCount),
+									  )}
+								:
+							</Text>
+						</Box>
+
+						{/* File list */}
+						<Box flexDirection="column" marginBottom={1} marginLeft={2}>
+							{hasMoreAbove && (
+								<Text color="gray" dimColor>
+									{fileScrollIndex} {t.fileRollback.moreAbove}
+								</Text>
+							)}
+							{displayFiles.map((file, index) => {
+								const actualIndex = showFullList
+									? fileScrollIndex + index
+									: index;
+								const isSelected = selectedFiles.has(file);
+								const isHighlighted =
+									showFullList && actualIndex === highlightedFileIndex;
+
+								return (
 									<Box key={index}>
 										<Text
-											color={index === selectedIndex ? 'green' : 'white'}
-											bold={index === selectedIndex}
+											color={
+												isHighlighted
+													? 'green'
+													: isSelected
+														? 'cyan'
+														: 'gray'
+											}
+											dimColor={!isHighlighted && !isSelected}
+											bold={isHighlighted}
 										>
-											{index === selectedIndex ? '❯  ' : '  '}
-											{option.label}
+											{showFullList ? (isSelected ? '[x] ' : '[ ] ') : '• '}
+											{file}
 										</Text>
 									</Box>
-								))}
+								);
+							})}
+							{hasMoreBelow && (
+								<Text color="gray" dimColor>
+									{filePaths.length - (fileScrollIndex + maxFilesToShowFull)}{' '}
+									{t.fileRollback.moreBelow}
+								</Text>
+							)}
+							{!showFullList && remainingCountCompact > 0 && (
+								<Text color="gray" dimColor>
+									... {t.fileRollback.andMoreFiles} {remainingCountCompact} more
+									file
+									{remainingCountCompact > 1 ? 's' : ''}
+								</Text>
+							)}
+						</Box>
+
+						{/* Notebook rollback info */}
+						{notebookCount !== undefined && notebookCount > 0 && (
+							<Box marginBottom={1} marginLeft={2}>
+								<Text color="magenta">
+									{t.fileRollback.notebookCount.replace(
+										'{count}',
+										String(notebookCount),
+									)}
+								</Text>
 							</Box>
-						</>
-					)}
+						)}
 
-					<Box>
-						<Text color="gray" dimColor>
-							{showFullList
-								? `${t.fileRollback.navigateHint} · ${t.fileRollback.toggleHint} · ${t.fileRollback.confirmHint} · ${t.fileRollback.backHint}`
-								: `${t.fileRollback.selectHint} · ${t.fileRollback.viewAllHint} · ${t.fileRollback.confirmHint} · ${t.fileRollback.cancelHint}`}
-						</Text>
-					</Box>
-				</>
-			)}
+						{/* Team cleanup info */}
+						{teamCount !== undefined && teamCount > 0 && (
+							<Box marginBottom={1} marginLeft={2}>
+								<Text color="cyan">
+									⚑{' '}
+									{t.fileRollback.teamCount.replace(
+										'{count}',
+										String(teamCount),
+									)}
+								</Text>
+							</Box>
+						)}
 
-			{!hasFiles && (
-				<Box marginTop={1}>
-					<Text color="gray" dimColor>
-						{t.fileRollback.noFilesConfirmHint}
-					</Text>
-				</Box>
-			)}
+						{!showFullList && (
+							<>
+								<Box marginBottom={1}>
+									<Text color="gray" dimColor>
+										{t.fileRollback.question}
+									</Text>
+								</Box>
+
+								<Box flexDirection="column" marginBottom={1}>
+									{options.map((option, index) => (
+										<Box key={index}>
+											<Text
+												color={index === selectedIndex ? 'green' : 'white'}
+												bold={index === selectedIndex}
+											>
+												{index === selectedIndex ? '❯  ' : '  '}
+												{option.label}
+											</Text>
+										</Box>
+									))}
+								</Box>
+							</>
+						)}
+
+						<Box>
+							<Text color="gray" dimColor>
+								{showFullList
+									? `${t.fileRollback.navigateHint} · ${t.fileRollback.toggleHint} · ${t.fileRollback.confirmHint} · ${t.fileRollback.backHint}`
+									: `${t.fileRollback.selectHint} · ${t.fileRollback.viewAllHint} · ${t.fileRollback.confirmHint} · ${t.fileRollback.cancelHint}`}
+							</Text>
+						</Box>
+					</>
+				)}
+			</Box>
 		</Box>
 	);
 }
