@@ -32,6 +32,80 @@ const EMPTY_LOCAL_TOOL_PLANE: LocalToolPlane = {
 type PreparedToolPlaneConfig = SnowBridgeApiConfig &
 	Pick<VcpApiConfig, 'bridgeToolProfile'>;
 
+function resolvePreparedToolPlaneLoadFlags(
+	config: PreparedToolPlaneConfig,
+): {
+	transport: ReturnType<typeof resolveToolTransport>;
+	shouldLoadBridge: boolean;
+	shouldLoadLocal: boolean;
+} {
+	const transport = resolveToolTransport(config);
+	return {
+		transport,
+		shouldLoadBridge: transport === 'bridge' || transport === 'hybrid',
+		shouldLoadLocal: transport === 'local' || transport === 'hybrid',
+	};
+}
+
+function loadLocalToolPlane(
+	shouldLoadLocal: boolean,
+): Promise<LocalToolPlane> {
+	if (!shouldLoadLocal) {
+		return Promise.resolve(EMPTY_LOCAL_TOOL_PLANE);
+	}
+
+	return Promise.all([collectAllMCPTools(), getMCPServicesInfo()]).then(
+		([localTools, localServicesInfo]): LocalToolPlane => ({
+			localTools,
+			localServicesInfo,
+		}),
+	);
+}
+
+function loadBridgeSnapshot(options: {
+	config: PreparedToolPlaneConfig;
+	sessionKey?: string;
+	transport: ReturnType<typeof resolveToolTransport>;
+	shouldLoadBridge: boolean;
+	localToolPlanePromise: Promise<LocalToolPlane>;
+}): Promise<SessionBridgeToolSnapshot | undefined> {
+	if (!options.shouldLoadBridge) {
+		return Promise.resolve(undefined);
+	}
+
+	return options.localToolPlanePromise
+		.then(localToolPlane =>
+			snowBridgeClient.getManifest(options.config, {
+				toolFilters: buildBridgeManifestToolFilters({
+					config: options.config,
+					transport: options.transport,
+					localTools: localToolPlane.localTools,
+				}),
+			}),
+		)
+		.then(manifest =>
+			buildSessionBridgeToolSnapshot(options.sessionKey, manifest),
+		);
+}
+
+function handleBridgeSnapshotFailure(options: {
+	sessionKey?: string;
+	transport: ReturnType<typeof resolveToolTransport>;
+	bridgeError: unknown;
+}): never | void {
+	clearBridgeToolSnapshotSession(options.sessionKey);
+	clearToolExecutionBindingsSession(options.sessionKey);
+
+	if (options.transport === 'bridge') {
+		throw options.bridgeError;
+	}
+
+	logger.warn(
+		'[VCPTools] SnowBridge manifest load failed in hybrid mode, fallback to local tools only:',
+		options.bridgeError,
+	);
+}
+
 export async function loadPreparedToolPlaneSources(options: {
 	config: PreparedToolPlaneConfig;
 	sessionKey?: string;
@@ -41,44 +115,22 @@ export async function loadPreparedToolPlaneSources(options: {
 	bridgeSnapshot?: SessionBridgeToolSnapshot;
 	bridgeLoadFailed: boolean;
 }> {
-	const transport = resolveToolTransport(options.config);
-	const shouldLoadBridge = transport === 'bridge' || transport === 'hybrid';
-	const shouldLoadLocal = transport === 'local' || transport === 'hybrid';
+	const {transport, shouldLoadBridge, shouldLoadLocal} =
+		resolvePreparedToolPlaneLoadFlags(options.config);
 	let bridgeSnapshot: SessionBridgeToolSnapshot | undefined;
 
 	if (!shouldLoadBridge) {
 		clearBridgeToolSnapshotSession(options.sessionKey);
 	}
 
-	const localToolsPromise = shouldLoadLocal
-		? collectAllMCPTools()
-		: Promise.resolve<MCPTool[]>([]);
-	const localServicesInfoPromise = shouldLoadLocal
-		? getMCPServicesInfo()
-		: Promise.resolve<MCPServiceTools[]>([]);
-	const bridgeSnapshotPromise = shouldLoadBridge
-		? localToolsPromise
-				.then(localTools =>
-					snowBridgeClient.getManifest(options.config, {
-						toolFilters: buildBridgeManifestToolFilters({
-							config: options.config,
-							transport,
-							localTools,
-						}),
-					}),
-				)
-				.then(manifest =>
-					buildSessionBridgeToolSnapshot(options.sessionKey, manifest),
-				)
-		: Promise.resolve<SessionBridgeToolSnapshot | undefined>(undefined);
-	const localToolPlanePromise = shouldLoadLocal
-		? Promise.all([localToolsPromise, localServicesInfoPromise]).then(
-				([localTools, localServicesInfo]): LocalToolPlane => ({
-					localTools,
-					localServicesInfo,
-				}),
-		  )
-		: Promise.resolve(EMPTY_LOCAL_TOOL_PLANE);
+	const localToolPlanePromise = loadLocalToolPlane(shouldLoadLocal);
+	const bridgeSnapshotPromise = loadBridgeSnapshot({
+		config: options.config,
+		sessionKey: options.sessionKey,
+		transport,
+		shouldLoadBridge,
+		localToolPlanePromise,
+	});
 
 	const [bridgeResult, localResult] = await Promise.allSettled([
 		bridgeSnapshotPromise,
@@ -92,17 +144,11 @@ export async function loadPreparedToolPlaneSources(options: {
 	if (bridgeResult.status === 'fulfilled') {
 		bridgeSnapshot = bridgeResult.value;
 	} else if (shouldLoadBridge) {
-		clearBridgeToolSnapshotSession(options.sessionKey);
-		clearToolExecutionBindingsSession(options.sessionKey);
-
-		if (transport === 'bridge') {
-			throw bridgeResult.reason;
-		}
-
-		logger.warn(
-			'[VCPTools] SnowBridge manifest load failed in hybrid mode, fallback to local tools only:',
-			bridgeResult.reason,
-		);
+		handleBridgeSnapshotFailure({
+			sessionKey: options.sessionKey,
+			transport,
+			bridgeError: bridgeResult.reason,
+		});
 	}
 
 	return {
