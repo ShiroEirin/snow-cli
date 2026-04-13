@@ -5,7 +5,9 @@ const test = anyTest as any;
 import {
 	formatSubAgentUserQuestionResult,
 	isToolAllowedForSubAgent,
+	shouldScopeSubAgentExecutionBindings,
 	shouldUseSubAgentToolPlane,
+	summarizeSpawnedSubAgentResult,
 } from './subAgentExecutor.js';
 
 test('allow built-in tools by exact and prefix match', (t: any) => {
@@ -78,5 +80,50 @@ test('subagent tool plane stays enabled for bridge and hybrid modes', (t: any) =
 			backendMode: 'vcp',
 			toolTransport: 'hybrid',
 		}),
+	);
+});
+
+test('subagent execution bindings stay scoped for vcp local-tools mode', (t: any) => {
+	t.true(
+		shouldScopeSubAgentExecutionBindings({
+			backendMode: 'vcp',
+		}),
+	);
+	t.false(
+		shouldScopeSubAgentExecutionBindings({
+			backendMode: 'native',
+		}),
+	);
+});
+
+test('spawned sub-agent summaries stay raw for local-style context handoff', (t: any) => {
+	t.is(
+		summarizeSpawnedSubAgentResult(
+			{
+				success: true,
+				result: 'full child result',
+			},
+			{
+				maxLength: 4,
+				projectForContext: false,
+			},
+		),
+		'full child result',
+	);
+});
+
+test('spawned sub-agent summaries still clip projected contexts', (t: any) => {
+	t.is(
+		summarizeSpawnedSubAgentResult(
+			{
+				success: true,
+				result: 'abcdef',
+			},
+			{
+				maxLength: 4,
+				projectForContext: true,
+			},
+		),
+		'abcd...',
 	);
 });

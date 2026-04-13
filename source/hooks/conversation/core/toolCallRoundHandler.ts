@@ -2,6 +2,7 @@ import {
 	executeToolCalls,
 	type ToolCall,
 } from '../../../utils/execution/toolExecutor.js';
+import {summarizeSpawnedSubAgentResult} from '../../../utils/execution/subAgentExecutor.js';
 import {toolSearchService} from '../../../utils/execution/toolSearchService.js';
 import type {Message} from '../../../ui/components/chat/MessageList.js';
 import {extractThinkingContent} from '../utils/thinkingExtractor.js';
@@ -377,11 +378,10 @@ export async function handleToolCallRound(ctx: {
 		if (spawnedResults.length > 0) {
 			for (const spawnedResult of spawnedResults) {
 				const statusIcon = spawnedResult.success ? '✓' : '✗';
-				const resultSummary = spawnedResult.success
-					? spawnedResult.result.length > 500
-						? spawnedResult.result.substring(0, 500) + '...'
-						: spawnedResult.result
-					: spawnedResult.error || 'Unknown error';
+				const resultSummary = summarizeSpawnedSubAgentResult(spawnedResult, {
+					maxLength: 500,
+					projectForContext: shouldProjectConversationToolResults,
+				});
 				const spawnedContent = `[Spawned Sub-Agent Result] ${statusIcon} ${spawnedResult.agentName} (${spawnedResult.agentId}) — spawned by ${spawnedResult.spawnedBy.agentName}\nPrompt: ${spawnedResult.prompt}\nResult: ${resultSummary}`;
 
 				conversationMessages.push({role: 'user', content: spawnedContent});

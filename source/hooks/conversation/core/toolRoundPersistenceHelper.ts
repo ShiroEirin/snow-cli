@@ -1,7 +1,13 @@
+import type {
+	BackendMode,
+	ToolTransport,
+} from '../../../utils/config/apiConfig.js';
+import {getOpenAiConfig} from '../../../utils/config/apiConfig.js';
 import type {ToolResult} from '../../../utils/execution/toolExecutor.js';
 import {
 	buildConversationToolMessage,
 	buildHistoryToolMessage,
+	shouldProjectToolContext,
 } from '../../../utils/session/toolMessageProjection.js';
 
 export type ToolResultMessageStatus = 'pending' | 'success' | 'error';
@@ -42,10 +48,15 @@ export function projectToolResultForPersistence<
 	messageStatus?: ToolResultMessageStatus,
 	options?: {
 		projectConversationMessage?: boolean;
+		config?: {
+			backendMode?: BackendMode;
+			toolTransport?: ToolTransport;
+		};
 	},
 ) {
 	const projectConversationMessage =
-		options?.projectConversationMessage !== false;
+		options?.projectConversationMessage ??
+		shouldProjectToolContext(options?.config || getOpenAiConfig());
 	return {
 		conversationMessage: projectConversationMessage
 			? buildConversationToolMessage(result, messageStatus)

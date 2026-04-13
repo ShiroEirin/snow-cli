@@ -10,6 +10,7 @@ import {
 	filterToolExecutionBindings,
 	rotateToolExecutionBindingsSession,
 } from '../session/vcpCompatibility/toolExecutionBinding.js';
+import {shouldProjectToolContext} from '../session/toolMessageProjection.js';
 import {
 	createApiStream,
 	processStreamEvents,
@@ -100,6 +101,12 @@ export function shouldUseSubAgentToolPlane(config: {
 	return config.backendMode === 'vcp' && config.toolTransport !== 'local';
 }
 
+export function shouldScopeSubAgentExecutionBindings(config: {
+	backendMode?: string;
+}): boolean {
+	return config.backendMode === 'vcp';
+}
+
 /**
  * 执行子智能体作为工具
  */
@@ -119,7 +126,8 @@ export async function executeSubAgent(
 	const toolPlaneSessionKey =
 		instanceId || `subagent-${agentId}-${Date.now()}`;
 	const rootConfig = getOpenAiConfig();
-	const useDedicatedToolPlane = shouldUseSubAgentToolPlane(rootConfig);
+	const shouldScopeExecutionBindings =
+		shouldScopeSubAgentExecutionBindings(rootConfig);
 	let shouldCleanupToolPlane = false;
 
 	try {
@@ -129,7 +137,8 @@ export async function executeSubAgent(
 			return {success: false, result: '', error: resolveError};
 		}
 
-		// 2. Filter tools. Only bridge / hybrid sub-agents need a dedicated tool plane.
+		// 2. Filter tools. Only bridge / hybrid sub-agents need a dedicated tool plane,
+		// but all VCP sub-agents should execute through a filtered binding scope.
 		const preparedToolPlane = await prepareToolPlane({
 			config: rootConfig,
 			sessionKey: toolPlaneSessionKey,
@@ -141,16 +150,18 @@ export async function executeSubAgent(
 			preparedToolPlane.tools,
 		);
 		let subAgentToolPlaneKey: string | undefined;
-		if (useDedicatedToolPlane) {
+		if (shouldScopeExecutionBindings) {
 			const allowedExecutionBindings = filterToolExecutionBindings(
 				allowedTools.map(tool => tool.function.name),
 				preparedToolPlane.toolPlaneKey,
 			);
-			subAgentToolPlaneKey = rotateToolExecutionBindingsSession({
-				sessionKey: toolPlaneSessionKey,
-				nextToolPlaneKey: `${preparedToolPlane.toolPlaneKey}:allowed`,
-				bindings: allowedExecutionBindings,
-			});
+			if (allowedExecutionBindings.length > 0) {
+				subAgentToolPlaneKey = rotateToolExecutionBindingsSession({
+					sessionKey: toolPlaneSessionKey,
+					nextToolPlaneKey: `${preparedToolPlane.toolPlaneKey}:allowed`,
+					bindings: allowedExecutionBindings,
+				});
+			}
 		}
 
 		if (allowedTools.length === 0) {
@@ -385,6 +396,27 @@ async function resolveConfig(
 	return {config, model: config.advancedModel || 'gpt-5'};
 }
 
+export function summarizeSpawnedSubAgentResult(
+	result: Pick<SubAgentResult, 'success' | 'result' | 'error'>,
+	options?: {
+		maxLength?: number;
+		projectForContext?: boolean;
+	},
+): string {
+	if (!result.success) {
+		return result.error || 'Unknown error';
+	}
+
+	if (options?.projectForContext === false) {
+		return result.result;
+	}
+
+	const maxLength = options?.maxLength ?? 800;
+	return result.result.length > maxLength
+		? result.result.substring(0, maxLength) + '...'
+		: result.result;
+}
+
 // ── Helper: wait for spawned child agents ──
 
 async function handleSpawnedChildren(
@@ -410,14 +442,14 @@ async function handleSpawnedChildren(
 
 	const spawnedResults = runningSubAgentTracker.drainSpawnedResults();
 	if (spawnedResults.length === 0) return false;
+	const shouldProjectSpawnedResults = shouldProjectToolContext(getOpenAiConfig());
 
 	for (const sr of spawnedResults) {
 		const statusIcon = sr.success ? '\u2713' : '\u2717';
-		const resultSummary = sr.success
-			? sr.result.length > 800
-				? sr.result.substring(0, 800) + '...'
-				: sr.result
-			: sr.error || 'Unknown error';
+		const resultSummary = summarizeSpawnedSubAgentResult(sr, {
+			maxLength: 800,
+			projectForContext: shouldProjectSpawnedResults,
+		});
 
 		ctx.messages.push({
 			role: 'user',
