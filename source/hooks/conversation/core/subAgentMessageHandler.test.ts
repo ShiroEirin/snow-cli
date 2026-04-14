@@ -23,7 +23,6 @@ test('sub-agent streaming suppresses VCP protocol shells while preserving flush 
 	const persistedMessages: any[] = [];
 	const handler = new SubAgentUIHandler(
 		createEncoder(),
-		() => undefined,
 		async message => {
 			persistedMessages.push(message);
 		},

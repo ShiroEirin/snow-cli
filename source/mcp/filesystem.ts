@@ -18,6 +18,10 @@ import type {
 	EditByHashlineResult,
 	EditByHashlineSingleResult,
 	EditByHashlineBatchResultItem,
+	EditBySearchConfig,
+	EditBySearchResult,
+	EditBySearchSingleResult,
+	EditBySearchBatchResultItem,
 	HashlineOperation,
 	SingleFileReadResult,
 	MultipleFilesReadResult,
@@ -25,13 +29,29 @@ import type {
 	ImageContent,
 } from './types/filesystem.types.js';
 import {IMAGE_MIME_TYPES, OFFICE_FILE_TYPES} from './types/filesystem.types.js';
+import {
+	tryUnescapeFix,
+	trimPairIfPossible,
+	isOverEscaped,
+} from '../utils/ui/escapeHandler.js';
 // Utility functions
-import {normalizeForDisplay} from './utils/filesystem/similarity.utils.js';
+import {
+	calculateSimilarity,
+	calculateSimilarityAsync,
+	normalizeForDisplay,
+} from './utils/filesystem/similarity.utils.js';
 import {
 	analyzeCodeStructure,
 	findSmartContextBoundaries,
 } from './utils/filesystem/code-analysis.utils.js';
-import {executeBatchOperation} from './utils/filesystem/batch-operations.utils.js';
+import {
+	findClosestMatches,
+	generateDiffMessage,
+} from './utils/filesystem/match-finder.utils.js';
+import {
+	parseEditBySearchParams,
+	executeBatchOperation,
+} from './utils/filesystem/batch-operations.utils.js';
 import {tryFixPath} from './utils/filesystem/path-fixer.utils.js';
 import {readOfficeDocument} from './utils/filesystem/office-parser.utils.js';
 // ACE Code Search utilities for symbol parsing
@@ -50,7 +70,6 @@ import {
 	formatLineWithHash,
 	formatLineWithHashDisplay,
 	validateAnchor,
-	parseAnchor,
 } from './utils/filesystem/hashline.utils.js';
 
 const {resolve, dirname, isAbsolute, extname} = path;
@@ -1091,6 +1110,635 @@ export class FilesystemMCPService {
 	}
 
 	/**
+	 * Fuzzy search-and-replace editing (exposed as MCP tool `filesystem-replaceedit`).
+	 * Copy search text from source files; strip `lineNum:hash→` prefixes if pasting from filesystem-read.
+	 */
+	async editFileBySearch(
+		filePath: string | string[] | EditBySearchConfig[],
+		searchContent?: string,
+		replaceContent?: string,
+		occurrence: number = 1,
+		contextLines: number = 8,
+	): Promise<EditBySearchResult> {
+		// Handle array of files
+		if (Array.isArray(filePath)) {
+			return await executeBatchOperation<
+				EditBySearchConfig,
+				EditBySearchSingleResult,
+				EditBySearchBatchResultItem
+			>(
+				filePath,
+				fileItem =>
+					parseEditBySearchParams(
+						fileItem,
+						searchContent,
+						replaceContent,
+						occurrence,
+					),
+				(path, search, replace, occ) =>
+					this.editFileBySearchSingle(path, search, replace, occ, contextLines),
+				(path, result) => {
+					return {path, ...result};
+				},
+			);
+		}
+
+		// Single file mode
+		if (
+			searchContent === undefined ||
+			searchContent === null ||
+			replaceContent === undefined ||
+			replaceContent === null
+		) {
+			throw new Error(
+				'searchContent and replaceContent are required for single file mode',
+			);
+		}
+
+		return await this.editFileBySearchSingle(
+			filePath,
+			searchContent,
+			replaceContent,
+			occurrence,
+			contextLines,
+		);
+	}
+
+	/**
+	 * Internal method: Edit a single file by search-replace
+	 * @private
+	 */
+	private async editFileBySearchSingle(
+		filePath: string,
+		searchContent: string,
+		replaceContent: string,
+		occurrence: number,
+		contextLines: number,
+	): Promise<EditBySearchSingleResult> {
+		try {
+			// Check if this is a remote SSH path
+			const isRemote = this.isSSHPath(filePath);
+			let content: string;
+			let fullPath: string;
+
+			if (isRemote) {
+				// Handle remote SSH file
+				content = await this.readRemoteFile(filePath);
+				fullPath = filePath;
+			} else {
+				fullPath = this.resolvePath(filePath);
+
+				// For absolute paths, skip validation to allow access outside base path
+				if (!isAbsolute(filePath)) {
+					await this.validatePath(fullPath);
+				}
+
+				// Read the entire file
+				content = await readFileWithEncoding(fullPath);
+			}
+
+			const lines = content.split('\n');
+
+			// Backup for rollback (file modification)
+			try {
+				const {getConversationContext} = await import(
+					'../utils/codebase/conversationContext.js'
+				);
+				const context = getConversationContext();
+				if (context) {
+					const {hashBasedSnapshotManager} = await import(
+						'../utils/codebase/hashBasedSnapshot.js'
+					);
+					await hashBasedSnapshotManager.backupFile(
+						context.sessionId,
+						context.messageIndex,
+						filePath,
+						this.basePath,
+						true, // File existed
+						content, // Original content
+					);
+				}
+			} catch (backupError) {
+				// Don't fail the operation if backup fails
+			}
+
+			// Normalize line endings
+			let normalizedSearch = searchContent
+				.replace(/\r\n/g, '\n')
+				.replace(/\r/g, '\n');
+			const normalizedContent = content
+				.replace(/\r\n/g, '\n')
+				.replace(/\r/g, '\n');
+
+			// Split into lines for matching
+			let searchLines = normalizedSearch.split('\n');
+			const contentLines = normalizedContent.split('\n');
+
+			// Find all matches using smart fuzzy matching (auto-handles whitespace)
+			const matches: Array<{
+				startLine: number;
+				endLine: number;
+				similarity: number;
+			}> = [];
+			// Fuzzy match threshold (fixed): stricter = higher value
+			const threshold = 0.75;
+
+			// Fast pre-filter: use first line as anchor to skip unlikely positions
+			// Only apply pre-filter for multi-line searches to avoid missing valid matches
+			const searchFirstLine =
+				searchLines[0]?.replace(/\s+/g, ' ').trim() || '';
+			const usePreFilter = searchLines.length >= 5; // Only pre-filter for 5+ line searches
+			const preFilterThreshold = 0.2;
+			const maxMatches = 10; // Limit matches to avoid excessive computation
+
+			// Async similarity calculations yield to event loop automatically
+			for (let i = 0; i <= contentLines.length - searchLines.length; i++) {
+				// Quick pre-filter: check first line similarity (only for multi-line searches)
+				// Keep this synchronous as it's very fast
+				if (usePreFilter) {
+					const firstLineCandidate =
+						contentLines[i]?.replace(/\s+/g, ' ').trim() || '';
+					const firstLineSimilarity = calculateSimilarity(
+						searchFirstLine,
+						firstLineCandidate,
+						preFilterThreshold,
+					);
+
+					// Skip only if first line is very different (< 20% match)
+					// This is safe because if first line differs this much, full match unlikely
+					if (firstLineSimilarity < preFilterThreshold) {
+						continue;
+					}
+				}
+
+				// Full candidate check - use async to prevent UI freeze
+				// The async similarity calculation yields to event loop, preventing UI freeze
+				const candidateLines = contentLines.slice(i, i + searchLines.length);
+				const candidateContent = candidateLines.join('\n');
+				const similarity = await calculateSimilarityAsync(
+					normalizedSearch,
+					candidateContent,
+					threshold, // Pass threshold for early exit consideration
+				);
+
+				// Accept matches above threshold
+				if (similarity >= threshold) {
+					matches.push({
+						startLine: i + 1,
+						endLine: i + searchLines.length,
+						similarity,
+					});
+
+					// Early exit if we found a nearly perfect match
+					if (similarity >= 0.95) {
+						break;
+					}
+
+					// Limit matches to avoid excessive computation
+					if (matches.length >= maxMatches) {
+						break;
+					}
+				}
+			}
+
+			// Sort by similarity descending (best match first)
+			matches.sort((a, b) => b.similarity - a.similarity);
+
+			// Handle no matches: Try escape correction before giving up
+			if (matches.length === 0) {
+				// Step 1: Try unescape correction (lightweight, no LLM)
+				const unescapeFix = tryUnescapeFix(
+					normalizedContent,
+					normalizedSearch,
+					1,
+				);
+				if (unescapeFix) {
+					// Unescape succeeded! Re-run the matching with corrected content using async
+					const correctedSearchLines = unescapeFix.correctedString.split('\n');
+					for (
+						let i = 0;
+						i <= contentLines.length - correctedSearchLines.length;
+						i++
+					) {
+						const candidateLines = contentLines.slice(
+							i,
+							i + correctedSearchLines.length,
+						);
+						const candidateContent = candidateLines.join('\n');
+						// Use async similarity to prevent UI freeze during unescape correction
+						const similarity = await calculateSimilarityAsync(
+							unescapeFix.correctedString,
+							candidateContent,
+						);
+
+						if (similarity >= threshold) {
+							matches.push({
+								startLine: i + 1,
+								endLine: i + correctedSearchLines.length,
+								similarity,
+							});
+						}
+					}
+
+					matches.sort((a, b) => b.similarity - a.similarity);
+
+					// If unescape fix worked, also fix replaceContent if needed
+					if (matches.length > 0) {
+						const trimResult = trimPairIfPossible(
+							unescapeFix.correctedString,
+							replaceContent,
+							normalizedContent,
+							1,
+						);
+						// Update searchContent and replaceContent for the edit
+						normalizedSearch = trimResult.target;
+						replaceContent = trimResult.paired;
+						// Also update searchLines for later use
+						searchLines.splice(
+							0,
+							searchLines.length,
+							...normalizedSearch.split('\n'),
+						);
+					}
+				}
+
+				// If still no matches after unescape, provide detailed error
+				if (matches.length === 0) {
+					// Find closest matches for suggestions
+					const closestMatches = await findClosestMatches(
+						normalizedSearch,
+						normalizedContent.split('\n'),
+						3,
+					);
+
+					let errorMessage = `❌ Search content not found in file: ${filePath}\n\n`;
+					errorMessage += `🔍 Using smart fuzzy matching (threshold: ${threshold})\n`;
+					if (isOverEscaped(searchContent)) {
+						errorMessage += `⚠️  Detected over-escaped content, automatic fix attempted but failed\n`;
+					}
+
+					errorMessage += `\n`;
+
+					if (closestMatches.length > 0) {
+						errorMessage += `💡 Found ${closestMatches.length} similar location(s):\n\n`;
+						closestMatches.forEach((candidate, idx) => {
+							errorMessage += `${idx + 1}. Lines ${candidate.startLine}-${
+								candidate.endLine
+							} (${(candidate.similarity * 100).toFixed(0)}% match):\n`;
+							errorMessage += `${candidate.preview}\n\n`;
+						});
+
+						// Show diff with the closest match
+						const bestMatch = closestMatches[0];
+						if (bestMatch) {
+							const bestMatchLines = lines.slice(
+								bestMatch.startLine - 1,
+								bestMatch.endLine,
+							);
+							const bestMatchContent = bestMatchLines.join('\n');
+							const diffMsg = generateDiffMessage(
+								normalizedSearch,
+								bestMatchContent,
+								5,
+							);
+							if (diffMsg) {
+								errorMessage += `📊 Difference with closest match:\n${diffMsg}\n\n`;
+							}
+						}
+						errorMessage += `💡 Suggestions:\n`;
+						errorMessage += `  • Make sure you copied raw code from the file (strip any "lineNum:hash→" prefixes from filesystem-read if you pasted read output)\n`;
+						errorMessage += `  • Whitespace differences are automatically handled\n`;
+						errorMessage += `  • Try copying a larger or smaller code block\n`;
+						errorMessage += `  • If multiple filesystem-replaceedit attempts fail, use terminal-execute to edit via command line (e.g. sed, printf)\n`;
+
+						errorMessage += `⚠️  No similar content found in the file.\n\n`;
+						errorMessage += `📝 What you searched for (first 5 lines, formatted):\n`;
+
+						searchLines.slice(0, 5).forEach((line, idx) => {
+							errorMessage += `${idx + 1}. ${JSON.stringify(
+								normalizeForDisplay(line),
+							)}\n`;
+						});
+						errorMessage += `\n💡 Copy exact source text (not hashline-prefixed read lines)\n`;
+					}
+
+					throw new Error(errorMessage);
+				}
+			}
+
+			// Handle occurrence selection
+			let selectedMatch: {startLine: number; endLine: number};
+
+			if (occurrence === -1) {
+				// Replace all occurrences
+				if (matches.length === 1) {
+					selectedMatch = matches[0]!;
+				} else {
+					throw new Error(
+						`Found ${matches.length} matches. Please specify which occurrence to replace (1-${matches.length}), or use occurrence=-1 to replace all (not yet implemented for safety).`,
+					);
+				}
+			} else if (occurrence < 1 || occurrence > matches.length) {
+				throw new Error(
+					`Invalid occurrence ${occurrence}. Found ${
+						matches.length
+					} match(es) at lines: ${matches.map(m => m.startLine).join(', ')}`,
+				);
+			} else {
+				selectedMatch = matches[occurrence - 1]!;
+			}
+
+			const {startLine, endLine} = selectedMatch;
+
+			// Perform the replacement by replacing the matched lines
+			const normalizedReplace = replaceContent
+				.replace(/\r\n/g, '\n')
+				.replace(/\r/g, '\n');
+			const beforeLines = lines.slice(0, startLine - 1);
+			const afterLines = lines.slice(endLine);
+			let replaceLines = normalizedReplace.split('\n');
+
+			// Fix indentation for Python/YAML files: preserve first line's original indentation
+			// but keep relative indentation for subsequent lines
+			if (replaceLines.length > 0) {
+				const originalFirstLine = lines[startLine - 1];
+				const originalIndent = originalFirstLine?.match(/^(\s*)/)?.[1] || '';
+				const replaceFirstLine = replaceLines[0];
+				const replaceIndent = replaceFirstLine?.match(/^(\s*)/)?.[1] || '';
+
+				// Only adjust if the first line indentation is different
+				if (originalIndent !== replaceIndent && replaceFirstLine) {
+					// Adjust only the first line to match original indentation
+					const adjustedFirstLine = originalIndent + replaceFirstLine.trim();
+					replaceLines[0] = adjustedFirstLine;
+					// Subsequent lines keep their relative indentation
+				}
+			}
+
+			const modifiedLines = [...beforeLines, ...replaceLines, ...afterLines];
+			const modifiedContent = modifiedLines.join('\n');
+
+			// Calculate replaced content for display (raw text, no line-number prefix)
+			const replacedLines = lines.slice(startLine - 1, endLine);
+			const replacedContent = replacedLines.join('\n');
+
+			// Calculate context boundaries
+			const lineDifference = replaceLines.length - (endLine - startLine + 1);
+
+			const smartBoundaries = findSmartContextBoundaries(
+				lines,
+				startLine,
+				endLine,
+				contextLines,
+			);
+			const contextStart = smartBoundaries.start;
+			const contextEnd = smartBoundaries.end;
+
+			// Extract old content for context (raw text for reliable diff rendering)
+			const oldContextLines = lines.slice(contextStart - 1, contextEnd);
+			const oldContent = oldContextLines.join('\n');
+
+			// Write the modified content
+			if (isRemote) {
+				await this.writeRemoteFile(fullPath, modifiedContent);
+			} else {
+				await writeFileWithEncoding(fullPath, modifiedContent);
+			}
+
+			// Format with Prettier asynchronously (non-blocking)
+			let finalContent = modifiedContent;
+			let finalLines = modifiedLines;
+			let finalTotalLines = modifiedLines.length;
+			let finalContextEnd = Math.min(
+				finalTotalLines,
+				contextEnd + lineDifference,
+			);
+
+			// Check if Prettier supports this file type
+			const fileExtension = path.extname(fullPath).toLowerCase();
+			const shouldFormat =
+				getAutoFormatEnabled() &&
+				this.prettierSupportedExtensions.includes(fileExtension);
+
+			if (shouldFormat) {
+				try {
+					// Use Prettier API for better performance (avoids npx overhead)
+					const prettierConfig = await prettier.resolveConfig(fullPath);
+					finalContent = await prettier.format(modifiedContent, {
+						filepath: fullPath,
+						...prettierConfig,
+					});
+
+					// Write formatted content back to file
+					if (isRemote) {
+						await this.writeRemoteFile(fullPath, finalContent);
+					} else {
+						await writeFileWithEncoding(fullPath, finalContent);
+					}
+					finalLines = finalContent.split('\n');
+					finalTotalLines = finalLines.length;
+
+					finalContextEnd = Math.min(
+						finalTotalLines,
+						contextStart + (contextEnd - contextStart) + lineDifference,
+					);
+				} catch (formatError) {
+					// Continue with unformatted content
+				}
+			}
+
+			// Extract new content for context (raw text for reliable diff rendering)
+			const newContextLines = finalLines.slice(
+				contextStart - 1,
+				finalContextEnd,
+			);
+			const newContextContent = newContextLines.join('\n');
+
+			// Provide a larger overflow window so UI can render a broader diff hunk
+			// and help models verify bracket/block closure with surrounding context.
+			const overflowPadding = Math.max(3, contextLines);
+			const completeOldStart = Math.max(1, contextStart - overflowPadding);
+			const completeOldEnd = Math.min(lines.length, contextEnd + overflowPadding);
+			const completeOldContent = lines
+				.slice(completeOldStart - 1, completeOldEnd)
+				.join('\n');
+
+			const finalLineDifference = finalLines.length - lines.length;
+			const completeNewStart = Math.max(1, completeOldStart);
+			const completeNewEnd = Math.min(
+				finalLines.length,
+				completeOldEnd + finalLineDifference,
+			);
+			const completeNewContent = finalLines
+				.slice(completeNewStart - 1, completeNewEnd)
+				.join('\n');
+
+			// Analyze code structure
+			const editedContentLines = replaceLines;
+			const structureAnalysis = analyzeCodeStructure(
+				finalContent,
+				filePath,
+				editedContentLines,
+			);
+
+			// Get diagnostics from IDE (VSCode or JetBrains) - non-blocking, fire-and-forget
+			let diagnostics: Diagnostic[] = [];
+			try {
+				// Request diagnostics without blocking (with timeout protection)
+				const diagnosticsPromise = Promise.race([
+					vscodeConnection.requestDiagnostics(fullPath),
+					new Promise<Diagnostic[]>(resolve =>
+						setTimeout(() => resolve([]), 1000),
+					), // 1s max wait
+				]);
+				diagnostics = await diagnosticsPromise;
+			} catch (error) {
+				// Ignore diagnostics errors - this is optional functionality
+			}
+
+			// Build result
+			const result = {
+				message:
+					`✅ File edited successfully using search-replace (safer boundary detection): ${filePath}\n` +
+					`   Matched: lines ${startLine}-${endLine} (occurrence ${occurrence}/${matches.length})\n` +
+					`   Result: ${replaceLines.length} new lines` +
+					(smartBoundaries.extended
+						? `\n   📍 Context auto-extended to show complete code block (lines ${contextStart}-${finalContextEnd})`
+						: ''),
+				filePath, // Include file path for DiffViewer display on Resume/re-render
+				oldContent,
+				newContent: newContextContent,
+				completeOldContent,
+				completeNewContent,
+				replacedContent,
+				matchLocation: {startLine, endLine},
+				contextStartLine: contextStart,
+				contextEndLine: finalContextEnd,
+				totalLines: finalTotalLines,
+				structureAnalysis,
+				diagnostics: undefined as Diagnostic[] | undefined,
+			};
+
+			// Add diagnostics if found
+			if (diagnostics.length > 0) {
+				// Limit diagnostics to top 10 to avoid excessive token usage
+				const limitedDiagnostics = diagnostics.slice(0, 10);
+				result.diagnostics = limitedDiagnostics;
+
+				const errorCount = diagnostics.filter(
+					d => d.severity === 'error',
+				).length;
+				const warningCount = diagnostics.filter(
+					d => d.severity === 'warning',
+				).length;
+
+				if (errorCount > 0 || warningCount > 0) {
+					result.message += `\n\n⚠️  Diagnostics detected: ${errorCount} error(s), ${warningCount} warning(s)`;
+
+					// Format diagnostics for better readability (limit to first 5 for message display)
+					const formattedDiagnostics = diagnostics
+						.filter(d => d.severity === 'error' || d.severity === 'warning')
+						.slice(0, 5)
+						.map(d => {
+							const icon = d.severity === 'error' ? '❌' : '⚠️';
+							const location = `${filePath}:${d.line}:${d.character}`;
+							return `   ${icon} [${
+								d.source || 'unknown'
+							}] ${location}\n      ${d.message}`;
+						})
+						.join('\n\n');
+
+					result.message += `\n\n📋 Diagnostic Details:\n${formattedDiagnostics}`;
+					if (errorCount + warningCount > 5) {
+						result.message += `\n   ... and ${
+							errorCount + warningCount - 5
+						} more issue(s)`;
+					}
+					result.message += `\n\n   ⚡ TIP: Review the errors above and make another edit to fix them`;
+				}
+			}
+
+			// Add structure analysis warnings
+			const structureWarnings: string[] = [];
+
+			if (!structureAnalysis.bracketBalance.curly.balanced) {
+				const diff =
+					structureAnalysis.bracketBalance.curly.open -
+					structureAnalysis.bracketBalance.curly.close;
+				structureWarnings.push(
+					`Curly brackets: ${
+						diff > 0 ? `${diff} unclosed {` : `${Math.abs(diff)} extra }`
+					}`,
+				);
+			}
+			if (!structureAnalysis.bracketBalance.round.balanced) {
+				const diff =
+					structureAnalysis.bracketBalance.round.open -
+					structureAnalysis.bracketBalance.round.close;
+				structureWarnings.push(
+					`Round brackets: ${
+						diff > 0 ? `${diff} unclosed (` : `${Math.abs(diff)} extra )`
+					}`,
+				);
+			}
+			if (!structureAnalysis.bracketBalance.square.balanced) {
+				const diff =
+					structureAnalysis.bracketBalance.square.open -
+					structureAnalysis.bracketBalance.square.close;
+				structureWarnings.push(
+					`Square brackets: ${
+						diff > 0 ? `${diff} unclosed [` : `${Math.abs(diff)} extra ]`
+					}`,
+				);
+			}
+
+			if (structureAnalysis.htmlTags && !structureAnalysis.htmlTags.balanced) {
+				if (structureAnalysis.htmlTags.unclosedTags.length > 0) {
+					structureWarnings.push(
+						`Unclosed HTML tags: ${structureAnalysis.htmlTags.unclosedTags.join(
+							', ',
+						)}`,
+					);
+				}
+				if (structureAnalysis.htmlTags.unopenedTags.length > 0) {
+					structureWarnings.push(
+						`Unopened closing tags: ${structureAnalysis.htmlTags.unopenedTags.join(
+							', ',
+						)}`,
+					);
+				}
+			}
+
+			if (structureAnalysis.indentationWarnings.length > 0) {
+				structureWarnings.push(
+					...structureAnalysis.indentationWarnings.map(
+						(w: string) => `Indentation: ${w}`,
+					),
+				);
+			}
+
+			// Note: Boundary warnings removed - partial edits are common and expected
+
+			if (structureWarnings.length > 0) {
+				result.message += `\n\n🔍 Structure Analysis:\n`;
+				structureWarnings.forEach(warning => {
+					result.message += `   ⚠️  ${warning}\n`;
+				});
+				result.message += `\n   💡 TIP: These warnings help identify potential issues. If intentional (e.g., opening a block), you can ignore them.`;
+			}
+
+			return result;
+		} catch (error) {
+			throw new Error(
+				`Failed to edit file ${filePath}: ${
+					error instanceof Error ? error.message : 'Unknown error'
+				}`,
+			);
+		}
+	}
+
+
+	/**
 	 * Edit file(s) using hashline anchors.
 	 *
 	 * Each operation references lines by `lineNum:hash` anchors obtained from
@@ -1098,9 +1746,9 @@ export class FilesystemMCPService {
 	 * so stale reads are caught early.
 	 *
 	 * Supported operation types:
-	 *   • replace  – replace startAnchor..endAnchor with content
-	 *   • insert_after – insert content after startAnchor
-	 *   • delete   – delete startAnchor..endAnchor
+	 *   • replace  – replace startAnchor..endAnchor (inclusive) with content
+	 *   • insert_after – insert content after startAnchor (endAnchor required; same as startAnchor)
+	 *   • delete   – delete startAnchor..endAnchor (inclusive)
 	 */
 	async editFile(
 		filePath: string | EditByHashlineConfig[],
@@ -1182,8 +1830,16 @@ export class FilesystemMCPService {
 			}
 
 			// ── Validate ALL anchors before mutating anything ──
+			type PreparedHashlineOperation = {
+				op: HashlineOperation;
+				originalIndex: number;
+				startLine: number;
+				endLine: number;
+			};
+
+			const preparedOps: PreparedHashlineOperation[] = [];
 			const anchorErrors: string[] = [];
-			for (const op of operations) {
+			for (const [originalIndex, op] of operations.entries()) {
 				const startV = validateAnchor(op.startAnchor, lines);
 				if (!startV.valid) {
 					anchorErrors.push(
@@ -1195,7 +1851,21 @@ export class FilesystemMCPService {
 								: ' (bad format, expected "lineNum:hash")'),
 					);
 				}
-				if (op.endAnchor) {
+
+				let endLine = startV.lineNum;
+				let hasValidRange = startV.valid;
+				const endAnchorMissing =
+					op.endAnchor === undefined ||
+					op.endAnchor === null ||
+					(typeof op.endAnchor === 'string' && op.endAnchor.trim() === '');
+				if (endAnchorMissing) {
+					anchorErrors.push(
+						`Operation ${originalIndex + 1} (${op.type}): endAnchor is required. ` +
+							`For a single-line replace or delete, set endAnchor to the same "lineNum:hash" as startAnchor. ` +
+							`For insert_after, repeat startAnchor as endAnchor.`,
+					);
+					hasValidRange = false;
+				} else {
 					const endV = validateAnchor(op.endAnchor, lines);
 					if (!endV.valid) {
 						anchorErrors.push(
@@ -1206,11 +1876,15 @@ export class FilesystemMCPService {
 									? ` (line ${endV.lineNum} out of range or hash mismatch)`
 									: ' (bad format, expected "lineNum:hash")'),
 						);
-					}
-					if (startV.valid && endV.valid && endV.lineNum < startV.lineNum) {
-						anchorErrors.push(
-							`endAnchor line ${endV.lineNum} is before startAnchor line ${startV.lineNum}`,
-						);
+						hasValidRange = false;
+					} else {
+						endLine = endV.lineNum;
+						if (startV.valid && endLine < startV.lineNum) {
+							anchorErrors.push(
+								`endAnchor line ${endLine} is before startAnchor line ${startV.lineNum}`,
+							);
+							hasValidRange = false;
+						}
 					}
 				}
 
@@ -1219,6 +1893,15 @@ export class FilesystemMCPService {
 					op.content === undefined
 				) {
 					anchorErrors.push(`Operation "${op.type}" requires content`);
+				}
+
+				if (hasValidRange) {
+					preparedOps.push({
+						op,
+						originalIndex,
+						startLine: startV.lineNum,
+						endLine,
+					});
 				}
 			}
 
@@ -1230,11 +1913,78 @@ export class FilesystemMCPService {
 				);
 			}
 
+			const conflictErrors: string[] = [];
+			for (let i = 0; i < preparedOps.length; i++) {
+				const current = preparedOps[i]!;
+				for (let j = i + 1; j < preparedOps.length; j++) {
+					const next = preparedOps[j]!;
+					const sameStartLine = current.startLine === next.startLine;
+					const bothInsertAfter =
+						current.op.type === 'insert_after' &&
+						next.op.type === 'insert_after' &&
+						sameStartLine;
+					if (bothInsertAfter) {
+						continue;
+					}
+
+					const sameSingleLineAnchor =
+						sameStartLine &&
+						current.startLine === current.endLine &&
+						next.startLine === next.endLine;
+					const hasInsertAfter =
+						current.op.type === 'insert_after' ||
+						next.op.type === 'insert_after';
+					if (sameSingleLineAnchor && hasInsertAfter) {
+						continue;
+					}
+
+					const overlaps =
+						current.startLine <= next.endLine &&
+						next.startLine <= current.endLine;
+					if (!overlaps) {
+						continue;
+					}
+
+					conflictErrors.push(
+						`Operation ${current.originalIndex + 1} (${current.op.type} ${
+							current.startLine
+						}-${current.endLine}) conflicts with ` +
+							`operation ${next.originalIndex + 1} (${next.op.type} ${
+								next.startLine
+							}-${next.endLine})`,
+					);
+				}
+			}
+
+			if (conflictErrors.length > 0) {
+				throw new Error(
+					`Hashline operations conflict for ${filePath}:\n` +
+						conflictErrors.map(e => `  • ${e}`).join('\n') +
+						`\n\nUse non-overlapping anchors for the same file, or split dependent edits into separate calls.`,
+				);
+			}
+
 			// ── Sort operations bottom-to-top to keep line numbers stable ──
-			const sortedOps = [...operations].sort((a, b) => {
-				const aLine = parseAnchor(a.startAnchor)!.lineNum;
-				const bLine = parseAnchor(b.startAnchor)!.lineNum;
-				return bLine - aLine;
+			const sortedOps = [...preparedOps].sort((a, b) => {
+				if (a.startLine !== b.startLine) {
+					return b.startLine - a.startLine;
+				}
+
+				const aInsertAfter = a.op.type === 'insert_after';
+				const bInsertAfter = b.op.type === 'insert_after';
+				if (aInsertAfter && bInsertAfter) {
+					return b.originalIndex - a.originalIndex;
+				}
+
+				if (aInsertAfter !== bInsertAfter) {
+					return aInsertAfter ? -1 : 1;
+				}
+
+				if (a.endLine !== b.endLine) {
+					return b.endLine - a.endLine;
+				}
+
+				return b.originalIndex - a.originalIndex;
 			});
 
 			// Track the overall edit range for context display
@@ -1267,11 +2017,8 @@ export class FilesystemMCPService {
 					.join('\n');
 			};
 
-			for (const op of sortedOps) {
-				const startLine = parseAnchor(op.startAnchor)!.lineNum;
-				const endLine = op.endAnchor
-					? parseAnchor(op.endAnchor)!.lineNum
-					: startLine;
+			for (const preparedOp of sortedOps) {
+				const {op, startLine, endLine} = preparedOp;
 
 				editStartLine = Math.min(editStartLine, startLine);
 				editEndLine = Math.max(editEndLine, endLine);
@@ -1674,15 +2421,97 @@ export const mcpTools = [
 		},
 	},
 	{
+		name: 'filesystem-replaceedit',
+		description:
+			'DEFAULT edit tool: Fuzzy search-and-replace editing. ' +
+			'**WHEN**: Prefer this for normal workflow and diff-friendly context display. Use `filesystem-edit` when you need strict hash-anchored safety checks. ' +
+			'**REMOTE SSH**: Supports ssh:// paths like other filesystem tools. ' +
+			'**INPUT**: `searchContent` must be raw source text — strip `lineNum:hash→` prefixes if you pasted from `filesystem-read`. ' +
+			'**BATCH**: `filePath` may be a string, string[] with top-level search/replace, or {path, searchContent, replaceContent, occurrence?}[]. ' +
+			'Uses fuzzy similarity matching (fixed threshold 0.75).',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				filePath: {
+					oneOf: [
+						{
+							type: 'string',
+							description: 'Path to a single file to edit',
+						},
+						{
+							type: 'array',
+							items: {
+								type: 'string',
+							},
+							description:
+								'Array of file paths (uses unified searchContent/replaceContent from top-level)',
+						},
+						{
+							type: 'array',
+							items: {
+								type: 'object',
+								properties: {
+									path: {
+										type: 'string',
+										description: 'File path',
+									},
+									searchContent: {
+										type: 'string',
+										description: 'Content to search for in this file',
+									},
+									replaceContent: {
+										type: 'string',
+										description: 'New content to replace with',
+									},
+									occurrence: {
+										type: 'number',
+										description:
+											'Which match to replace (1-indexed, default: 1)',
+									},
+								},
+								required: ['path', 'searchContent', 'replaceContent'],
+							},
+							description:
+								'Array of edit config objects for per-file search-replace operations',
+						},
+					],
+					description: 'File path(s) to edit',
+				},
+				searchContent: {
+					type: 'string',
+					description:
+						'Content to find and replace (for single file or unified mode). Raw file text only — no hashline prefixes.',
+				},
+				replaceContent: {
+					type: 'string',
+					description:
+						'New content to replace with (for single file or unified mode)',
+				},
+				occurrence: {
+					type: 'number',
+					description:
+						'Which match to replace if multiple found (1-indexed). Default: 1 (best match first). Use -1 only when a single match exists (same as occurrence 1).',
+					default: 1,
+				},
+				contextLines: {
+					type: 'number',
+					description: 'Context lines to show before/after (default: 8)',
+					default: 8,
+				},
+			},
+			required: ['filePath'],
+		},
+	},
+	{
 		name: 'filesystem-edit',
 		description:
-			'PREFERRED edit tool: Hash-anchored editing using content hashes from filesystem-read. ' +
+			'OPTIONAL strict edit tool: Hash-anchored editing using content hashes from filesystem-read. ' +
 			'Line format: "lineNum:hash→content" (e.g. "42:a3→code"). Use anchors "lineNum:hash" to reference lines — no text reproduction needed. ' +
 			'**OPERATIONS**: (1) replace — replaces startAnchor..endAnchor with content; ' +
 			'(2) insert_after — inserts content after startAnchor; ' +
 			'(3) delete — removes startAnchor..endAnchor, set content to empty string "". ' +
 			'**WORKFLOW**: filesystem-read → note anchors → call this tool with operations. ' +
-			'**ANCHOR FORMAT**: "lineNum:hash" e.g. "10:a3". Omit endAnchor for single-line operations. ' +
+			'**ANCHOR FORMAT**: "lineNum:hash" e.g. "10:a3". endAnchor is always required (inclusive range). Single-line edits: set endAnchor to the same anchor as startAnchor. ' +
 			'**SUPPORTS BATCH**: Pass array of {path, operations} for multi-file edits.',
 		inputSchema: {
 			type: 'object',
@@ -1720,7 +2549,7 @@ export const mcpTools = [
 												endAnchor: {
 													type: 'string',
 													description:
-														'End anchor for range operations (format: "lineNum:hash", e.g. "10:a3"). Omit for single-line operations.',
+														'Inclusive end anchor (format: "lineNum:hash"). For a single line, use the same value as startAnchor.',
 												},
 												content: {
 													type: 'string',
@@ -1728,7 +2557,12 @@ export const mcpTools = [
 														'New content to write (for replace and insert_after). Pass empty string "" for delete. Do NOT include line numbers or hashes.',
 												},
 											},
-											required: ['type', 'startAnchor', 'content'],
+											required: [
+												'type',
+												'startAnchor',
+												'endAnchor',
+												'content',
+											],
 										},
 										description: 'Array of edit operations for this file',
 									},
@@ -1760,7 +2594,7 @@ export const mcpTools = [
 							endAnchor: {
 								type: 'string',
 								description:
-									'End anchor for range operations (format: "lineNum:hash", e.g. "10:a3"). Omit for single-line operations.',
+									'Inclusive end anchor (format: "lineNum:hash"). For a single line, use the same value as startAnchor.',
 							},
 							content: {
 								type: 'string',
@@ -1768,7 +2602,7 @@ export const mcpTools = [
 									'New content to write (for replace and insert_after). Pass empty string "" for delete. Do NOT include line numbers or hashes.',
 							},
 						},
-						required: ['type', 'startAnchor', 'content'],
+						required: ['type', 'startAnchor', 'endAnchor', 'content'],
 					},
 					description:
 						'Array of edit operations (for single file mode). Each operation references anchors from filesystem-read.',

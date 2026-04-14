@@ -42,6 +42,7 @@ import {
 import {getDisabledSkills} from '../config/disabledSkills.js';
 import {
 	getDisabledMCPTools,
+	getOptInEnabledMCPKeysMerged,
 	isMCPToolEnabled,
 } from '../config/disabledMCPTools.js';
 import {logger} from '../core/logger.js';
@@ -213,6 +214,7 @@ async function generateConfigHash(): Promise<string> {
 			disabledBuiltInServices: getDisabledBuiltInServices(),
 			disabledSkills: getDisabledSkills(),
 			disabledMCPTools: getDisabledMCPTools(),
+			optInEnabledMCPTools: getOptInEnabledMCPKeysMerged(),
 			teamMode: getTeamMode(),
 		});
 	} catch {
@@ -317,7 +319,7 @@ async function refreshToolsCache(): Promise<void> {
 		}
 	};
 
-	// Add built-in filesystem tools
+	// Built-in filesystem (filesystem-edit is opt-in; filesystem-replaceedit is enabled by default)
 	addBuiltInService('filesystem', filesystemTools, 'filesystem');
 
 	// Add built-in terminal tools
@@ -1435,12 +1437,28 @@ export async function executeMCPTool(
 						throw new Error(
 							`Missing required parameter 'operations' for filesystem-edit tool.\n` +
 								`Received args: ${JSON.stringify(args, null, 2)}\n` +
-								`AI Tip: Provide an array of {type, startAnchor, endAnchor?, content?} operations.`,
+								`AI Tip: Provide an array of {type, startAnchor, endAnchor, content} operations (endAnchor required; same as startAnchor for single-line edits).`,
 						);
 					}
 					result = await filesystemService.editFile(
 						args.filePath,
 						args.operations,
+						args.contextLines,
+					);
+					break;
+				case 'replaceedit':
+					// Default-on tool (can be disabled in MCP panel)
+					if (!args.filePath) {
+						throw new Error(
+							`Missing required parameter 'filePath' for filesystem-replaceedit tool.\n` +
+								`Received args: ${JSON.stringify(args, null, 2)}`,
+						);
+					}
+					result = await filesystemService.editFileBySearch(
+						args.filePath,
+						args.searchContent,
+						args.replaceContent,
+						args.occurrence ?? 1,
 						args.contextLines,
 					);
 					break;

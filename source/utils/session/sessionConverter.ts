@@ -332,8 +332,21 @@ export function convertSessionMessagesToUI(
 					| undefined;
 				if (
 					!isError &&
-					(toolName === 'filesystem-create' || toolName === 'filesystem-edit')
+					(toolName === 'filesystem-create' ||
+						toolName === 'filesystem-edit' ||
+						toolName === 'filesystem-replaceedit')
 				) {
+					const preExtractedEditDiffData = (msg as any).editDiffData;
+					if (
+						preExtractedEditDiffData &&
+						(typeof preExtractedEditDiffData.oldContent === 'string' ||
+							Array.isArray(preExtractedEditDiffData.batchResults))
+					) {
+						fileToolData = {
+							name: toolName,
+							arguments: preExtractedEditDiffData,
+						};
+					}
 					try {
 						const resultData = JSON.parse(msg.content);
 
@@ -522,7 +535,8 @@ export function convertSessionMessagesToUI(
 				| undefined;
 
 			if (
-				toolName === 'filesystem-edit' &&
+				(toolName === 'filesystem-edit' ||
+					toolName === 'filesystem-replaceedit') &&
 				!isError &&
 				(msg as any).editDiffData &&
 				(typeof (msg as any).editDiffData.oldContent === 'string' ||
@@ -533,7 +547,11 @@ export function convertSessionMessagesToUI(
 			}
 
 			// Extract edit diff data
-			if (toolName === 'filesystem-edit' && !isError) {
+			if (
+				(toolName === 'filesystem-edit' ||
+					toolName === 'filesystem-replaceedit') &&
+				!isError
+			) {
 				try {
 					const resultData = JSON.parse(msg.content);
 					// Handle single file edit

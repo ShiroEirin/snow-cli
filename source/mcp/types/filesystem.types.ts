@@ -140,6 +140,16 @@ export interface MultipleFilesReadResult {
 }
 
 /**
+ * Search-replace (replaceedit) batch config
+ */
+export interface EditBySearchConfig {
+	path: string;
+	searchContent: string;
+	replaceContent: string;
+	occurrence?: number;
+}
+
+/**
  * Hashline edit operation types
  */
 export type HashlineOperationType = 'replace' | 'insert_after' | 'delete';
@@ -152,8 +162,8 @@ export interface HashlineOperation {
 	type: HashlineOperationType;
 	/** Start anchor – required for all operation types */
 	startAnchor: string;
-	/** End anchor – for range replace/delete. Omit for single-line ops or insert_after. */
-	endAnchor?: string;
+	/** End anchor – inclusive end of range for replace/delete. For a single line, use the same value as startAnchor. For insert_after, repeat startAnchor (only the start line is used). */
+	endAnchor: string;
 	/** New content – required for replace and insert_after, ignored for delete */
 	content?: string;
 }
@@ -190,6 +200,14 @@ export interface SingleFileEditResult {
 }
 
 /**
+ * Search-replace single file result
+ */
+export interface EditBySearchSingleResult extends SingleFileEditResult {
+	replacedContent: string;
+	matchLocation: {startLine: number; endLine: number};
+}
+
+/**
  * Batch operation result item (generic)
  */
 export interface BatchResultItem {
@@ -197,6 +215,12 @@ export interface BatchResultItem {
 	success: boolean;
 	error?: string;
 }
+
+/**
+ * Search-replace batch result item
+ */
+export type EditBySearchBatchResultItem = BatchResultItem &
+	Partial<EditBySearchSingleResult>;
 
 /**
  * Edit by hashline batch result item
@@ -221,3 +245,10 @@ export interface BatchOperationResult<T extends BatchResultItem> {
 export type EditByHashlineResult =
 	| EditByHashlineSingleResult
 	| BatchOperationResult<EditByHashlineBatchResultItem>;
+
+/**
+ * Search-replace return type
+ */
+export type EditBySearchResult =
+	| EditBySearchSingleResult
+	| BatchOperationResult<EditBySearchBatchResultItem>;
