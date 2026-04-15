@@ -374,14 +374,17 @@ export function convertSessionMessagesToUI(
 								},
 							};
 						} else if (
-							resultData.batchResults &&
+							Array.isArray(resultData.results) ||
 							Array.isArray(resultData.batchResults)
 						) {
+							const batchResults = Array.isArray(resultData.results)
+								? resultData.results
+								: resultData.batchResults;
 							fileToolData = {
 								name: toolName,
 								arguments: {
 									isBatch: true,
-									batchResults: resultData.batchResults,
+									batchResults,
 								},
 							};
 						}

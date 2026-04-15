@@ -243,6 +243,67 @@ test('convertSessionMessagesToUI replays successful sub-agent quick tools in com
 	t.is(uiMessages[0]?.toolCallId, undefined);
 });
 
+test('convertSessionMessagesToUI replays sub-agent batch replaceedit results from upstream-style results payload', t => {
+	const uiMessages = convertSessionMessagesToUI([
+		{
+			role: 'assistant',
+			content: '',
+			subAgentInternal: true,
+			tool_calls: [
+				{
+					id: 'subagent-batch-edit',
+					type: 'function',
+					function: {
+						name: 'filesystem-replaceedit',
+						arguments: '{"filePath":["a.ts","b.ts"]}',
+					},
+				},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'subagent-batch-edit',
+			content: JSON.stringify({
+				success: true,
+				results: [
+					{
+						path: 'a.ts',
+						oldContent: 'const a = 1;',
+						newContent: 'const a = 2;',
+					},
+					{
+						path: 'b.ts',
+						oldContent: 'const b = 1;',
+						newContent: 'const b = 2;',
+					},
+				],
+			}),
+			messageStatus: 'success',
+			subAgentInternal: true,
+		},
+	] as any);
+
+	const toolMessage = uiMessages.find(
+		message => message.toolCallId === 'subagent-batch-edit',
+	);
+
+	t.truthy(toolMessage);
+	t.is(toolMessage?.toolName, 'filesystem-replaceedit');
+	t.true(Boolean(toolMessage?.toolCall?.arguments?.isBatch));
+	t.deepEqual(toolMessage?.toolCall?.arguments?.batchResults, [
+		{
+			path: 'a.ts',
+			oldContent: 'const a = 1;',
+			newContent: 'const a = 2;',
+		},
+		{
+			path: 'b.ts',
+			oldContent: 'const b = 1;',
+			newContent: 'const b = 2;',
+		},
+	]);
+});
+
 test('convertSessionMessagesToUI preserves replay parallel group for non-time-consuming tools', t => {
 	const uiMessages = convertSessionMessagesToUI([
 		{
