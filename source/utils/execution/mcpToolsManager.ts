@@ -1372,7 +1372,7 @@ export async function executeMCPTool(
 			result = await getTodoService().executeTool(actualToolName, args);
 		} else if (serviceName === 'notebook') {
 			// Handle built-in Notebook tools (no connection needed)
-			result = await executeNotebookTool(toolName, args);
+			result = await executeNotebookTool(actualToolName, args);
 		} else if (serviceName === 'filesystem') {
 			// Handle built-in filesystem tools (no connection needed)
 			const {filesystemService} = await import('../../mcp/filesystem.js');
@@ -1484,6 +1484,13 @@ export async function executeMCPTool(
 								`Use the project root path or a specific directory path.`,
 						);
 					}
+					if (typeof args.enableAiSummary !== 'boolean') {
+						throw new Error(
+							`Missing required parameter 'enableAiSummary' for terminal-execute tool.\n` +
+								`Received args: ${JSON.stringify(args, null, 2)}\n` +
+								`AI Tip: You MUST provide a boolean 'enableAiSummary'. Use false by default, or true when output may need AI cleanup.`,
+						);
+					}
 
 					// Set working directory from AI-provided parameter
 					terminalService.setWorkingDirectory(args.workingDirectory);
@@ -1505,6 +1512,7 @@ export async function executeMCPTool(
 							args.timeout,
 							abortSignal, // Pass abort signal to support ESC key interruption
 							args.isInteractive ?? false, // Pass isInteractive flag for AI-determined interactive commands
+							args.enableAiSummary,
 						);
 					} finally {
 						// Clear execution state

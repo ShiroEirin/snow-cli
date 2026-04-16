@@ -127,10 +127,14 @@ export const en: TranslationKeys = {
 		rerankingApiKey: 'API Key:',
 		rerankingContextLength: 'Model Context Length:',
 		rerankingTopN: 'Top N:',
-		rerankingNotConfigured: 'Please configure Model Name and Base URL in "Reranking Model Config" first',
-		validationRerankingModelNameRequired: 'Reranking model name is required when enabled',
-		validationRerankingBaseUrlRequired: 'Reranking base URL is required when enabled',
-		validationRerankingContextLengthPositive: 'Model context length must be greater than 0',
+		rerankingNotConfigured:
+			'Please configure Model Name and Base URL in "Reranking Model Config" first',
+		validationRerankingModelNameRequired:
+			'Reranking model name is required when enabled',
+		validationRerankingBaseUrlRequired:
+			'Reranking base URL is required when enabled',
+		validationRerankingContextLengthPositive:
+			'Model context length must be greater than 0',
 		validationRerankingTopNPositive: 'Top N must be greater than 0',
 		saveError: 'Failed to save configuration',
 		gitignoreNotFound:
@@ -439,13 +443,11 @@ export const en: TranslationKeys = {
 		scopeGlobal: 'Global',
 		scopeSelectTitle: 'Select scope for new command',
 		scopeSelectHint: '↑↓: Navigate • Enter: Select • Esc: Cancel',
-		duplicatePattern:
-			'Pattern "{pattern}" already exists in {scope} scope',
+		duplicatePattern: 'Pattern "{pattern}" already exists in {scope} scope',
 		resetScopeSelectTitle: 'Select scope to reset',
 		resetGlobalDesc: 'Restore to default preset commands',
 		resetProjectDesc: 'Clear all project custom commands',
-		confirmResetScopeMessage:
-			'⚠️ Press Enter again to confirm {scope} reset',
+		confirmResetScopeMessage: '⚠️ Press Enter again to confirm {scope} reset',
 		// Add view
 		addTitle: 'Add Custom Sensitive Command ({scope})',
 		patternLabel: 'Pattern (supports wildcards, e.g., "rm*"):',
@@ -663,6 +665,7 @@ export const en: TranslationKeys = {
 			disconnect: 'Disconnect from the current Snow Instance',
 			connectionStatus: 'Show current Snow Instance connection status',
 			newPrompt: 'Generate a refined prompt from your requirement using AI',
+			pixel: 'Open the terminal pixel editor',
 			btw: 'Ask a side-question while AI is working (temporary, no context saved)',
 			quit: 'Exit the application',
 		},
@@ -1700,6 +1703,44 @@ export const en: TranslationKeys = {
 		actionClose: 'Close',
 		errorPrefix: 'Error: ',
 		scrollHint: '↑↓ Scroll',
+	},
+	pixelEditor: {
+		title: 'Pixel Editor',
+		palette: 'Palette',
+		eraser: 'Eraser',
+		colorNumber: 'Color {n}',
+		canvasCleared: 'Canvas cleared',
+		clearCancelled: 'Clear cancelled',
+		saveCancelled: 'Save cancelled',
+		nameCannotBeEmpty: 'Name cannot be empty',
+		savedAs: 'Saved as {name}',
+		controlsHint:
+			'Arrows: move • Space: draw/erase • Enter: draw • 1-9: color • 0: erase • C: clear',
+		controlsHintPosBrush:
+			'ESC/Q: back • Ctrl+S: save • Pos: ({x}, {y}) • Brush: ',
+		saveDrawingLabel: 'Save drawing: ',
+		namePlaceholder: 'Enter name...',
+		escCancelHint: '  ESC cancel',
+		confirmClearCanvas:
+			'Clear canvas? Press Y to confirm, any other key to cancel.',
+	},
+	pixelEditorScreen: {
+		screenTitle: 'Pixel Editor',
+		newCanvas: 'New Canvas',
+		manageDrawings: 'Manage Drawings',
+		menuNavigateHint: '↑↓ navigate • Enter select • Esc back',
+		manageTitle: 'Manage Drawings',
+		noDrawings: 'No drawings found.',
+		managerHint:
+			'↑↓ navigate • Space select • D delete • S toggle exit image • Enter edit • Esc back',
+		confirmDeleteMany:
+			'Confirm delete {count} item(s)? Enter/Y/D confirm, N/Esc cancel',
+		moreAbove: '↑ {count} more above',
+		moreBelow: '↓ {count} more below',
+		selectedCount: 'Selected {count} item(s)',
+		exitImageDisabled: 'Exit image disabled',
+		failedDisableExitImage: 'Failed to disable exit image',
+		setAsExitImage: 'Set "{name}" as exit image',
 	},
 	exitScreen: {
 		title: 'Goodbye',

@@ -19,6 +19,7 @@ import {
 import {codebaseReviewAgent} from '../../agents/codebaseReviewAgent.js';
 import {reviewAgent} from '../../agents/reviewAgent.js';
 import {summaryAgent} from '../../agents/summaryAgent.js';
+import {bashOutputSummaryAgent} from '../../agents/bashOutputSummaryAgent.js';
 import {unifiedHooksExecutor} from '../execution/unifiedHooksExecutor.js';
 
 const CONFIG_DIR = join(homedir(), '.snow');
@@ -35,6 +36,7 @@ export function clearAllAgentCaches(): void {
 	codebaseReviewAgent.clearCache();
 	reviewAgent.clearCache();
 	summaryAgent.clearCache();
+	bashOutputSummaryAgent.clearCache();
 	unifiedHooksExecutor.clearCache();
 }
 

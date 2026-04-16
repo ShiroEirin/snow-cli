@@ -294,6 +294,7 @@ export default function ChatScreen({
 		setShowBranchPanel: panelState.setShowBranchPanel,
 		setShowNewPromptPanel: panelState.setShowNewPromptPanel,
 		setShowTodoListPanel: panelState.setShowTodoListPanel,
+		setShowPixelEditor: panelState.setShowPixelEditor,
 		onSwitchProfile: handleSwitchProfile,
 		setShowBackgroundPanel: backgroundProcesses.enablePanel,
 		setYoloMode,
@@ -398,6 +399,7 @@ export default function ChatScreen({
 		panelState.showConnectionPanel ||
 		panelState.showNewPromptPanel ||
 		panelState.showTodoListPanel ||
+		panelState.showPixelEditor ||
 		showPermissionsPanel ||
 		showSubAgentDepthPanel;
 	const shouldShowFooter =
