@@ -88,6 +88,34 @@ export async function resolveTeammateRegularToolApproval(
 	};
 }
 
+const MUTATING_MANAGE_ACTIONS = new Map<string, Set<string>>([
+	['todo-manage', new Set(['add', 'update', 'delete'])],
+	['notebook-manage', new Set(['add', 'update', 'delete'])],
+]);
+
+function isProtectedManageToolCall(
+	toolCall: ToolCall,
+	binding: ToolExecutionBinding | undefined,
+): boolean {
+	const resolvedToolName =
+		binding?.kind === 'local' ? binding.toolName : toolCall.function.name;
+	const protectedActions = MUTATING_MANAGE_ACTIONS.get(resolvedToolName);
+
+	if (!protectedActions) {
+		return false;
+	}
+
+	const parsedArgs = parseTeammateToolArgsResult(toolCall);
+	if (!parsedArgs.ok) {
+		return false;
+	}
+
+	return (
+		typeof parsedArgs.args['action'] === 'string' &&
+		protectedActions.has(parsedArgs.args['action'])
+	);
+}
+
 export function partitionPlanApprovalRegularCalls(options: {
 	toolCalls: ToolCall[];
 	toolPlaneKey: string;
@@ -104,6 +132,9 @@ export function partitionPlanApprovalRegularCalls(options: {
 		options.getToolExecutionBindingImpl || getToolExecutionBinding;
 	const blockedCalls = options.toolCalls.filter(toolCall => {
 		const binding = getBinding(toolCall.function.name, options.toolPlaneKey);
+		if (isProtectedManageToolCall(toolCall, binding)) {
+			return true;
+		}
 		return options.isPlanApprovalProtectedTool(toolCall.function.name, binding);
 	});
 	const executableCalls = options.toolCalls.filter(

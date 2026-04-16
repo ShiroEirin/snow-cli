@@ -1,5 +1,12 @@
 import anyTest from 'ava';
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'fs';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 
@@ -58,6 +65,46 @@ function executeToolCallWithBindings(
 		undefined,
 		toolPlaneKey,
 	);
+}
+
+const PROJECT_OPT_IN_CONFIG_PATH = join(
+	process.cwd(),
+	'.snow',
+	'opt-in-mcp-tools.json',
+);
+
+function enableProjectOptInTool(toolKey: string): string | undefined {
+	const previousContent = existsSync(PROJECT_OPT_IN_CONFIG_PATH)
+		? readFileSync(PROJECT_OPT_IN_CONFIG_PATH, 'utf8')
+		: undefined;
+	const enabledTools =
+		previousContent === undefined
+			? []
+			: (((JSON.parse(previousContent) as {enabledTools?: unknown}).enabledTools ??
+					[]) as unknown[]);
+	const nextEnabledTools = Array.from(
+		new Set(
+			enabledTools.filter((value): value is string => typeof value === 'string').concat(toolKey),
+		),
+	);
+
+	mkdirSync(join(process.cwd(), '.snow'), {recursive: true});
+	writeFileSync(
+		PROJECT_OPT_IN_CONFIG_PATH,
+		JSON.stringify({enabledTools: nextEnabledTools}, null, 2),
+		'utf8',
+	);
+
+	return previousContent;
+}
+
+function restoreProjectOptInConfig(previousContent: string | undefined): void {
+	if (previousContent === undefined) {
+		rmSync(PROJECT_OPT_IN_CONFIG_PATH, {force: true});
+		return;
+	}
+
+	writeFileSync(PROJECT_OPT_IN_CONFIG_PATH, previousContent, 'utf8');
 }
 
 test('team askuser adapter preserves cancelled responses', async (t: any) => {
@@ -945,6 +992,7 @@ test.serial(
 		const tempDir = mkdtempSync(join(tmpdir(), 'snow-tool-edit-'));
 		const filePath = join(tempDir, 'native-edit.ts');
 		const toolPlaneKey = registerLocalToolBindings(['filesystem-edit']);
+		const previousOptInConfig = enableProjectOptInTool('filesystem:edit');
 		writeFileSync(filePath, 'line1\nline2\nline3\n', 'utf8');
 		const startAnchor = `2:${lineHash('line2')}`;
 
@@ -960,6 +1008,7 @@ test.serial(
 							{
 								type: 'replace',
 								startAnchor,
+								endAnchor: startAnchor,
 								content: 'LINE2',
 							},
 						],
@@ -999,11 +1048,12 @@ test.serial(
 			);
 			t.true(
 				legacyLineRangeResult.content.includes(
-					'array of {type, startAnchor, endAnchor?, content?} operations',
+					'array of {type, startAnchor, endAnchor, content} operations',
 				),
 			);
 			t.false(readFileSync(filePath, 'utf8').includes('SHOULD_NOT_APPLY'));
 		} finally {
+			restoreProjectOptInConfig(previousOptInConfig);
 			clearToolExecutionBindings(toolPlaneKey);
 			rmSync(tempDir, {recursive: true, force: true});
 		}

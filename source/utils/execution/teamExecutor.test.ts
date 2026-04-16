@@ -68,6 +68,71 @@ test('plan approval keeps read-only and bridge tools outside the block list', (t
 	);
 });
 
+test('plan approval blocks mutating manage actions but keeps read actions executable', (t: any) => {
+	const toolCalls = [
+		{
+			id: 'todo-get',
+			type: 'function',
+			function: {
+				name: 'todo-manage',
+				arguments: JSON.stringify({action: 'get'}),
+			},
+		},
+		{
+			id: 'todo-update',
+			type: 'function',
+			function: {
+				name: 'todo-manage',
+				arguments: JSON.stringify({action: 'update', todoId: 'task-1'}),
+			},
+		},
+		{
+			id: 'notebook-query',
+			type: 'function',
+			function: {
+				name: 'notebook-manage',
+				arguments: JSON.stringify({action: 'query', filePathPattern: 'src'}),
+			},
+		},
+		{
+			id: 'notebook-delete',
+			type: 'function',
+			function: {
+				name: 'notebook-manage',
+				arguments: JSON.stringify({action: 'delete', notebookId: 'nb-1'}),
+			},
+		},
+		{
+			id: 'legacy-add',
+			type: 'function',
+			function: {
+				name: 'todo-add',
+				arguments: JSON.stringify({content: 'legacy'}),
+			},
+		},
+	];
+
+	const partitioned = partitionPlanApprovalRegularCalls({
+		toolCalls: toolCalls as any,
+		toolPlaneKey: 'plane-key-1',
+		isPlanApprovalProtectedTool,
+		getToolExecutionBindingImpl: toolName =>
+			({
+				kind: 'local',
+				toolName,
+			}) as any,
+	});
+
+	t.deepEqual(
+		partitioned.blockedCalls.map(toolCall => toolCall.id),
+		['todo-update', 'notebook-delete', 'legacy-add'],
+	);
+	t.deepEqual(
+		partitioned.executableCalls.map(toolCall => toolCall.id),
+		['todo-get', 'notebook-query'],
+	);
+});
+
 test('teammate synthetic tools keep stable order and gate plan approval tool', (t: any) => {
 	const defaultToolNames = buildTeammateSyntheticTools().map(
 		tool => tool.function.name,
