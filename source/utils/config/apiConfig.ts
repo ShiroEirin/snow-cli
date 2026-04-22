@@ -70,7 +70,7 @@ export interface ApiCoreConfig {
 	toolResultTokenLimit?: number;
 	// 文件编辑搜索相似度阈值
 	editSimilarityThreshold?: number;
-	// 流式逐行显示 AI 回复 (默认: false)
+	// 流式逐行显示 AI 回复 (默认: true)
 	streamingDisplay?: boolean;
 }
 
@@ -208,7 +208,7 @@ export const DEFAULT_CONFIG: AppConfig = {
 		maxTokens: 64000,
 		anthropicBeta: false,
 		streamIdleTimeoutSec: DEFAULT_STREAM_IDLE_TIMEOUT_SEC,
-		streamingDisplay: false,
+		streamingDisplay: true,
 	},
 };
 

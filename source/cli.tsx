@@ -224,7 +224,7 @@ Options
 		--help        Show help
 		--version     Show version
 		--update      Update to latest version
-		-c            Skip welcome screen and resume last conversation
+		-c            Skip welcome screen and resume last conversation (optionally specify sessionId)
 		--ask         Quick question mode (headless mode with single prompt, optional sessionId for continuous conversation)
 		--task        Create a background AI task (headless mode, saves session)
 		--yolo        Skip welcome screen and enable YOLO mode (auto-approve tools)
@@ -546,6 +546,7 @@ const Startup = ({
 	version,
 	skipWelcome,
 	autoResume,
+	resumeSessionId,
 	headlessPrompt,
 	headlessSessionId,
 	showTaskList,
@@ -556,6 +557,7 @@ const Startup = ({
 	version: string | undefined;
 	skipWelcome: boolean;
 	autoResume: boolean;
+	resumeSessionId?: string;
 	headlessPrompt?: string;
 	headlessSessionId?: string;
 	showTaskList?: boolean;
@@ -649,6 +651,7 @@ const Startup = ({
 			version={version}
 			skipWelcome={skipWelcome}
 			autoResume={autoResume}
+			resumeSessionId={resumeSessionId}
 			headlessPrompt={headlessPrompt}
 			headlessSessionId={headlessSessionId}
 			showTaskList={showTaskList}
@@ -665,18 +668,24 @@ process.stdout.write('\x1b[2K\r');
 
 // Track cleanup state to prevent multiple cleanup calls
 let isCleaningUp = false;
+// Shared promise so concurrent SIGINT/SIGTERM handlers await the same cleanup
+let cleanupPromise: Promise<void> | null = null;
 
 // Synchronous cleanup for 'exit' event (cannot be async)
 const cleanupSync = () => {
 	process.stdout.write('\x1b[?2004l');
 	process.stdout.write('\x1b[?25h'); // Restore cursor visibility on exit
 	process.stdout.write('\x1b[0 q'); // Restore cursor shape to terminal default (DECSCUSR)
-	const deps = (global as any).__deps;
-	if (deps) {
-		// Kill all child processes synchronously
-		deps.processManager.killAll();
-		deps.resourceMonitor.stopMonitoring();
-		deps.vscodeConnection.stop();
+	// If async cleanup is already running/done, skip deps to avoid double-close of
+	// libuv handles (causes UV_HANDLE_CLOSING assertion failure on Windows)
+	if (!isCleaningUp) {
+		const deps = (global as any).__deps;
+		if (deps) {
+			// Kill all child processes synchronously
+			deps.processManager.killAll();
+			deps.resourceMonitor.stopMonitoring();
+			deps.vscodeConnection.stop();
+		}
 	}
 };
 
@@ -684,6 +693,39 @@ const cleanupSync = () => {
 const cleanupAsync = async () => {
 	if (isCleaningUp) return;
 	isCleaningUp = true;
+
+	// Close the chokidar file watcher BEFORE Ink unmount, calling the agent
+	// directly to avoid triggering React state updates that cause Ink to
+	// re-render on handles that are about to be closed.
+	// React effect cleanups are synchronous and cannot await chokidar's async
+	// close(), which leaves libuv handles in a half-closed state.
+	try {
+		const codebaseAgent = (global as any).__codebaseAgent;
+		if (codebaseAgent) {
+			codebaseAgent.stopWatching();
+			await Promise.race([
+				codebaseAgent.waitForWatcherClose(),
+				new Promise(resolve => setTimeout(resolve, 1000)),
+			]);
+		}
+	} catch {
+		// Ignore codebase watcher close errors
+	}
+
+	// Unmount Ink so React effects cleanup (timers, stdin listeners, raw mode)
+	// can release libuv handles before we start closing deps.
+	try {
+		mainInk?.unmount();
+	} catch {
+		// Ignore unmount errors - already unmounted or in bad state
+	}
+
+	// On Windows, Ink unmount restores stdin raw mode and releases TTY handles.
+	// The console reader thread needs time to stop before process.exit() can
+	// safely close all remaining libuv handles. A single setImmediate is not
+	// enough — use setTimeout to span multiple event loop iterations so
+	// pending uv_close callbacks (stdin reader, chokidar IOCP) can complete.
+	await new Promise(resolve => setTimeout(resolve, 50));
 
 	process.stdout.write('\x1b[?2004l');
 	process.stdout.write('\x1b[?25h'); // Restore cursor visibility on exit
@@ -718,26 +760,42 @@ const cleanupAsync = async () => {
 
 process.on('exit', cleanupSync);
 process.on('SIGINT', async () => {
-	await cleanupAsync();
-	process.exit(0);
+	// Reuse the same promise so a rapid second Ctrl+C waits for the first cleanup
+	// instead of calling process.exit() while handles are still being torn down
+	if (!cleanupPromise) {
+		cleanupPromise = cleanupAsync();
+	}
+	await cleanupPromise;
+	// Don't call process.exit() synchronously — on Windows the stdin reader
+	// thread and chokidar IOCP may still be signalling their uv_async handles.
+	// A short delay lets libuv finish processing pending close callbacks,
+	// preventing "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)".
+	setTimeout(() => process.exit(0), 50);
 });
 process.on('SIGTERM', async () => {
-	await cleanupAsync();
-	process.exit(0);
+	if (!cleanupPromise) {
+		cleanupPromise = cleanupAsync();
+	}
+	await cleanupPromise;
+	setTimeout(() => process.exit(0), 50);
 });
-render(
+const isResumeMode = Boolean(cli.flags.c || cli.flags.cYolo);
+const resumeSessionId = isResumeMode ? cli.input[0] : undefined;
+
+const mainInk = render(
 	<Startup
 		version={VERSION}
 		skipWelcome={Boolean(
 			cli.flags.c || cli.flags.yolo || cli.flags.yoloP || cli.flags.cYolo,
 		)}
-		autoResume={Boolean(cli.flags.c || cli.flags.cYolo)}
+		autoResume={isResumeMode}
+		resumeSessionId={resumeSessionId}
 		headlessPrompt={
 			typeof cli.flags['ask'] === 'string'
 				? (cli.flags['ask'] as string)
 				: undefined
 		}
-		headlessSessionId={cli.input[0]}
+		headlessSessionId={isResumeMode ? undefined : cli.input[0]}
 		showTaskList={cli.flags.taskList}
 		isDevMode={cli.flags.dev}
 		enableYolo={

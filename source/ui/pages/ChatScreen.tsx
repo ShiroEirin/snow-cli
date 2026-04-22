@@ -38,12 +38,14 @@ const MIN_TERMINAL_HEIGHT = 10;
 
 type Props = {
 	autoResume?: boolean;
+	resumeSessionId?: string;
 	enableYolo?: boolean;
 	enablePlan?: boolean;
 };
 
 export default function ChatScreen({
 	autoResume,
+	resumeSessionId,
 	enableYolo,
 	enablePlan,
 }: Props) {
@@ -172,6 +174,7 @@ export default function ChatScreen({
 
 	useChatScreenSessionLifecycle({
 		autoResume,
+		resumeSessionId,
 		terminalWidth,
 		remountKey,
 		setRemountKey,
@@ -445,8 +448,7 @@ export default function ChatScreen({
 		);
 	}
 
-	// Show loading state when resuming session
-	if (isResumingSession) {
+	if (!commandsLoaded || isResumingSession) {
 		return (
 			<Box
 				flexDirection="column"
@@ -458,7 +460,11 @@ export default function ChatScreen({
 				<Text color="cyan">
 					<Spinner type="dots" />
 				</Text>
-				<Text>{t.chatScreen.sessionLoading}</Text>
+				<Text>
+					{isResumingSession
+						? t.chatScreen.sessionLoading
+						: t.chatScreen.chatInitializing}
+				</Text>
 			</Box>
 		);
 	}

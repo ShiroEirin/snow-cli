@@ -649,6 +649,16 @@ export const zh: TranslationKeys = {
 				openingDialog: '正在打开文件保存对话框...',
 				cancelledByUser: '导出已被用户取消。',
 			},
+			// IDE 命令消息
+			ide: {
+				disconnected: '已断开 IDE 连接。',
+				noAvailableIDEs:
+					'未检测到可用的 IDE。请确保 IDE 已安装 Snow CLI 扩展/插件并正在运行。',
+				unmatchedIDEs:
+					'发现 {count} 个其他运行中的 IDE，但其工作区/项目目录与当前工作目录不匹配。',
+				connectedTo: '已连接到 {label}',
+				connectFailed: '连接 IDE 失败：{error}',
+			},
 		},
 	},
 	permissionsPanel: {
@@ -1044,6 +1054,7 @@ export const zh: TranslationKeys = {
 		rollbackConversation: '仅回滚对话',
 		rollbackWarning: '将影响 {count} 个文件',
 		// Session
+		chatInitializing: '初始化中...',
 		sessionCreating: '创建第一个对话记录文件...',
 		sessionLoading: '加载会话...',
 		sessionSaving: '保存会话...',
@@ -1536,8 +1547,12 @@ export const zh: TranslationKeys = {
 		reverted: '修改已回退至上一个有效配置。',
 		invalidJson: 'JSON 格式无效，修改已回退至上一个有效配置。',
 	},
+	commandArgsPanel: {
+		navigationHint:
+			'\u2191\u2193 \u5bfc\u822a  Enter \u9009\u62e9  Tab/ESC \u5173\u95ed',
+	},
 	runningAgentsPanel: {
-		title: '运行中的代理',
+		title: '\u8fd0\u884c\u4e2d\u7684\u4ee3\u7406',
 		noAgentsRunning: '当前没有运行中的代理或队友',
 		keyboardHint: '(空格: 切换 · 回车: 确认 · Esc: 取消)',
 		selected: '已选择: {count}',
@@ -1644,8 +1659,7 @@ export const zh: TranslationKeys = {
 		noDrawings: '暂无作品。',
 		managerHint:
 			'↑↓ 移动 • 空格 多选 • D 删除 • S 切换退出画面 • Enter 编辑 • Esc 返回',
-		confirmDeleteMany:
-			'确认删除 {count} 项？Enter/Y/D 确认，N/Esc 取消',
+		confirmDeleteMany: '确认删除 {count} 项？Enter/Y/D 确认，N/Esc 取消',
 		moreAbove: '↑ 上方还有 {count} 项',
 		moreBelow: '↓ 下方还有 {count} 项',
 		selectedCount: '已选择 {count} 项',
@@ -1657,6 +1671,7 @@ export const zh: TranslationKeys = {
 		title: '再见',
 		goodbye: '感谢使用 Snow CLI',
 		thankYou: '期待下次相见',
+		resumeSession: '恢复会话',
 		version: 'v{version}',
 	},
 };

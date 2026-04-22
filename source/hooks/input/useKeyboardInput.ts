@@ -6,6 +6,7 @@ import {executeCommand} from '../../utils/execution/commandExecutor.js';
 import {copyToClipboard} from '../../utils/core/clipboard.js';
 import {commandUsageManager} from '../../utils/session/commandUsageManager.js';
 import {setPickerActive} from '../../utils/ui/pickerState.js';
+import {COMMAND_ARGS_OPTIONS} from '../ui/useCommandPanel.js';
 import type {SubAgent} from '../../utils/config/subAgentConfig.js';
 
 type KeyboardInputOptions = {
@@ -56,7 +57,7 @@ type KeyboardInputOptions = {
 	fileListRef: React.RefObject<{
 		getSelectedFile: () => string | null;
 		toggleDisplayMode: () => boolean;
-	}>;
+	} | null>;
 
 	showHistoryMenu: boolean;
 	setShowHistoryMenu: (show: boolean) => void;
@@ -184,6 +185,12 @@ type KeyboardInputOptions = {
 	confirmRunningAgentsSelection: () => any[];
 	closeRunningAgentsPicker: () => void;
 	updateRunningAgentsPickerState: (text: string, cursorPos: number) => void;
+	// Command args picker
+	showArgsPicker: boolean;
+	setShowArgsPicker: (show: boolean) => void;
+	argsSelectedIndex: number;
+	setArgsSelectedIndex: (index: number | ((prev: number) => number)) => void;
+	argsPickerContext: {commandName: string; options: string[]};
 };
 
 export function useKeyboardInput(options: KeyboardInputOptions) {
@@ -306,6 +313,11 @@ export function useKeyboardInput(options: KeyboardInputOptions) {
 		confirmRunningAgentsSelection,
 		closeRunningAgentsPicker,
 		updateRunningAgentsPickerState,
+		showArgsPicker,
+		setShowArgsPicker,
+		argsSelectedIndex,
+		setArgsSelectedIndex,
+		argsPickerContext,
 	} = options;
 
 	// Mark variables as used (they are used in useInput closure below)
@@ -350,7 +362,9 @@ export function useKeyboardInput(options: KeyboardInputOptions) {
 	// ink's useInput doesn't distinguish between Backspace and Delete.
 	// We must NOT use process.stdin.on('data', ...) directly, as adding a 'data' listener
 	// switches stdin to flowing mode, conflicting with Ink's readable-event-based handling.
-	const stdinContext = useStdin() as {internal_eventEmitter?: import('events').EventEmitter};
+	const stdinContext = useStdin() as {
+		internal_eventEmitter?: import('events').EventEmitter;
+	};
 	const {internal_eventEmitter: inkEventEmitter} = stdinContext;
 
 	useEffect(() => {
@@ -523,6 +537,13 @@ export function useKeyboardInput(options: KeyboardInputOptions) {
 
 		// Handle escape key for double-ESC history navigation
 		if (key.escape) {
+			if (showArgsPicker) {
+				setShowArgsPicker(false);
+				setArgsSelectedIndex(0);
+				setPickerActive(true);
+				return;
+			}
+
 			if (showProfilePicker) {
 				setShowProfilePicker(false);
 				setProfileSelectedIndex(0);
@@ -615,6 +636,58 @@ export function useKeyboardInput(options: KeyboardInputOptions) {
 					}
 				}
 			}
+			return;
+		}
+
+		// Handle command args picker navigation
+		if (showArgsPicker) {
+			const argOptions = argsPickerContext.options;
+
+			if (key.upArrow) {
+				setArgsSelectedIndex(prev =>
+					prev > 0 ? prev - 1 : Math.max(0, argOptions.length - 1),
+				);
+				return;
+			}
+
+			if (key.downArrow) {
+				const maxIndex = Math.max(0, argOptions.length - 1);
+				setArgsSelectedIndex(prev => (prev < maxIndex ? prev + 1 : 0));
+				return;
+			}
+
+			// Tab closes the panel
+			if (key.tab) {
+				setShowArgsPicker(false);
+				setArgsSelectedIndex(0);
+				setPickerActive(true);
+				return;
+			}
+
+			if (key.return) {
+				if (argOptions.length > 0 && argsSelectedIndex < argOptions.length) {
+					const selected = argOptions[argsSelectedIndex];
+					if (selected) {
+						const text = buffer.text;
+						const hasTrailingSpace = /^\/[a-zA-Z0-9_-]+\s+$/.test(text);
+						const suffix = hasTrailingSpace ? selected : ' ' + selected;
+						buffer.insert(suffix);
+						buffer.setCursorPosition(buffer.text.length);
+						setShowArgsPicker(false);
+						setArgsSelectedIndex(0);
+						triggerUpdate();
+					}
+				}
+				return;
+			}
+
+			// Backspace silently closes (not shown in hint text)
+			if (key.backspace || key.delete) {
+				setShowArgsPicker(false);
+				setArgsSelectedIndex(0);
+				return;
+			}
+
 			return;
 		}
 
@@ -1261,13 +1334,15 @@ export function useKeyboardInput(options: KeyboardInputOptions) {
 				) {
 					const selectedCommand = filteredCommands[commandSelectedIndex];
 					if (selectedCommand) {
-						// Replace input with "/" + selected command name
 						buffer.setText('/' + selectedCommand.name);
-						// Move cursor to end
 						buffer.setCursorPosition(buffer.text.length);
-						// Close command panel
 						setShowCommands(false);
 						setCommandSelectedIndex(0);
+						const cmdArgsOptions = COMMAND_ARGS_OPTIONS[selectedCommand.name];
+						if (cmdArgsOptions && cmdArgsOptions.length > 0) {
+							setShowArgsPicker(true);
+							setArgsSelectedIndex(0);
+						}
 						triggerUpdate();
 						return;
 					}
@@ -1360,6 +1435,21 @@ export function useKeyboardInput(options: KeyboardInputOptions) {
 					}
 				}
 				// If no commands available, fall through to normal Enter handling
+			}
+		}
+
+		// Tab to open command args picker when hints are visible
+		if (key.tab && !showCommands && !showFilePicker && !showArgsPicker) {
+			const text = buffer.text;
+			const cmdMatch = text.match(/^\/([a-zA-Z0-9_-]+)\s*$/);
+			if (cmdMatch) {
+				const cmdName = cmdMatch[1] ?? '';
+				const cmdOpts = COMMAND_ARGS_OPTIONS[cmdName];
+				if (cmdOpts && cmdOpts.length > 0) {
+					setShowArgsPicker(true);
+					setArgsSelectedIndex(0);
+					return;
+				}
 			}
 		}
 

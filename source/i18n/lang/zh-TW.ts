@@ -650,6 +650,16 @@ export const zhTW: TranslationKeys = {
 				openingDialog: '正在開啟檔案儲存對話方塊...',
 				cancelledByUser: '導出已被使用者取消。',
 			},
+			// IDE 命令訊息
+			ide: {
+				disconnected: '已中斷 IDE 連線。',
+				noAvailableIDEs:
+					'未偵測到可用的 IDE。請確認 IDE 已安裝 Snow CLI 擴充套件/外掛程式且正在執行。',
+				unmatchedIDEs:
+					'發現 {count} 個其他執行中的 IDE，但其工作區/專案目錄與目前工作目錄不相符。',
+				connectedTo: '已連線至 {label}',
+				connectFailed: '連線 IDE 失敗：{error}',
+			},
 		},
 	},
 	permissionsPanel: {
@@ -1045,6 +1055,7 @@ export const zhTW: TranslationKeys = {
 		rollbackConversation: '僅回復對話',
 		rollbackWarning: '將影響 {count} 個檔案',
 		// Session
+		chatInitializing: '初始化中...',
 		sessionCreating: '建立第一個對話記錄檔案...',
 		sessionLoading: '載入會話...',
 		sessionSaving: '儲存會話...',
@@ -1532,8 +1543,12 @@ export const zhTW: TranslationKeys = {
 		reverted: '修改已還原至上一個有效設定。',
 		invalidJson: 'JSON 格式無效，修改已還原至上一個有效設定。',
 	},
+	commandArgsPanel: {
+		navigationHint:
+			'\u2191\u2193 \u5c0e\u822a  Enter \u9078\u64c7  Tab/ESC \u95dc\u9589',
+	},
 	runningAgentsPanel: {
-		title: '執行中的代理',
+		title: '\u57f7\u884c\u4e2d\u7684\u4ee3\u7406',
 		noAgentsRunning: '目前沒有執行中的代理或隊友',
 		keyboardHint: '(空白鍵: 切換 · Enter: 確認 · Esc: 取消)',
 		selected: '已選擇: {count}',
@@ -1640,8 +1655,7 @@ export const zhTW: TranslationKeys = {
 		noDrawings: '尚無作品。',
 		managerHint:
 			'↑↓ 移動 • 空白鍵 多選 • D 刪除 • S 切換結束畫面 • Enter 編輯 • Esc 返回',
-		confirmDeleteMany:
-			'確認刪除 {count} 項？Enter/Y/D 確認，N/Esc 取消',
+		confirmDeleteMany: '確認刪除 {count} 項？Enter/Y/D 確認，N/Esc 取消',
 		moreAbove: '↑ 上方還有 {count} 項',
 		moreBelow: '↓ 下方還有 {count} 項',
 		selectedCount: '已選擇 {count} 項',
@@ -1653,6 +1667,7 @@ export const zhTW: TranslationKeys = {
 		title: '再見',
 		goodbye: '感謝使用 Snow CLI',
 		thankYou: '期待下次相見',
+		resumeSession: '恢復會話',
 		version: 'v{version}',
 	},
 };
