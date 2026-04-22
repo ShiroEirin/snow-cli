@@ -63,7 +63,7 @@ jobs:
             - snow -c supports adding sessionId to restore a specific session
             - Default streaming display scheme enabled
             - Fixed known bugs to improve stability
-            
+
             ### Installation
             ```bash
             npm install -g snow-ai
