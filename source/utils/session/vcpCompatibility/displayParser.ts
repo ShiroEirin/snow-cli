@@ -90,6 +90,8 @@ type ProtectedRange = {
 	end: number;
 };
 
+type ProtectedRangeMode = 'overlap' | 'start';
+
 export type ParsedToolResultFields = {
 	content?: string;
 	statusText?: string;
@@ -140,11 +142,19 @@ function overlapsProtectedRange(
 	);
 }
 
+function startsInProtectedRange(
+	start: number,
+	protectedRanges: readonly ProtectedRange[],
+): boolean {
+	return protectedRanges.some(range => start >= range.start && start < range.end);
+}
+
 function collectRegexMatches<T extends VcpDisplayBlock>(
 	text: string,
 	regex: RegExp,
 	buildBlock: MatchBuilder<T>,
 	protectedRanges: readonly ProtectedRange[] = [],
+	protectedRangeMode: ProtectedRangeMode = 'overlap',
 ): BlockMatch[] {
 	const matches: BlockMatch[] = [];
 	const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`;
@@ -155,7 +165,11 @@ function collectRegexMatches<T extends VcpDisplayBlock>(
 		const wholeMatch = match[0] || '';
 		const start = match.index;
 		const end = match.index + wholeMatch.length;
-		if (overlapsProtectedRange(start, end, protectedRanges)) {
+		const isProtected =
+			protectedRangeMode === 'start'
+				? startsInProtectedRange(start, protectedRanges)
+				: overlapsProtectedRange(start, end, protectedRanges);
+		if (isProtected) {
 			continue;
 		}
 
@@ -373,18 +387,21 @@ export function parseVcpDisplayBlocks(text: string): VcpDisplayParseResult {
 			VCP_TOOL_REQUEST_REGEX,
 			match => buildToolRequestBlock(match[1] || ''),
 			protectedRanges,
+			'start',
 		),
 		...collectRegexMatches(
 			text,
 			VCP_TOOL_RESULT_REGEX,
 			match => buildToolResultBlock(match[1] || ''),
 			protectedRanges,
+			'start',
 		),
 		...collectRegexMatches(
 			text,
 			VCP_DAILY_NOTE_REGEX,
 			match => buildDailyNoteBlock(match[1] || ''),
 			protectedRanges,
+			'start',
 		),
 		...collectRegexMatches(
 			text,
@@ -392,18 +409,21 @@ export function parseVcpDisplayBlocks(text: string): VcpDisplayParseResult {
 			match =>
 				buildThoughtChainBlock('vcp', match[2] || '', match[1] || undefined),
 			protectedRanges,
+			'start',
 		),
 		...collectRegexMatches(
 			text,
 			CONVENTIONAL_THOUGHT_REGEX,
 			match => buildThoughtChainBlock('conventional', match[1] || ''),
 			protectedRanges,
+			'start',
 		),
 		...collectRegexMatches(
 			text,
 			VCP_ROLE_DIVIDER_REGEX,
 			match => buildRoleDividerBlock(match),
 			protectedRanges,
+			'start',
 		),
 	].sort((left, right) => left.start - right.start || left.end - right.end);
 

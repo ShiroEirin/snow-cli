@@ -241,6 +241,48 @@ VCP调用结果结束]]`;
 	t.true(transcript.includes('- 内容: found 3 records'));
 });
 
+test('parse TOOL_RESULT blocks that contain fenced code as raw result content', t => {
+	const input = `[[VCP调用结果信息汇总:
+- 工具名称: TestTool
+- 执行状态: SUCCESS
+- 返回内容: Here is code:
+\`\`\`js
+console.log(1)
+\`\`\`
+VCP调用结果结束]]`;
+
+	const result = parseVcpDisplayBlocks(input);
+	const toolResult = result.blocks.find(block => block.type === 'toolResult');
+
+	t.truthy(toolResult);
+	if (toolResult?.type === 'toolResult') {
+		t.is(toolResult.toolName, 'TestTool');
+		t.is(toolResult.status, 'success');
+		t.true(toolResult.content.includes('```js'));
+		t.true(toolResult.content.includes('console.log(1)'));
+	}
+
+	t.is(result.mainText, '');
+});
+
+test('ignore TOOL_RESULT protocol samples inside fenced code blocks', t => {
+	const input = `下面是工具结果协议示例：
+\`\`\`text
+[[VCP调用结果信息汇总:
+- 工具名称: TestTool
+- 执行状态: SUCCESS
+- 返回内容: 示例内容
+VCP调用结果结束]]
+\`\`\`
+这里不是实际工具结果。`;
+
+	const result = parseVcpDisplayBlocks(input);
+
+	t.is(result.blocks.length, 0);
+	t.true(result.mainText.includes('[[VCP调用结果信息汇总:'));
+	t.true(result.mainText.includes('这里不是实际工具结果。'));
+});
+
 test('suppress VCP protocol shells during streaming until final render takes over', t => {
 	let state = null;
 
