@@ -295,6 +295,7 @@ export default function ChatScreen({
 		setConnectionPanelApiUrl: panelState.setConnectionPanelApiUrl,
 		setShowPermissionsPanel,
 		setShowBranchPanel: panelState.setShowBranchPanel,
+		setShowIdeSelectPanel: panelState.setShowIdeSelectPanel,
 		setShowNewPromptPanel: panelState.setShowNewPromptPanel,
 		setShowTodoListPanel: panelState.setShowTodoListPanel,
 		setShowPixelEditor: panelState.setShowPixelEditor,
@@ -413,6 +414,15 @@ export default function ChatScreen({
 		!schedulerExecutionState.state.isRunning &&
 		!hasBlockingPanel &&
 		!snapshotState.pendingRollback;
+
+	// 统一处理：任何会隐藏输入框的场景（面板打开、footer 隐藏等），
+	// 都需要清空 draftContent，避免面板关闭后 ChatInput 重新挂载时
+	// 通过 draftContent 把旧文本恢复回输入框。
+	useEffect(() => {
+		if (!shouldShowFooter) {
+			setInputDraftContent(null);
+		}
+	}, [shouldShowFooter, setInputDraftContent]);
 	const footerContextUsage = streamingState.contextUsage
 		? {
 				inputTokens: streamingState.contextUsage.prompt_tokens,
@@ -529,6 +539,19 @@ export default function ChatScreen({
 					showReviewCommitPanel={panelState.showReviewCommitPanel}
 					setShowReviewCommitPanel={panelState.setShowReviewCommitPanel}
 					onReviewCommitConfirm={handleReviewCommitConfirm}
+					showIdeSelectPanel={panelState.showIdeSelectPanel}
+					setShowIdeSelectPanel={panelState.setShowIdeSelectPanel}
+					onIdeConnectionChange={(status, message) => {
+						vscodeState.setVscodeConnectionStatus(status);
+						if (message) {
+							const commandMessage = {
+								role: 'command' as const,
+								content: message,
+								commandName: 'ide',
+							};
+							setMessages(prev => [...prev, commandMessage]);
+						}
+					}}
 					btwPrompt={btwPrompt}
 					onBtwClose={() => setBtwPrompt(null)}
 					disabled={
