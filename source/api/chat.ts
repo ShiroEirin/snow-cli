@@ -23,7 +23,10 @@ import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {getVersionHeader} from '../utils/core/version.js';
 import {resolveVcpRequestHeaders} from '../utils/session/vcpCompatibility/mode.js';
-import {resolveBuiltinSystemPrompt} from '../utils/session/vcpCompatibility/systemPromptPolicy.js';
+import {
+	assertVcpHttpSystemPromptSafe,
+	resolveBuiltinSystemPrompt,
+} from '../utils/session/vcpCompatibility/systemPromptPolicy.js';
 
 export type {
 	ChatMessage,
@@ -532,6 +535,7 @@ function convertToOpenAIMessages(
 
 	// 如果第一条消息已经是 system 消息，跳过
 	if (result.length > 0 && result[0]?.role === 'system') {
+		assertVcpHttpSystemPromptSafe(config, [result[0].content]);
 		return result;
 	}
 
@@ -588,6 +592,11 @@ function convertToOpenAIMessages(
 			...result,
 		];
 	}
+
+	assertVcpHttpSystemPromptSafe(
+		config,
+		result.map(message => message.content),
+	);
 
 	return result;
 }

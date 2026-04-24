@@ -21,7 +21,10 @@ import type {
 import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {getVersionHeader} from '../utils/core/version.js';
-import {resolveBuiltinSystemPrompt} from '../utils/session/vcpCompatibility/systemPromptPolicy.js';
+import {
+	assertVcpHttpSystemPromptSafe,
+	resolveBuiltinSystemPrompt,
+} from '../utils/session/vcpCompatibility/systemPromptPolicy.js';
 export interface ResponseOptions {
 	model: string;
 	messages: ChatMessage[];
@@ -371,6 +374,8 @@ function convertToResponseInput(
 		// 既没有自定义系统提示词，也不需要添加默认系统提示词
 		systemInstructions = 'You are a helpful assistant.';
 	}
+
+	assertVcpHttpSystemPromptSafe(config, [systemInstructions, ...result]);
 
 	return {input: result, systemInstructions};
 }

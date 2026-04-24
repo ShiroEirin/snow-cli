@@ -135,6 +135,22 @@ test('emit explicit snow protocol headers only for vcp requests', (t: any) => {
 	);
 });
 
+test('document snow headers as HTTP metadata and bridge identity', (t: any) => {
+	const headers = resolveVcpRequestHeaders({
+		backendMode: 'vcp',
+		toolTransport: 'local',
+		baseUrl: 'http://127.0.0.1:6005/v1',
+		requestMethod: 'chat',
+	});
+
+	t.deepEqual(Object.keys(headers), [
+		'x-snow-client',
+		'x-snow-protocol',
+		'x-snow-tool-mode',
+	]);
+	t.is(headers['x-snow-protocol'], 'function-calling');
+});
+
 test('route anthropic-like models through chat and keep tools in VCP mode', (t: any) => {
 	const resolution = resolveVcpModeRequest(
 		{

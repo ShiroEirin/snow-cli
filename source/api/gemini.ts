@@ -16,7 +16,10 @@ import type {ChatMessage, ChatCompletionTool, UsageInfo} from './types.js';
 import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {getVersionHeader} from '../utils/core/version.js';
-import {resolveBuiltinSystemPrompt} from '../utils/session/vcpCompatibility/systemPromptPolicy.js';
+import {
+	assertVcpHttpSystemPromptSafe,
+	resolveBuiltinSystemPrompt,
+} from '../utils/session/vcpCompatibility/systemPromptPolicy.js';
 
 export interface GeminiOptions {
 	model: string;
@@ -416,6 +419,13 @@ function convertToGeminiMessages(
 			}),
 		];
 	}
+
+	assertVcpHttpSystemPromptSafe(config, [
+		...(systemInstruction ?? []),
+		...contents.flatMap(content =>
+			content.parts.map((part: {text: string}) => part.text),
+		),
+	]);
 
 	return {systemInstruction, contents};
 }

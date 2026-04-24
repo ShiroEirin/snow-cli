@@ -25,6 +25,8 @@ export function resolveVcpRequestHeaders(
 		return {};
 	}
 
+	// VCPToolBox HTTP chat treats these as transparent client metadata. SnowBridge
+	// WebSocket validates the same snow protocol identity for manifest/execute.
 	return {
 		'x-snow-client': 'snow-cli',
 		'x-snow-protocol': 'function-calling',

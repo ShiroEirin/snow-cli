@@ -2,6 +2,12 @@ import type {VcpApiConfig} from '../../config/apiConfig.js';
 import {getSystemPromptForMode} from '../../../prompt/systemPrompt.js';
 import {getSystemPromptWithRole} from '../../../prompt/shared/promptHelpers.js';
 
+const VCP_HTTP_PROMPT_PLACEHOLDER_PATTERNS = [
+	/{{\s*VarToolList\s*}}/i,
+	/{{\s*VarVCPGuide\s*}}/i,
+	/{{\s*SarPrompt\s*}}/i,
+] as const;
+
 const DEFAULT_ROLE_TEXT =
 	'You are Snow AI CLI, an intelligent command-line assistant.';
 
@@ -21,6 +27,49 @@ function shouldUseVcpLocalMinimalPrompt(
 	config: Pick<VcpApiConfig, 'backendMode' | 'toolTransport'>,
 ): boolean {
 	return config.backendMode === 'vcp' && (config.toolTransport || 'local') === 'local';
+}
+
+function isVcpHttpPromptGuardEnabled(
+	config: Pick<VcpApiConfig, 'backendMode'>,
+): boolean {
+	return config.backendMode === 'vcp';
+}
+
+export function assertVcpHttpSystemPromptSafe(
+	config: Pick<VcpApiConfig, 'backendMode'>,
+	prompts: readonly unknown[] | undefined,
+): void {
+	if (!isVcpHttpPromptGuardEnabled(config) || !prompts) {
+		return;
+	}
+
+	for (const prompt of prompts) {
+		const promptText = extractPromptText(prompt);
+		for (const pattern of VCP_HTTP_PROMPT_PLACEHOLDER_PATTERNS) {
+			if (pattern.test(promptText)) {
+				throw new Error(
+					'VCP HTTP system prompt contains VCPToolBox text-protocol placeholders. Remove {{VarToolList}}, {{VarVCPGuide}}, and {{SarPrompt}} before sending function-calling requests through VCPToolBox.',
+				);
+			}
+		}
+	}
+}
+
+function extractPromptText(prompt: unknown): string {
+	if (typeof prompt === 'string') {
+		return prompt;
+	}
+
+	if (Array.isArray(prompt)) {
+		return prompt.map(item => extractPromptText(item)).join('\n');
+	}
+
+	if (prompt && typeof prompt === 'object') {
+		const maybeText = (prompt as {text?: unknown}).text;
+		return typeof maybeText === 'string' ? maybeText : '';
+	}
+
+	return '';
 }
 
 export function resolveBuiltinSystemPrompt(

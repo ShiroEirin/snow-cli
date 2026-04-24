@@ -20,7 +20,10 @@ import {addProxyToFetchOptions} from '../utils/core/proxyUtils.js';
 import {saveUsageToFile} from '../utils/core/usageLogger.js';
 import {isDevMode, getDevUserId} from '../utils/core/devMode.js';
 import {getVersionHeader} from '../utils/core/version.js';
-import {resolveBuiltinSystemPrompt} from '../utils/session/vcpCompatibility/systemPromptPolicy.js';
+import {
+	assertVcpHttpSystemPromptSafe,
+	resolveBuiltinSystemPrompt,
+} from '../utils/session/vcpCompatibility/systemPromptPolicy.js';
 
 export interface AnthropicOptions {
 	model: string;
@@ -449,6 +452,11 @@ function convertToAnthropicMessages(
 			}),
 		];
 	}
+
+	assertVcpHttpSystemPromptSafe(config, [
+		...(systemContents ?? []),
+		...anthropicMessages.map(message => message.content),
+	]);
 
 	let lastUserMessageIndex = -1;
 	for (let i = anthropicMessages.length - 1; i >= 0; i--) {
