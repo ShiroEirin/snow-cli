@@ -1,13 +1,9 @@
-import {executeMCPTool} from './mcpToolsManager.js';
 import {subAgentService} from '../../mcp/subagent.js';
 import {teamService} from '../../mcp/team.js';
 import {runningSubAgentTracker} from './runningSubAgentTracker.js';
 import {parseJsonWithFix} from '../core/retryUtils.js';
 import {logger} from '../core/logger.js';
-import {sessionManager} from '../session/sessionManager.js';
-import {getToolExecutionBinding} from '../session/vcpCompatibility/toolExecutionBinding.js';
 import {
-	summarizeBridgeStatusPayload,
 	type BridgeStatusSummary,
 } from '../session/vcpCompatibility/bridgeStatus.js';
 
@@ -19,14 +15,9 @@ import {
 	buildToolHistoryArtifacts,
 } from './toolHistoryArtifacts.js';
 import {
-	extractToolResultSidecar,
-	normalizeBridgeIngressPayload,
-} from './bridgeIngress.js';
-import {executeBridgeToolCall} from './bridgeToolExecution.js';
-import {
-	shouldBuildStructuredToolArtifacts,
 	shouldRefreshStructuredToolArtifacts,
 } from './toolResultPolicy.js';
+import {executeRegularToolStrategy} from './toolExecutionStrategy.js';
 
 export {buildToolHistoryContent} from './toolHistoryArtifacts.js';
 
@@ -141,7 +132,7 @@ export interface UserInteractionCallback {
 	}>;
 }
 
-export type BridgeToolStatusUpdate = BridgeStatusSummary & {
+export type ToolLifecycleUpdate = BridgeStatusSummary & {
 	toolCallId: string;
 	toolName: string;
 };
@@ -186,7 +177,7 @@ function isMultimodalContent(value: any): value is MultimodalContent {
 /**
  * Extract images and text content from a result that may be multimodal
  */
-function extractMultimodalContent(result: any): {
+export function extractMultimodalContent(result: any): {
 	textContent: string;
 	images?: ImageContent[];
 } {
@@ -268,7 +259,7 @@ export async function executeToolCall(
 	addToAlwaysApproved?: AddToAlwaysApprovedCallback,
 	onUserInteractionNeeded?: UserInteractionCallback,
 	toolSnapshotKey?: string,
-	onBridgeToolStatusUpdate?: (update: BridgeToolStatusUpdate) => void,
+	onToolLifecycleUpdate?: (update: ToolLifecycleUpdate) => void,
 ): Promise<ToolResult> {
 	let result: ToolResult | undefined;
 	let executionError: Error | null = null;
@@ -496,66 +487,29 @@ export async function executeToolCall(
 			}
 		} else {
 			// Regular tool execution
-			const currentSessionId = sessionManager.getCurrentSession()?.id;
 			if (toolCall.function.name === 'tool_search') {
-				const toolResult = await executeMCPTool(
-					toolCall.function.name,
+				const strategyResult = await executeRegularToolStrategy({
+					toolCallId: toolCall.id,
+					toolName: toolCall.function.name,
 					args,
 					abortSignal,
 					onTokenUpdate,
-				);
-				const {textContent, images} = extractMultimodalContent(toolResult);
-
-				result = {
-					tool_call_id: toolCall.id,
-					role: 'tool',
-					content: textContent,
-					images,
-				};
+					requireBinding: false,
+				});
+				result = strategyResult.toolResult;
 				return result;
 			}
-			const executionBinding = getToolExecutionBinding(
-				toolCall.function.name,
-				toolSnapshotKey || currentSessionId,
-			);
-			if (!executionBinding) {
-				throw new Error(
-					`Tool execution binding not found for ${toolCall.function.name}`,
-				);
-			}
-			const toolResult =
-				executionBinding.kind === 'bridge'
-					? await executeBridgeToolCall({
-							toolName: toolCall.function.name,
-							args,
-							toolPlaneKey: toolSnapshotKey || currentSessionId,
-							abortSignal,
-							onStatus: payload => {
-								const bridgeSummary = summarizeBridgeStatusPayload(
-									normalizeBridgeIngressPayload(payload),
-								);
-								if (!bridgeSummary) {
-									return;
-								}
 
-								onBridgeToolStatusUpdate?.({
-									...bridgeSummary,
-									toolCallId: toolCall.id,
-									toolName: toolCall.function.name,
-								});
-							},
-					  })
-					: await executeMCPTool(
-						toolCall.function.name,
-						args,
-						abortSignal,
-						onTokenUpdate,
-					  );
-
-			const normalizedToolResult =
-				executionBinding.kind === 'bridge'
-					? normalizeBridgeIngressPayload(toolResult)
-					: toolResult;
+			const strategyResult = await executeRegularToolStrategy({
+				toolCallId: toolCall.id,
+				toolName: toolCall.function.name,
+				args,
+				abortSignal,
+				onTokenUpdate,
+				toolPlaneKey: toolSnapshotKey,
+				onToolLifecycleUpdate,
+			});
+			const normalizedToolResult = strategyResult.rawResult as any;
 
 			// Pre-extract edit diff data from raw result before stringification/truncation
 			// This ensures DiffViewer data survives token limit truncation
@@ -586,44 +540,8 @@ export async function executeToolCall(
 				}
 			}
 
-			// Extract multimodal content (text + images)
-			const {textContent, images} = extractMultimodalContent(normalizedToolResult);
-			const bridgeSidecar = extractToolResultSidecar(normalizedToolResult);
-			const shouldBuildStructuredArtifacts = shouldBuildStructuredToolArtifacts({
-				toolName: toolCall.function.name,
-				executionBinding,
-			});
-			const toolHistoryArtifacts = shouldBuildStructuredArtifacts
-				? bridgeSidecar.historyContent || bridgeSidecar.previewContent
-					? {
-							historyContent:
-								bridgeSidecar.historyContent ||
-								buildToolHistoryArtifacts(
-									normalizedToolResult,
-									textContent,
-								).historyContent,
-							previewContent: bridgeSidecar.previewContent,
-					  }
-					: buildToolHistoryArtifacts(normalizedToolResult, textContent)
-				: undefined;
-			const bridgeSummary =
-				executionBinding.kind === 'bridge'
-					? summarizeBridgeStatusPayload(normalizedToolResult)
-					: null;
-
 			result = {
-				tool_call_id: toolCall.id,
-				role: 'tool',
-				content: textContent,
-				...(toolHistoryArtifacts
-					? {
-							historyContent: toolHistoryArtifacts.historyContent,
-							previewContent: toolHistoryArtifacts.previewContent,
-					  }
-					: {}),
-				toolStatusDetail: bridgeSummary?.detail,
-				toolLifecycleState: bridgeSummary?.state,
-				images,
+				...strategyResult.toolResult,
 				editDiffData,
 			};
 		}
@@ -891,7 +809,7 @@ export async function executeToolCalls(
 	addToAlwaysApproved?: AddToAlwaysApprovedCallback,
 	onUserInteractionNeeded?: UserInteractionCallback,
 	toolSnapshotKey?: string,
-	onBridgeToolStatusUpdate?: (update: BridgeToolStatusUpdate) => void,
+	onToolLifecycleUpdate?: (update: ToolLifecycleUpdate) => void,
 ): Promise<ToolResult[]> {
 	// Group tool calls by their resource identifier
 	const resourceGroups = new Map<string, ToolCall[]>();
@@ -932,7 +850,7 @@ export async function executeToolCalls(
 					addToAlwaysApproved,
 					onUserInteractionNeeded,
 					toolSnapshotKey,
-					onBridgeToolStatusUpdate,
+					onToolLifecycleUpdate,
 				);
 				groupResults.push(result);
 

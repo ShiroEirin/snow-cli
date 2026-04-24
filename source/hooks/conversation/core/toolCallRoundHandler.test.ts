@@ -3,12 +3,12 @@ import anyTest from 'ava';
 const test = anyTest as any;
 
 import {
-	applyBridgeToolStatusUpdate,
+	applyToolLifecycleUpdate,
 	replacePendingToolMessages,
 } from './toolRoundMessageAdapter.js';
 
-test('applyBridgeToolStatusUpdate settles terminal bridge updates without leaving pending state behind', (t: any) => {
-	const updatedMessages = applyBridgeToolStatusUpdate(
+test('applyToolLifecycleUpdate settles terminal tool lifecycle updates without leaving pending state behind', (t: any) => {
+	const updatedMessages = applyToolLifecycleUpdate(
 		[
 			{
 				role: 'assistant',
@@ -39,7 +39,7 @@ test('applyBridgeToolStatusUpdate settles terminal bridge updates without leavin
 	);
 });
 
-test('replacePendingToolMessages reuses the settled bridge shell for the final result payload', (t: any) => {
+test('replacePendingToolMessages reuses the settled tool lifecycle shell for the final result payload', (t: any) => {
 	const nextMessages = replacePendingToolMessages(
 		[
 			{

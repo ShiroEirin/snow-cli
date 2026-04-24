@@ -1,4 +1,4 @@
-import type {BridgeToolStatusUpdate} from '../../../utils/execution/toolExecutor.js';
+import type {ToolLifecycleUpdate} from '../../../utils/execution/toolExecutor.js';
 import type {Message} from '../../../ui/components/chat/MessageList.js';
 import {
 	buildToolLifecycleSideband,
@@ -79,18 +79,18 @@ export function replacePendingToolMessages(
 }
 
 /**
- * Applies a bridge lifecycle update onto the matching tool UI message.
+ * Applies a tool lifecycle update onto the matching tool UI message.
  *
  * Args:
  *   existingMessages: Current rendered chat messages.
- *   update: Bridge lifecycle update emitted during tool execution.
+ *   update: Tool lifecycle update emitted during tool execution.
  *
  * Returns:
  *   The original message list when nothing changed, otherwise an updated copy.
  */
-export function applyBridgeToolStatusUpdate(
+export function applyToolLifecycleUpdate(
 	existingMessages: Message[],
-	update: BridgeToolStatusUpdate,
+	update: ToolLifecycleUpdate,
 ): Message[] {
 	let changed = false;
 	const nextMessages = existingMessages.map(message => {

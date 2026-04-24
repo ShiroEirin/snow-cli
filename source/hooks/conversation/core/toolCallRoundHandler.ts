@@ -24,7 +24,7 @@ import type {
 import type {MCPTool} from '../../../utils/execution/mcpToolsManager.js';
 import type {ConfirmationResult} from '../../../ui/components/tools/ToolConfirmation.js';
 import {
-	applyBridgeToolStatusUpdate,
+	applyToolLifecycleUpdate,
 	replacePendingToolMessages,
 } from './toolRoundMessageAdapter.js';
 import {
@@ -35,7 +35,7 @@ import {getOpenAiConfig} from '../../../utils/config/apiConfig.js';
 import {shouldProjectToolContext} from '../../../utils/session/toolMessageProjection.js';
 
 export {
-	applyBridgeToolStatusUpdate,
+	applyToolLifecycleUpdate,
 	replacePendingToolMessages,
 } from './toolRoundMessageAdapter.js';
 
@@ -216,7 +216,7 @@ export async function handleToolCallRound(ctx: {
 		},
 		toolSnapshotKey,
 		update => {
-			setMessages(prev => applyBridgeToolStatusUpdate(prev, update));
+			setMessages(prev => applyToolLifecycleUpdate(prev, update));
 		},
 	);
 

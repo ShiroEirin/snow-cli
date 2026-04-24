@@ -5,7 +5,7 @@ import {getSystemPromptWithRole} from '../../../prompt/shared/promptHelpers.js';
 const VCP_HTTP_PROMPT_PLACEHOLDER_PATTERNS = [
 	/{{\s*VarToolList\s*}}/i,
 	/{{\s*VarVCPGuide\s*}}/i,
-	/{{\s*SarPrompt\s*}}/i,
+	/{{\s*SarPrompt\d*\s*}}/i,
 ] as const;
 
 const DEFAULT_ROLE_TEXT =
@@ -48,7 +48,7 @@ export function assertVcpHttpSystemPromptSafe(
 		for (const pattern of VCP_HTTP_PROMPT_PLACEHOLDER_PATTERNS) {
 			if (pattern.test(promptText)) {
 				throw new Error(
-					'VCP HTTP system prompt contains VCPToolBox text-protocol placeholders. Remove {{VarToolList}}, {{VarVCPGuide}}, and {{SarPrompt}} before sending function-calling requests through VCPToolBox.',
+					'VCP HTTP system prompt contains VCPToolBox text-protocol placeholders. Remove {{VarToolList}}, {{VarVCPGuide}}, and {{SarPromptN}} before sending function-calling requests through VCPToolBox.',
 				);
 			}
 		}

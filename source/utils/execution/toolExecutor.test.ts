@@ -25,6 +25,7 @@ import {
 	normalizeBridgePhaseValue,
 } from './bridgeIngress.js';
 import {buildToolHistoryArtifacts} from './toolHistoryArtifacts.js';
+import {executeRegularToolStrategy} from './toolExecutionStrategy.js';
 import {
 	clearToolExecutionBindings,
 	registerToolExecutionBindings,
@@ -142,6 +143,20 @@ test('tool_search bypasses regular execution binding lookup', async (t: any) => 
 	t.true(result.content.includes('subagent filesystem'));
 	t.is(result.historyContent, undefined);
 	t.is(result.previewContent, undefined);
+});
+
+test('regular tool strategy requires bindings by default', async (t: any) => {
+	const result = await t.throwsAsync(() =>
+		executeRegularToolStrategy({
+			toolCallId: 'missing-binding-call',
+			toolName: 'filesystem-read',
+			args: {filePath: 'missing.txt'},
+		}),
+	);
+
+	t.true(
+		result?.message.includes('Tool execution binding not found for filesystem-read'),
+	);
 });
 
 test('invalid concatenated tool arguments fail instead of truncating payload', async (t: any) => {

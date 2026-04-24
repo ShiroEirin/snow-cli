@@ -58,6 +58,25 @@ test('reject VCPToolBox text-protocol placeholders in VCP HTTP prompts', t => {
 	);
 });
 
+test('reject numbered SarPrompt placeholders in VCP HTTP prompts', t => {
+	const error = t.throws(() => {
+		assertVcpHttpSystemPromptSafe(
+			{
+				backendMode: 'vcp',
+			},
+			[
+				[
+					{text: 'custom prompt {{SarPrompt1}}'},
+					{text: 'custom prompt {{ SarPrompt2 }}'},
+				],
+			],
+		);
+	});
+
+	t.true(
+		error?.message.includes('VCPToolBox text-protocol placeholders'),
+	);
+});
 test('allow the same placeholder text outside VCP mode', t => {
 	t.notThrows(() => {
 		assertVcpHttpSystemPromptSafe(
