@@ -218,6 +218,8 @@ export const zhTW: TranslationKeys = {
 		responsesReasoningEffort: 'Responses 推理強度:',
 		responsesVerbosity: 'Responses 輸出詳細度:',
 		responsesFastMode: 'Responses Fast (priority):',
+		chatThinkingEnabled: '啟用 Chat 思考 (DeepSeek):',
+		chatReasoningEffort: 'Chat 思考強度:',
 		advancedModel: '進階模型(輸入後可以搜尋):',
 		basicModel: '基礎模型(輸入後可以搜尋):',
 		maxContextTokens: '最大上下文令牌:',
@@ -618,6 +620,7 @@ export const zhTW: TranslationKeys = {
 			hybridCompress:
 				'切換混合壓縮模式（AI 摘要 + 智慧截斷，用於 /compact 和自動壓縮）',
 			team: '切換 Agent Team 模式 - 協調多個代理在獨立 Git Worktree 中並行工作',
+			branch: '將目前對話分叉為新分支，可用 /resume 返回原會話',
 			worktree: '開啟 Git 分支管理面板，支援切換、新建和刪除分支',
 			diff: '在 IDE 中查看對話的檔案修改 Diff',
 			connect: '連接到 Snow Instance 進行 AI 處理',
@@ -659,6 +662,12 @@ export const zhTW: TranslationKeys = {
 					'發現 {count} 個其他執行中的 IDE，但其工作區/專案目錄與目前工作目錄不相符。',
 				connectedTo: '已連線至 {label}',
 				connectFailed: '連線 IDE 失敗：{error}',
+			},
+			branchFork: {
+				noActiveSession: '沒有可分叉的活躍會話。',
+				success:
+					'對話已分叉為分支 {name}。返回原會話請執行:\n/resume {originalId}',
+				failed: '會話分叉失敗',
 			},
 		},
 	},

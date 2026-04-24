@@ -216,6 +216,8 @@ export type TranslationKeys = {
 		responsesReasoningEffort: string;
 		responsesVerbosity: string;
 		responsesFastMode: string;
+		chatThinkingEnabled: string;
+		chatReasoningEffort: string;
 		advancedModel: string;
 		basicModel: string;
 		maxContextTokens: string;
@@ -608,7 +610,8 @@ export type TranslationKeys = {
 			toolSearch: string;
 			hybridCompress: string;
 			team: string;
-			worktree: string; // Git branch management panel
+			branch: string; // Fork conversation into a new branch
+		worktree: string; // Git branch management panel
 			diff: string;
 			connect: string;
 			disconnect: string;
@@ -647,6 +650,11 @@ export type TranslationKeys = {
 				unmatchedIDEs: string;
 				connectedTo: string;
 				connectFailed: string;
+			};
+			branchFork: {
+				noActiveSession: string;
+				success: string;
+				failed: string;
 			};
 		};
 	};

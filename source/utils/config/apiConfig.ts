@@ -29,6 +29,13 @@ export interface ResponsesReasoningConfig {
 	effort: 'none' | 'low' | 'medium' | 'high' | 'xhigh';
 }
 
+export type ChatReasoningEffort = 'low' | 'medium' | 'high' | 'max';
+
+export interface ChatThinkingConfig {
+	enabled: boolean;
+	reasoning_effort?: ChatReasoningEffort;
+}
+
 export interface VcpApiConfig {
 	backendMode?: BackendMode;
 	toolTransport?: ToolTransport;
@@ -53,6 +60,7 @@ export interface ApiCoreConfig {
 	thinking?: ThinkingConfig; // Anthropic thinking configuration
 	geminiThinking?: GeminiThinkingConfig; // Gemini thinking configuration
 	responsesReasoning?: ResponsesReasoningConfig; // Responses API reasoning configuration
+	chatThinking?: ChatThinkingConfig; // Chat API thinking configuration
 	responsesFastMode?: boolean; // Responses API fast mode (service_tier: "priority")
 	responsesVerbosity?: 'low' | 'medium' | 'high'; // Responses API text verbosity (default: medium)
 	anthropicSpeed?: 'fast' | 'standard'; // Anthropic speed parameter (optional, not sent when undefined)

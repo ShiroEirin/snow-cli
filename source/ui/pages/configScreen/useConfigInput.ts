@@ -59,6 +59,8 @@ export function useConfigInput(
 		setResponsesReasoningEnabled,
 		responsesFastMode,
 		setResponsesFastMode,
+		chatThinkingEnabled,
+		setChatThinkingEnabled,
 		maxContextTokens,
 		setMaxContextTokens,
 		maxTokens,
@@ -432,6 +434,10 @@ export function useConfigInput(
 				if (!next) setShowThinking(false);
 			} else if (currentField === 'responsesFastMode') {
 				setResponsesFastMode(!responsesFastMode);
+			} else if (currentField === 'chatThinkingEnabled') {
+				const next = !chatThinkingEnabled;
+				setChatThinkingEnabled(next);
+				if (!next) setShowThinking(false);
 			}
 		} else if (
 			currentField === 'anthropicCacheTTL' ||
@@ -439,7 +445,8 @@ export function useConfigInput(
 			currentField === 'thinkingMode' ||
 			currentField === 'thinkingEffort' ||
 			currentField === 'responsesReasoningEffort' ||
-			currentField === 'responsesVerbosity'
+			currentField === 'responsesVerbosity' ||
+			currentField === 'chatReasoningEffort'
 		) {
 			setIsEditing(true);
 		} else if (isNumericField(currentField)) {

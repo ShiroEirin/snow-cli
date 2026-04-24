@@ -236,6 +236,8 @@ export const en: TranslationKeys = {
 		responsesReasoningEffort: 'Responses Reasoning Effort:',
 		responsesVerbosity: 'Responses Verbosity:',
 		responsesFastMode: 'Responses Fast Mode (priority):',
+		chatThinkingEnabled: 'Chat Thinking (DeepSeek):',
+		chatReasoningEffort: 'Chat Reasoning Effort:',
 		advancedModel: 'Advanced Model(Type to search):',
 		basicModel: 'Basic Model(Type to search):',
 		maxContextTokens: 'Max Context Tokens:',
@@ -658,6 +660,8 @@ export const en: TranslationKeys = {
 			hybridCompress:
 				'Toggle Hybrid Compress mode (AI summary + smart truncation for /compact and auto-compress)',
 			team: 'Toggle Agent Team mode - orchestrate multiple agents working together in independent Git worktrees',
+			branch:
+				'Fork current conversation into a new branch',
 			worktree:
 				'Open Git branch management panel for switching, creating and deleting branches',
 			diff: 'Review file changes from a conversation in IDE diff view',
@@ -701,6 +705,12 @@ export const en: TranslationKeys = {
 					'Found {count} other running IDE(s). However, their workspace/project directories do not match the current cwd.',
 				connectedTo: 'Connected to {label}',
 				connectFailed: 'Failed to connect to IDE: {error}',
+			},
+			branchFork: {
+				noActiveSession: 'No active session to fork.',
+				success:
+					'Conversation forked into branch {name}. To return to the original session:\n/resume {originalId}',
+				failed: 'Failed to fork session',
 			},
 		},
 	},

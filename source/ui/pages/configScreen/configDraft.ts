@@ -32,6 +32,7 @@ export type ConfigDraftInput = Pick<
 	| 'toolResultTokenLimit'
 	| 'editSimilarityThreshold'
 > &
+	Partial<Pick<ApiCoreConfig, 'chatThinking'>> &
 	Pick<
 		VcpApiConfig,
 	| 'enableVcpTimeBridge'
