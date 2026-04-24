@@ -3,7 +3,7 @@ import type {
 	ToolTransport,
 } from '../../../utils/config/apiConfig.js';
 import {getOpenAiConfig} from '../../../utils/config/apiConfig.js';
-import type {ToolResult} from '../../../utils/execution/toolExecutor.js';
+import type {ToolResult} from '../../../utils/execution/toolTypes.js';
 import {
 	buildConversationToolMessage,
 	buildHistoryToolMessage,

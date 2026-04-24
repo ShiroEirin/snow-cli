@@ -9,11 +9,8 @@ import {executeBridgeToolCall} from './bridgeToolExecution.js';
 import {normalizeBridgeIngressPayload, extractToolResultSidecar} from './bridgeIngress.js';
 import {buildToolHistoryArtifacts} from './toolHistoryArtifacts.js';
 import {shouldBuildStructuredToolArtifacts} from './toolResultPolicy.js';
-import {
-	extractMultimodalContent,
-	type ToolLifecycleUpdate,
-	type ToolResult,
-} from './toolExecutor.js';
+import type {ToolLifecycleUpdate, ToolResult} from './toolTypes.js';
+import {extractMultimodalContent} from './toolResultContent.js';
 
 export type RegularToolStrategyResult = {
 	toolResult: ToolResult;

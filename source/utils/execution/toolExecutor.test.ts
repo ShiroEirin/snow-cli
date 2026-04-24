@@ -16,9 +16,9 @@ import {
 	buildToolHistoryContent,
 	createTeamUserQuestionAdapter,
 	executeToolCall,
-	type ToolResult,
 	type ToolCall,
 } from './toolExecutor.js';
+import type {ToolResult} from './toolTypes.js';
 import {
 	extractToolResultSidecar,
 	normalizeBridgeIngressPayload,

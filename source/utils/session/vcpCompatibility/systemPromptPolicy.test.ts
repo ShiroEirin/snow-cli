@@ -77,6 +77,37 @@ test('reject numbered SarPrompt placeholders in VCP HTTP prompts', t => {
 		error?.message.includes('VCPToolBox text-protocol placeholders'),
 	);
 });
+test('reject VCP plugin description placeholders in VCP HTTP prompts', t => {
+	for (const prompt of [
+		'custom prompt {{VCPAllTools}}',
+		'custom prompt {{VCPFileOperator}}',
+		'custom prompt {{ VCPDailyNoteEditor }}',
+	]) {
+		const error = t.throws(() => {
+			assertVcpHttpSystemPromptSafe(
+				{
+					backendMode: 'vcp',
+				},
+				[prompt],
+			);
+		});
+
+		t.true(
+			error?.message.includes('VCPToolBox text-protocol placeholders'),
+		);
+	}
+});
+
+test('allow VCP async result placeholders because they are runtime result references', t => {
+	t.notThrows(() => {
+		assertVcpHttpSystemPromptSafe(
+			{
+				backendMode: 'vcp',
+			},
+			['runtime result {{VCP_ASYNC_RESULT::Plugin::request_1}}'],
+		);
+	});
+});
 test('allow the same placeholder text outside VCP mode', t => {
 	t.notThrows(() => {
 		assertVcpHttpSystemPromptSafe(

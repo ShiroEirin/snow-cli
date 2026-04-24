@@ -1,4 +1,5 @@
 import type {MCPServiceTools} from '../../execution/mcpToolsManager.js';
+import {logger} from '../../core/logger.js';
 import type {
 	BridgeToolArgumentBinding,
 	BridgeToolExecutionBinding,
@@ -79,6 +80,26 @@ type BridgeToolParameterDefinition = {
 	fileUrlCompatible?: boolean;
 };
 
+const warnedBridgeManifestShapes = new Set<string>();
+
+function warnBridgeManifestShapeOnce(reason: string): void {
+	if (warnedBridgeManifestShapes.has(reason)) {
+		return;
+	}
+
+	warnedBridgeManifestShapes.add(reason);
+	logger.warn(`[SnowBridge] Manifest compatibility warning: ${reason}`);
+}
+
+function warnIfBridgeManifestShapeIsSuspicious(manifest: BridgeManifestResponse): void {
+	if (!manifest.bridgeVersion) {
+		warnBridgeManifestShapeOnce('missing bridgeVersion; translator is using compatibility mode.');
+	}
+
+	if (!Array.isArray(manifest.plugins)) {
+		warnBridgeManifestShapeOnce('plugins is not an array; no bridge tools can be translated.');
+	}
+}
 const SUPPORTED_BRIDGE_PLUGIN_TYPES = new Set([
 	'synchronous',
 	'asynchronous',
@@ -226,6 +247,7 @@ function normalizeBridgeManifestPlugin(
 export function normalizeBridgeManifestResponse(
 	manifest: BridgeManifestResponse,
 ): BridgeManifestResponse {
+	warnIfBridgeManifestShapeIsSuspicious(manifest);
 	const metadata = mergeBridgeMetadataSidecars(
 		manifest.metadata,
 		manifest.sidecar,

@@ -1,4 +1,4 @@
-import type {ToolLifecycleUpdate} from '../../../utils/execution/toolExecutor.js';
+import type {ToolLifecycleUpdate} from '../../../utils/execution/toolTypes.js';
 import type {Message} from '../../../ui/components/chat/MessageList.js';
 import {
 	buildToolLifecycleSideband,

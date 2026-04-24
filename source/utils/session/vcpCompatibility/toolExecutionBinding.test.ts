@@ -92,6 +92,41 @@ test.serial('resolve execution binding from latest session plane key fallback', 
 	);
 });
 
+test.serial('resolve session binding when explicit session lookup misses direct resource', (t: any) => {
+	rotateToolExecutionBindingsSession({
+		sessionKey: 'chat-session',
+		nextToolPlaneKey: 'plane-b',
+		bindings: [
+			{
+				kind: 'bridge',
+				toolName: 'vcp-codesearcher-searchcode',
+				pluginName: 'CodeSearcher',
+				displayName: 'CodeSearcher',
+				commandName: 'SearchCode',
+				stringifyArgumentNames: [],
+			},
+		],
+	});
+
+	registerToolExecutionBindings('chat-session', [
+		{
+			kind: 'local',
+			toolName: 'filesystem-read',
+		},
+	]);
+
+	t.deepEqual(
+		getToolExecutionBinding('vcp-codesearcher-searchcode', 'chat-session'),
+		{
+			kind: 'bridge',
+			toolName: 'vcp-codesearcher-searchcode',
+			pluginName: 'CodeSearcher',
+			displayName: 'CodeSearcher',
+			commandName: 'SearchCode',
+			stringifyArgumentNames: [],
+		},
+	);
+});
 test.serial('drop stale session fallback after explicit plane cleanup', (t: any) => {
 	rotateToolExecutionBindingsSession({
 		sessionKey: 'chat-session',

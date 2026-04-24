@@ -1,8 +1,6 @@
 import type {Message} from '../../../ui/components/chat/MessageList.js';
-import type {
-	ToolCall,
-	ToolResult,
-} from '../../../utils/execution/toolExecutor.js';
+import type {ToolCall} from '../../../utils/execution/toolExecutor.js';
+import type {ToolResult} from '../../../utils/execution/toolTypes.js';
 import {formatToolCallMessage} from '../../../utils/ui/messageFormatter.js';
 import {isToolNeedTwoStepDisplay} from '../../../utils/config/toolDisplayConfig.js';
 import {buildToolResultView} from '../../../utils/session/toolResultView.js';

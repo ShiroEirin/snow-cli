@@ -12,6 +12,16 @@ function getToolParameters(
 		| undefined;
 }
 
+test('treat malformed manifest plugin list as empty compatibility mode', (t: any) => {
+	const toolPlane = translateBridgeManifestToToolPlane({
+		bridgeVersion: '2.1.0',
+		plugins: undefined as any,
+	});
+
+	t.deepEqual(toolPlane.modelTools, []);
+	t.deepEqual(toolPlane.servicesInfo, []);
+	t.deepEqual(toolPlane.bindings, []);
+});
 test('translate markdown parameter bullets and strip legacy example blocks', (t: any) => {
 	const toolPlane = translateBridgeManifestToToolPlane({
 		plugins: [

@@ -6,6 +6,8 @@ const VCP_HTTP_PROMPT_PLACEHOLDER_PATTERNS = [
 	/{{\s*VarToolList\s*}}/i,
 	/{{\s*VarVCPGuide\s*}}/i,
 	/{{\s*SarPrompt\d*\s*}}/i,
+	/{{\s*VCPAllTools\s*}}/i,
+	/{{\s*VCP(?!_ASYNC_RESULT::)[A-Za-z0-9_]+\s*}}/i,
 ] as const;
 
 const DEFAULT_ROLE_TEXT =
@@ -48,7 +50,7 @@ export function assertVcpHttpSystemPromptSafe(
 		for (const pattern of VCP_HTTP_PROMPT_PLACEHOLDER_PATTERNS) {
 			if (pattern.test(promptText)) {
 				throw new Error(
-					'VCP HTTP system prompt contains VCPToolBox text-protocol placeholders. Remove {{VarToolList}}, {{VarVCPGuide}}, and {{SarPromptN}} before sending function-calling requests through VCPToolBox.',
+					'VCP HTTP system prompt contains VCPToolBox text-protocol placeholders. Remove VCPToolBox text-protocol placeholders such as {{VarToolList}}, {{VarVCPGuide}}, {{SarPromptN}}, {{VCPAllTools}}, or {{VCPPluginName}} before sending function-calling requests through VCPToolBox.',
 				);
 			}
 		}

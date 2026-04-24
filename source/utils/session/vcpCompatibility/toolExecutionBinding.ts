@@ -151,7 +151,19 @@ export function getToolExecutionBinding(
 ): ToolExecutionBinding | undefined {
 	const normalizedToolPlaneKey = toolPlaneKey?.trim();
 	if (normalizedToolPlaneKey) {
-		return bindingLeaseStore.getResource(normalizedToolPlaneKey)?.get(toolName);
+		const directBinding = bindingLeaseStore
+			.getResource(normalizedToolPlaneKey)
+			?.get(toolName);
+		if (directBinding) {
+			return directBinding;
+		}
+
+		const registeredResourceKey = bindingSessionRegistry.get(normalizedToolPlaneKey);
+		if (registeredResourceKey && registeredResourceKey !== normalizedToolPlaneKey) {
+			return bindingLeaseStore.getResource(registeredResourceKey)?.get(toolName);
+		}
+
+		return undefined;
 	}
 
 	return fallbackBindingsByToolName.get(toolName);
