@@ -1,4 +1,4 @@
-import {getOpenAiConfig} from '../config/apiConfig.js';
+import {getSnowConfig} from '../config/apiConfig.js';
 import {snowBridgeClient} from '../session/vcpCompatibility/bridgeClient.js';
 import {
 	coerceBridgeExecutionArguments,
@@ -12,7 +12,7 @@ export async function executeBridgeToolCall(options: {
 	abortSignal?: AbortSignal;
 	onStatus?: (payload: unknown) => void;
 }) {
-	const config = getOpenAiConfig();
+	const config = getSnowConfig();
 	const executionBinding = getToolExecutionBinding(
 		options.toolName,
 		options.toolPlaneKey,

@@ -5,7 +5,7 @@ import type {CompressionStatus} from '../../ui/components/compression/Compressio
 import {sessionManager} from '../../utils/session/sessionManager.js';
 import {compressContext} from '../../utils/core/contextCompressor.js';
 import {performHybridCompression} from '../../utils/core/subAgentContextCompressor.js';
-import {getOpenAiConfig} from '../../utils/config/apiConfig.js';
+import {getSnowConfig} from '../../utils/config/apiConfig.js';
 import {getHybridCompressEnabled} from '../../utils/config/projectSettings.js';
 import {getTodoService} from '../../utils/execution/mcpToolsManager.js';
 import {
@@ -89,7 +89,7 @@ export async function executeContextCompression(
 
 		// 使用会话文件中的消息进行压缩（这是真实的对话记录）
 		const sessionMessages = currentSession.messages;
-		const apiConfig = getOpenAiConfig();
+		const apiConfig = getSnowConfig();
 
 		// 转换为 ChatMessage 格式（保留所有关键字段）
 		const chatMessages = (
@@ -426,7 +426,6 @@ type CommandHandlerOptions = {
 	setShowTodoListPanel: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowPixelEditor: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowUsagePanel: React.Dispatch<React.SetStateAction<boolean>>;
-	setShowModelsPanel: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowSubAgentDepthPanel: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowCustomCommandConfig: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowSkillsCreation: React.Dispatch<React.SetStateAction<boolean>>;
@@ -596,6 +595,11 @@ export function useCommandHandler(options: CommandHandlerOptions) {
 						// before useEffect syncs the state to ref
 						options.currentContextPercentageRef.current = 0;
 
+						// Clean up global singleton resources to reclaim memory
+						import('../../utils/core/globalCleanup.js')
+							.then(({cleanupGlobalResources}) => cleanupGlobalResources())
+							.catch(() => {});
+
 						// Add command message
 						const commandMessage: Message = {
 							role: 'command',
@@ -621,6 +625,11 @@ export function useCommandHandler(options: CommandHandlerOptions) {
 						// CRITICAL: Also reset the ref immediately to prevent auto-compress trigger
 						// before useEffect syncs the state to ref
 						options.currentContextPercentageRef.current = 0;
+
+						// Clean up global singleton resources to reclaim memory
+						import('../../utils/core/globalCleanup.js')
+							.then(({cleanupGlobalResources}) => cleanupGlobalResources())
+							.catch(() => {});
 
 						const commandMessage: Message = {
 							role: 'command',
@@ -672,14 +681,6 @@ export function useCommandHandler(options: CommandHandlerOptions) {
 				options.setMessages(prev => [...prev, commandMessage]);
 			} else if (result.success && result.action === 'showUsagePanel') {
 				options.setShowUsagePanel(true);
-				const commandMessage: Message = {
-					role: 'command',
-					content: '',
-					commandName: commandName,
-				};
-				options.setMessages(prev => [...prev, commandMessage]);
-			} else if (result.success && result.action === 'showModelsPanel') {
-				options.setShowModelsPanel(true);
 				const commandMessage: Message = {
 					role: 'command',
 					content: '',

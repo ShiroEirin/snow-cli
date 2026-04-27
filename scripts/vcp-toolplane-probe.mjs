@@ -2,7 +2,7 @@ import process from 'node:process';
 import {performance} from 'node:perf_hooks';
 import {
 	clearConfigCache,
-	getOpenAiConfig,
+	getSnowConfig,
 } from '../source/utils/config/apiConfig.ts';
 import {clearMCPToolsCache} from '../source/utils/execution/mcpToolsManager.ts';
 import {prepareToolPlane} from '../source/utils/session/vcpCompatibility/toolPlaneFacade.ts';
@@ -216,7 +216,7 @@ function summarizePerformance(results) {
 
 async function run() {
 	clearConfigCache();
-	const baseConfig = getOpenAiConfig();
+	const baseConfig = getSnowConfig();
 	const options = parseArguments(process.argv.slice(2));
 	const modes = resolveModes(baseConfig, options.modes);
 	const results = [];

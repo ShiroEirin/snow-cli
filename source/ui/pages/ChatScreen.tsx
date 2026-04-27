@@ -4,7 +4,7 @@ import Spinner from 'ink-spinner';
 import {useI18n} from '../../i18n/I18nContext.js';
 import {useTheme} from '../contexts/ThemeContext.js';
 import ChatFooter from '../components/chat/ChatFooter.js';
-import {getOpenAiConfig} from '../../utils/config/apiConfig.js';
+import {getSnowConfig} from '../../utils/config/apiConfig.js';
 import {getAllProfiles} from '../../utils/config/configManager.js';
 import {useSessionSave} from '../../hooks/session/useSessionSave.js';
 import {useToolConfirmation} from '../../hooks/conversation/useToolConfirmation.js';
@@ -20,7 +20,6 @@ import {useTerminalExecutionState} from '../../hooks/execution/useTerminalExecut
 import {useSchedulerExecutionState} from '../../hooks/execution/useSchedulerExecutionState.js';
 import {useBackgroundProcesses} from '../../hooks/execution/useBackgroundProcesses.js';
 import {usePanelState} from '../../hooks/ui/usePanelState.js';
-import {useCursorHide} from '../../hooks/ui/useCursorHide.js';
 import {connectionManager} from '../../utils/connection/ConnectionManager.js';
 import {updateGlobalTokenUsage} from '../../utils/connection/contextManager.js';
 import {sessionManager} from '../../utils/session/sessionManager.js';
@@ -53,11 +52,6 @@ export default function ChatScreen({
 	const {theme} = useTheme();
 	const {columns: terminalWidth, rows: terminalHeight} = useTerminalSize();
 	const workingDirectory = process.cwd();
-	const apiConfig = getOpenAiConfig();
-	const advancedModel = apiConfig.advancedModel || '';
-	const basicModel = apiConfig.basicModel || '';
-
-	useCursorHide();
 
 	const {
 		messages,
@@ -278,7 +272,6 @@ export default function ChatScreen({
 		onResumeSessionById: handleSessionPanelSelect,
 		setShowMcpPanel: panelState.setShowMcpPanel,
 		setShowUsagePanel: panelState.setShowUsagePanel,
-		setShowModelsPanel: panelState.setShowModelsPanel,
 		setShowSubAgentDepthPanel,
 		setShowCustomCommandConfig: panelState.setShowCustomCommandConfig,
 		setShowSkillsCreation: panelState.setShowSkillsCreation,
@@ -336,7 +329,7 @@ export default function ChatScreen({
 				cache_read_input_tokens:
 					streamingState.contextUsage.cache_read_input_tokens,
 				cached_tokens: streamingState.contextUsage.cached_tokens,
-				max_tokens: getOpenAiConfig().maxContextTokens || 128000,
+				max_tokens: getSnowConfig().maxContextTokens || 128000,
 			});
 			sessionManager.updateContextUsage(streamingState.contextUsage);
 		} else {
@@ -388,7 +381,7 @@ export default function ChatScreen({
 		panelState.showSessionPanel ||
 		panelState.showMcpPanel ||
 		panelState.showUsagePanel ||
-		panelState.showModelsPanel ||
+		panelState.showProfileEditPanel ||
 		panelState.showCustomCommandConfig ||
 		panelState.showSkillsCreation ||
 		panelState.showRoleCreation ||
@@ -437,7 +430,7 @@ export default function ChatScreen({
 	const footerContextUsage = streamingState.contextUsage
 		? {
 				inputTokens: streamingState.contextUsage.prompt_tokens,
-				maxContextTokens: getOpenAiConfig().maxContextTokens || 4000,
+				maxContextTokens: getSnowConfig().maxContextTokens || 4000,
 				cacheCreationTokens:
 					streamingState.contextUsage.cache_creation_input_tokens,
 				cacheReadTokens: streamingState.contextUsage.cache_read_input_tokens,
@@ -521,8 +514,6 @@ export default function ChatScreen({
 				panelState={panelState}
 				messages={messages}
 				snapshotState={snapshotState}
-				advancedModel={advancedModel}
-				basicModel={basicModel}
 				handleSessionPanelSelect={handleSessionPanelSelect}
 				showPermissionsPanel={showPermissionsPanel}
 				setShowPermissionsPanel={setShowPermissionsPanel}
@@ -546,6 +537,7 @@ export default function ChatScreen({
 					onHistorySelect={handleHistorySelect}
 					onSwitchProfile={handleSwitchProfile}
 					handleProfileSelect={handleProfileSelect}
+					handleProfileEdit={panelState.openProfileEdit}
 					handleHistorySelect={handleHistorySelect}
 					showReviewCommitPanel={panelState.showReviewCommitPanel}
 					setShowReviewCommitPanel={panelState.setShowReviewCommitPanel}

@@ -7,7 +7,7 @@ import {
 	type HookContextMap,
 } from '../config/hooksConfig.js';
 import {processManager} from '../core/processManager.js';
-import {getOpenAiConfig} from '../config/apiConfig.js';
+import {getSnowConfig} from '../config/apiConfig.js';
 import {logger} from '../core/logger.js';
 import {
 	createStreamingChatCompletion,
@@ -126,7 +126,7 @@ export class UnifiedHooksExecutor {
 		}
 
 		try {
-			const config = getOpenAiConfig();
+			const config = getSnowConfig();
 
 			if (!config.basicModel) {
 				logger.warn('Unified hooks executor: Basic model not configured');
@@ -685,7 +685,7 @@ Rules:
 		messages: ChatMessage[],
 		abortSignal?: AbortSignal,
 	): Promise<string> {
-		const config = getOpenAiConfig();
+		const config = getSnowConfig();
 		let streamGenerator: AsyncGenerator<any, void, unknown>;
 
 		// 根据 requestMethod 路由到相应的 API

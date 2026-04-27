@@ -323,7 +323,7 @@ export async function executeTeammate(
 	updateMember(teamName, memberId, {instanceId, status: 'active'});
 
 	try {
-		const {getOpenAiConfig} = await import('../config/apiConfig.js');
+		const {getSnowConfig} = await import('../config/apiConfig.js');
 		const {sessionManager} = await import('../session/sessionManager.js');
 		const {createStreamingChatCompletion} = await import('../../api/chat.js');
 		const {createStreamingAnthropicCompletion} = await import(
@@ -346,7 +346,7 @@ export async function executeTeammate(
 		const {listTasks} = await import('../team/teamTaskList.js');
 		const {executeToolCall} = await import('./toolExecutor.js');
 
-		const config = getOpenAiConfig();
+		const config = getSnowConfig();
 		const currentSession = sessionManager.getCurrentSession();
 		const preparedToolPlane = await prepareToolPlane({
 			config,

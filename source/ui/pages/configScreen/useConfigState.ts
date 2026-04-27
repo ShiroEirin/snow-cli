@@ -1,7 +1,7 @@
 import React, {useState, useEffect} from 'react';
 import {
-	getOpenAiConfig,
-	updateOpenAiConfig,
+	getSnowConfig,
+	updateSnowConfig,
 	validateApiConfig,
 	getSystemPromptConfig,
 	getCustomHeadersConfig,
@@ -25,6 +25,7 @@ import {
 	deleteProfile,
 	renameProfile,
 	saveProfile,
+	loadProfile,
 	type ConfigProfile,
 } from '../../../utils/config/configManager.js';
 import {useI18n} from '../../../i18n/index.js';
@@ -43,9 +44,20 @@ import {
 import {isVcpModeEnabled} from '../../../utils/session/vcpCompatibility/mode.js';
 import {buildSnowConfigDraft} from './configDraft.js';
 
-export function useConfigState() {
+export type UseConfigStateOptions = {
+	/**
+	 * 指定要加载/保存的 profile 名称。
+	 * 提供时，加载的配置来自该 profile 文件，保存只写回该 profile，
+	 * 不会修改全局的 config.json 与当前 active profile（即不切换激活配置）。
+	 * 未提供时回退到当前 active profile（旧行为）。
+	 */
+	targetProfileName?: string;
+};
+
+export function useConfigState(options?: UseConfigStateOptions) {
 	const {t} = useI18n();
 	const {theme} = useTheme();
+	const targetProfileName = options?.targetProfileName;
 
 	// Profile management
 	const [profiles, setProfiles] = useState<ConfigProfile[]>([]);
@@ -131,7 +143,11 @@ export function useConfigState() {
 		useState<ChatReasoningEffort>('high');
 
 	// UI state
-	const [currentField, setCurrentField] = useState<ConfigField>('profile');
+	// 当从 ProfileEditPanel 进入（提供 targetProfileName）时，profile 字段被隐藏，
+	// 初始光标应落在 baseUrl，避免 currentFieldIndex 为 -1。
+	const [currentField, setCurrentField] = useState<ConfigField>(
+		targetProfileName ? 'baseUrl' : 'profile',
+	);
 	const [errors, setErrors] = useState<string[]>([]);
 	const [isEditing, setIsEditing] = useState(false);
 	const [models, setModels] = useState<Model[]>([]);
@@ -218,7 +234,10 @@ export function useConfigState() {
 			toolTransport,
 		);
 		return [
-			'profile',
+			// 仅在未指定 targetProfileName（即从主菜单常规进入 ConfigScreen）时才允许
+			// 显示/操作 profile 切换项；从 ProfileEditPanel 进入时彻底隐藏，
+			// 防止用户切换 active profile 或对 profile 进行增删改。
+			...(targetProfileName ? [] : ['profile' as ConfigField]),
 			'baseUrl',
 			'apiKey',
 			'requestMethod',
@@ -392,7 +411,12 @@ export function useConfigState() {
 		const loadedProfiles = getAllProfiles();
 		setProfiles(loadedProfiles);
 
-		const config = getOpenAiConfig();
+		// 当指定了 targetProfileName 时，从该 profile 文件加载配置
+		// （而不是当前 active profile 的全局 config）。这样可以编辑非激活 profile。
+		const targetConfig = targetProfileName
+			? loadProfile(targetProfileName)
+			: undefined;
+		const config = targetConfig?.snowcfg ?? getSnowConfig();
 		setBaseUrl(config.baseUrl);
 		setApiKey(config.apiKey);
 		setRequestMethod(config.requestMethod || 'chat');
@@ -450,7 +474,9 @@ export function useConfigState() {
 		);
 		setActiveCustomHeadersSchemeId(customHeadersConfig?.active || '');
 
-		setActiveProfile(getActiveProfileName());
+		// 当编辑指定 profile 时，把 activeProfile 状态指向目标 profile，
+		// 让 UI（标题/保存逻辑等）按目标 profile 显示，但不实际切换全局 active。
+		setActiveProfile(targetProfileName ?? getActiveProfileName());
 	};
 
 	const loadModels = async () => {
@@ -467,11 +493,15 @@ export function useConfigState() {
 			bridgeVcpKey,
 			bridgeAccessToken,
 			bridgeToolProfile,
+			customHeadersSchemeId,
 		};
-		await updateOpenAiConfig(tempConfig);
 
+		// loadModels 只是为了拉模型列表临时使用 baseUrl/apiKey/method，
+		// 一律不调 updateSnowConfig（它会写全局 config.json 并 saveProfile 到磁盘当前的 active profile，
+		// 在多开 CLI / ProfileEditPanel 编辑非激活 profile 等场景都会造成污染），
+		// 改为通过 overrideConfig 直接传给 fetchAvailableModels 做一次性请求。
 		try {
-			const fetchedModels = await fetchAvailableModels();
+			const fetchedModels = await fetchAvailableModels(tempConfig);
 			setModels(fetchedModels);
 		} catch (err) {
 			const errorMessage =
@@ -529,6 +559,7 @@ export function useConfigState() {
 		if (currentField === 'responsesReasoningEffort')
 			return responsesReasoningEffort;
 		if (currentField === 'anthropicSpeed') return anthropicSpeed || '';
+		if (currentField === 'chatReasoningEffort') return chatReasoningEffort;
 		return '';
 	};
 
@@ -852,11 +883,24 @@ export function useConfigState() {
 				? {enabled: true, reasoning_effort: chatReasoningEffort}
 				: undefined;
 
-			await updateOpenAiConfig(config);
+			// 保存对齐（统一规则，覆盖所有入口）：
+			// editingProfile = 进入页面时记录的目标 profile（targetProfileName 优先，否则 activeProfile state）。
+			// 仅当磁盘当前 active 仍然 === editingProfile 时，才调 updateSnowConfig 刷新全局 config.json + 缓存。
+			// 否则（CLI 多开场景：另一个实例已经把 active 切走了；或 ProfileEditPanel 编辑非激活 profile）
+			// 一律跳过 updateSnowConfig，避免把当前编辑结果错误写到磁盘当前 active profile 文件。
+			const editingProfile =
+				targetProfileName ?? activeProfile ?? getActiveProfileName();
+			const liveActiveProfile = getActiveProfileName();
+			if (liveActiveProfile === editingProfile) {
+				await updateSnowConfig(config);
+			}
 
 			try {
 				const fullConfig = buildCurrentSnowConfigDraft();
-				saveProfile(activeProfile, fullConfig);
+				// 写回的目标固定为 editingProfile（与上面 updateSnowConfig 判定使用同一个值）。
+				// 即使另一个 CLI 实例已经把磁盘 active 切走，也保证把当前编辑结果
+				// 准确落盘到"用户进入页面时编辑的那个 profile"文件，绝不污染其他 profile。
+				saveProfile(editingProfile, fullConfig);
 			} catch (err) {
 				console.error('Failed to save profile:', err);
 			}

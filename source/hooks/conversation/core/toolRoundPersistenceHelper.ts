@@ -2,7 +2,7 @@ import type {
 	BackendMode,
 	ToolTransport,
 } from '../../../utils/config/apiConfig.js';
-import {getOpenAiConfig} from '../../../utils/config/apiConfig.js';
+import {getSnowConfig} from '../../../utils/config/apiConfig.js';
 import type {ToolResult} from '../../../utils/execution/toolTypes.js';
 import {
 	buildConversationToolMessage,
@@ -56,7 +56,7 @@ export function projectToolResultForPersistence<
 ) {
 	const projectConversationMessage =
 		options?.projectConversationMessage ??
-		shouldProjectToolContext(options?.config || getOpenAiConfig());
+		shouldProjectToolContext(options?.config || getSnowConfig());
 	return {
 		conversationMessage: projectConversationMessage
 			? buildConversationToolMessage(result, messageStatus)

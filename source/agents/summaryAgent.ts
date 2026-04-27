@@ -1,4 +1,4 @@
-import {getOpenAiConfig} from '../utils/config/apiConfig.js';
+import {getSnowConfig} from '../utils/config/apiConfig.js';
 import {logger} from '../utils/core/logger.js';
 import {createStreamingChatCompletion, type ChatMessage} from '../api/chat.js';
 import {createStreamingResponse} from '../api/responses.js';
@@ -29,7 +29,7 @@ export class SummaryAgent {
 	 */
 	private async initialize(): Promise<boolean> {
 		try {
-			const config = getOpenAiConfig();
+			const config = getSnowConfig();
 
 			// Use basicModel first, fallback to advancedModel if not configured
 			const basicModel = config.basicModel?.trim();
@@ -82,7 +82,7 @@ export class SummaryAgent {
 		messages: ChatMessage[],
 		abortSignal?: AbortSignal,
 	): Promise<string> {
-		const config = getOpenAiConfig();
+		const config = getSnowConfig();
 		let streamGenerator: AsyncGenerator<any, void, unknown>;
 
 		// Route to appropriate streaming API based on request method

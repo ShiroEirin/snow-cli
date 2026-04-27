@@ -1,4 +1,4 @@
-import {getOpenAiConfig} from '../utils/config/apiConfig.js';
+import {getSnowConfig} from '../utils/config/apiConfig.js';
 import {logger} from '../utils/core/logger.js';
 import {createStreamingChatCompletion, type ChatMessage} from '../api/chat.js';
 import {createStreamingResponse} from '../api/responses.js';
@@ -67,7 +67,7 @@ export class CodebaseReviewAgent {
 	 */
 	private async initialize(): Promise<boolean> {
 		try {
-			const config = getOpenAiConfig();
+			const config = getSnowConfig();
 
 			if (!config.basicModel) {
 				logger.warn(
@@ -117,7 +117,7 @@ export class CodebaseReviewAgent {
 		messages: ChatMessage[],
 		abortSignal?: AbortSignal,
 	): Promise<{content: string; tool_calls?: any[]}> {
-		const config = getOpenAiConfig();
+		const config = getSnowConfig();
 		let streamGenerator: AsyncGenerator<any, void, unknown>;
 		const effectiveRequestMethod = config.requestMethod;
 

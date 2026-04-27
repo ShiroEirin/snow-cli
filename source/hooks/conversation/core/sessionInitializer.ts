@@ -1,6 +1,6 @@
 import type {ChatMessage} from '../../../api/chat.js';
 import {sessionManager} from '../../../utils/session/sessionManager.js';
-import {getOpenAiConfig} from '../../../utils/config/apiConfig.js';
+import {getSnowConfig} from '../../../utils/config/apiConfig.js';
 import {getTodoService} from '../../../utils/execution/mcpToolsManager.js';
 import {formatTodoContext} from '../../../utils/core/todoPreprocessor.js';
 import {getSystemPromptForMode} from '../../../prompt/systemPrompt.js';
@@ -59,7 +59,7 @@ export async function initializeConversationSession(
 	// Filter out internal sub-agent messages (marked with subAgentInternal: true)
 	const session = sessionManager.getCurrentSession();
 	if (session && session.messages.length > 0) {
-		const apiConfig = getOpenAiConfig();
+		const apiConfig = getSnowConfig();
 		const filteredMessages = session.messages.filter(
 			msg => !msg.subAgentInternal,
 		);

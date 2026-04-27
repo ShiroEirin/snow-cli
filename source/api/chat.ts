@@ -1,5 +1,5 @@
 import {
-	getOpenAiConfig,
+	getSnowConfig,
 	getCustomHeadersForConfig,
 	getCustomSystemPromptForConfig,
 } from '../utils/config/apiConfig.js';
@@ -417,13 +417,14 @@ export function finalizeStreamingToolCalls(
  */
 function convertToOpenAIMessages(
 	messages: ChatMessage[],
-	config: ReturnType<typeof getOpenAiConfig>,
+	config: ReturnType<typeof getSnowConfig>,
 	includeBuiltinSystemPrompt: boolean = true,
 	customSystemPromptOverride?: string[],
 	planMode: boolean = false,
 	vulnerabilityHuntingMode: boolean = false,
 	toolSearchDisabled: boolean = false,
 	teamMode: boolean = false,
+	thinkingEnabled: boolean = false,
 ): ChatCompletionMessageParam[] {
 	const customSystemPrompts = customSystemPromptOverride;
 
@@ -470,9 +471,11 @@ function convertToOpenAIMessages(
 				...baseMessage,
 				tool_calls: msg.tool_calls,
 			};
-			// Include reasoning_content for DeepSeek R1 models
-			if ((msg as any).reasoning_content) {
-				result.reasoning_content = (msg as any).reasoning_content;
+			const rc = (msg as any).reasoning_content;
+			if (rc !== undefined && rc !== null) {
+				result.reasoning_content = rc;
+			} else if (thinkingEnabled) {
+				result.reasoning_content = '';
 			}
 			return result as ChatCompletionMessageParam;
 		}
@@ -522,12 +525,20 @@ function convertToOpenAIMessages(
 			} as ChatCompletionMessageParam;
 		}
 
-		// Include reasoning_content for assistant messages (DeepSeek R1)
-		if (msg.role === 'assistant' && (msg as any).reasoning_content) {
-			return {
-				...baseMessage,
-				reasoning_content: (msg as any).reasoning_content,
-			} as any;
+		if (msg.role === 'assistant') {
+			const rc = (msg as any).reasoning_content;
+			if (rc !== undefined && rc !== null) {
+				return {
+					...baseMessage,
+					reasoning_content: rc,
+				} as any;
+			}
+			if (thinkingEnabled) {
+				return {
+					...baseMessage,
+					reasoning_content: '',
+				} as any;
+			}
 		}
 
 		return baseMessage as ChatCompletionMessageParam;
@@ -601,7 +612,7 @@ function convertToOpenAIMessages(
 	return result;
 }
 
-export function resetOpenAIClient(): void {
+export function resetApiClient(): void {
 	// No-op: kept for backward compatibility
 }
 
@@ -778,7 +789,7 @@ export async function* createStreamingChatCompletion(
 	onRetry?: (error: Error, attempt: number, nextDelay: number) => void,
 ): AsyncGenerator<StreamChunk, void, unknown> {
 	// Load configuration: if configProfile is specified, load it; otherwise use main config
-	let config: ReturnType<typeof getOpenAiConfig>;
+	let config: ReturnType<typeof getSnowConfig>;
 	if (options.configProfile) {
 		try {
 			const {loadProfile} = await import('../utils/config/configManager.js');
@@ -787,7 +798,7 @@ export async function* createStreamingChatCompletion(
 				config = profileConfig.snowcfg;
 			} else {
 				// Profile not found, fallback to main config
-				config = getOpenAiConfig();
+				config = getSnowConfig();
 				const {logger} = await import('../utils/core/logger.js');
 				logger.warn(
 					`Profile ${options.configProfile} not found, using main config`,
@@ -795,7 +806,7 @@ export async function* createStreamingChatCompletion(
 			}
 		} catch (error) {
 			// If loading profile fails, fallback to main config
-			config = getOpenAiConfig();
+			config = getSnowConfig();
 			const {logger} = await import('../utils/core/logger.js');
 			logger.warn(
 				`Failed to load profile ${options.configProfile}, using main config:`,
@@ -804,7 +815,7 @@ export async function* createStreamingChatCompletion(
 		}
 	} else {
 		// No configProfile specified, use main config
-		config = getOpenAiConfig();
+		config = getSnowConfig();
 	}
 
 	// Get system prompt (with custom override support)
@@ -826,6 +837,10 @@ export async function* createStreamingChatCompletion(
 	customSystemPromptContent ||= getCustomSystemPromptForConfig(config);
 
 	// 使用重试包装生成器
+	const thinkingEnabled = !!(
+		config.chatThinking?.enabled && !options.disableThinking
+	);
+
 	yield* withRetryGenerator(
 		async function* () {
 			const requestBody: Record<string, any> = {
@@ -839,6 +854,7 @@ export async function* createStreamingChatCompletion(
 					options.vulnerabilityHuntingMode || false,
 					options.toolSearchDisabled || false,
 					options.teamMode || false,
+					thinkingEnabled,
 				),
 				stream: true,
 				stream_options: {include_usage: true},
@@ -848,10 +864,11 @@ export async function* createStreamingChatCompletion(
 				tool_choice: options.tool_choice,
 			};
 
-			if (config.chatThinking?.enabled && !options.disableThinking) {
+			if (thinkingEnabled) {
 				requestBody['thinking'] = {type: 'enabled'};
-				if (config.chatThinking.reasoning_effort) {
-					requestBody['reasoning_effort'] = config.chatThinking.reasoning_effort;
+				if (config.chatThinking?.reasoning_effort) {
+					requestBody['reasoning_effort'] =
+						config.chatThinking.reasoning_effort;
 				}
 			}
 

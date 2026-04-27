@@ -1,4 +1,4 @@
-import {getOpenAiConfig} from '../config/apiConfig.js';
+import {getSnowConfig} from '../config/apiConfig.js';
 import {sessionManager} from '../session/sessionManager.js';
 import {unifiedHooksExecutor} from './unifiedHooksExecutor.js';
 import {interpretHookResult} from './hookResultInterpreter.js';
@@ -125,7 +125,7 @@ export async function executeSubAgent(
 ): Promise<SubAgentResult> {
 	const toolPlaneSessionKey =
 		instanceId || `subagent-${agentId}-${Date.now()}`;
-	const rootConfig = getOpenAiConfig();
+	const rootConfig = getSnowConfig();
 	const shouldScopeExecutionBindings =
 		shouldScopeSubAgentExecutionBindings(rootConfig);
 	let shouldCleanupToolPlane = false;
@@ -392,7 +392,7 @@ async function resolveConfig(
 		}
 	}
 
-	const config = getOpenAiConfig();
+	const config = getSnowConfig();
 	return {config, model: config.advancedModel || 'gpt-5'};
 }
 
@@ -442,7 +442,7 @@ async function handleSpawnedChildren(
 
 	const spawnedResults = runningSubAgentTracker.drainSpawnedResults();
 	if (spawnedResults.length === 0) return false;
-	const shouldProjectSpawnedResults = shouldProjectToolContext(getOpenAiConfig());
+	const shouldProjectSpawnedResults = shouldProjectToolContext(getSnowConfig());
 
 	for (const sr of spawnedResults) {
 		const statusIcon = sr.success ? '\u2713' : '\u2717';

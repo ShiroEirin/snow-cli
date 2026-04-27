@@ -45,7 +45,7 @@ import {
 import {createStreamingResponse} from '../../api/responses.js';
 import {createStreamingAnthropicCompletion} from '../../api/anthropic.js';
 import {createStreamingGeminiCompletion} from '../../api/gemini.js';
-import {getOpenAiConfig} from '../config/apiConfig.js';
+import {getSnowConfig} from '../config/apiConfig.js';
 import type {ResponseStreamChunk} from '../../api/responses.js';
 import type {AnthropicStreamChunk} from '../../api/anthropic.js';
 import type {GeminiStreamChunk} from '../../api/gemini.js';
@@ -332,7 +332,7 @@ class AcpManager {
 		}
 
 		// 获取配置
-		const config = getOpenAiConfig();
+		const config = getSnowConfig();
 		const model = config.advancedModel || 'claude-sonnet-4-20250514';
 
 		const preparedToolPlane = await prepareToolPlane({

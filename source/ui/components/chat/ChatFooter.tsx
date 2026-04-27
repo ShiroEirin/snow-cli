@@ -35,6 +35,8 @@ type ChatFooterProps = {
 	) => Promise<void>;
 	onSwitchProfile: () => void;
 	handleProfileSelect: (profileName: string) => void;
+	/** 在 ProfilePanel 中按右方向键时进入 ProfileEditPanel 编辑该 profile */
+	handleProfileEdit?: (profileName: string) => void;
 	handleHistorySelect: (
 		selectedIndex: number,
 		message: string,
@@ -324,6 +326,7 @@ const ChatFooter = React.memo(function ChatFooter(props: ChatFooterProps) {
 							setProfileSelectedIndex={props.setProfileSelectedIndex}
 							getFilteredProfiles={props.getFilteredProfiles}
 							handleProfileSelect={props.handleProfileSelect}
+							handleProfileEdit={props.handleProfileEdit}
 							profileSearchQuery={props.profileSearchQuery}
 							setProfileSearchQuery={props.setProfileSearchQuery}
 							onSwitchProfile={props.onSwitchProfile}

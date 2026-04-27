@@ -1,5 +1,5 @@
 import type {ChatMessage} from '../../../api/chat.js';
-import {getOpenAiConfig} from '../../../utils/config/apiConfig.js';
+import {getSnowConfig} from '../../../utils/config/apiConfig.js';
 import type {MCPTool} from '../../../utils/execution/mcpToolsManager.js';
 import {toolSearchService} from '../../../utils/execution/toolSearchService.js';
 import {sessionManager} from '../../../utils/session/sessionManager.js';
@@ -38,7 +38,7 @@ export async function prepareConversationSetup(
 		options.teamMode || false,
 	);
 
-	const config = getOpenAiConfig();
+	const config = getSnowConfig();
 	const currentSessionId = sessionManager.getCurrentSession()?.id;
 	const {
 		tools: allMCPTools,

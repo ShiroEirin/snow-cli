@@ -31,7 +31,7 @@ import {
 	projectToolResultForPersistence,
 	resolveToolResultMessageStatus,
 } from './toolRoundPersistenceHelper.js';
-import {getOpenAiConfig} from '../../../utils/config/apiConfig.js';
+import {getSnowConfig} from '../../../utils/config/apiConfig.js';
 import {shouldProjectToolContext} from '../../../utils/session/toolMessageProjection.js';
 
 export {
@@ -74,7 +74,7 @@ export async function handleToolCallRound(ctx: {
 	options: ConversationHandlerOptions;
 }): Promise<ToolCallRoundResult> {
 	const shouldProjectConversationToolResults = shouldProjectToolContext(
-		getOpenAiConfig(),
+		getSnowConfig(),
 	);
 	const {
 		streamResult,

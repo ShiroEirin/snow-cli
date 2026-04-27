@@ -212,7 +212,24 @@ Notebook is your persistent memory for the codebase. Use it aggressively to reco
 - If you notice an existing note is outdated or incorrect, fix it immediately — do NOT leave stale notes
 - After refactoring removes the fragile code a note warned about, delete that note
 
-**Key actions:** \`action:"add"\` to record, \`action:"query"\` to recall before starting a task, \`action:"update"\` / \`action:"delete"\` to keep notes accurate
+**PARALLEL CALLS RULE:**
+ALWAYS pair notebook-manage with action tools in same call:
+- CORRECT: notebook-manage({action:"query"}) + filesystem-read | notebook-manage({action:"add",...}) + filesystem-edit
+- WRONG: Call notebook-manage alone, wait for result, then act
+
+**Single tool — \`notebook-manage\` (required \`action\`):**
+- **query**: Search by fuzzy file path pattern; optional \`filePathPattern\`, \`topN\`
+- **list**: All entries for one exact file; required \`filePath\`
+- **add**: \`filePath\` + \`note\` (string or string[] for batch); records note(s) for a file
+- **update**: \`notebookId\` + \`note\` (string); updates one entry's content
+- **delete**: \`notebookId\` (string or string[]); removes entry(s)
+
+**Examples:**
+\`\`\`
+notebook-manage({action:"query", filePathPattern:"auth"}) + filesystem-read("src/auth.ts")
+notebook-manage({action:"add", filePath:"src/auth.ts", note:["validateInput() MUST be called first","Session token is nullable"]}) + filesystem-edit(...)
+notebook-manage({action:"delete", notebookId:["id1","id2"]}) + filesystem-edit(...)
+\`\`\`
 
 **Golden rule:** If you had to think hard to understand something, write it down so the next session doesn't have to.
 
@@ -288,7 +305,7 @@ function getWorkflowSection(hasCodebase: boolean): string {
    - Returns relevant code with full context - dramatically faster than manual file reading
 2. Read specific files found by codebase-search or mentioned by user
 3. Check dependencies/imports that directly impact the change
-4. Use ACE tools ONLY when needed: \`ace-find_definition\` (exact symbol), \`ace-find_references\` (usage tracking)
+4. Use \`ace-search\` ONLY when needed (action=find_definition for exact symbol, action=find_references for usage tracking)
 5. Write/modify code with proper context
 6. Verify with build
 
@@ -296,7 +313,7 @@ function getWorkflowSection(hasCodebase: boolean): string {
 	} else {
 		return `**Your workflow:**
 1. Read the primary file(s) mentioned - USE BATCH READ if multiple files
-2. Use \\\`ace-search_symbols\\\`, \\\`ace-find_definition\\\`, or \\\`ace-find_references\\\` to find related code
+2. Use \\\`ace-search\\\` (action=semantic_search / find_definition / find_references) to find related code
 3. Check dependencies/imports that directly impact the change
 4. Read related files ONLY if they're critical to understanding the task
 5. Write/modify code with proper context - USE BATCH EDIT if modifying 2+ files
@@ -331,19 +348,14 @@ function getCodeSearchSection(hasCodebase: boolean): string {
 - **Why it's superior**: Understands semantic relationships, not just exact matches
 - Examples: "how users are authenticated", "where database queries happen", "error handling approach"
 
-**Fallback tools (use ONLY when codebase-search insufficient):**
-- \`ace-find_definition\` - Jump to exact symbol definition (when you know the exact name)
-- \`ace-find_references\` - Find all usages of a known symbol (for impact analysis)
-- \`ace-text_search\` - Literal string search (TODOs, log messages, exact error strings)
+**Fallback tool (use ONLY when codebase-search insufficient):**
+- \`ace-search\` - Unified ACE code search; pick \`action\`: find_definition (exact symbol), find_references (impact analysis), text_search (literal/regex), semantic_search (fuzzy), file_outline
 
 **Golden rule:** Try codebase-search first, use ACE tools only for precise symbol lookup`;
 	} else {
 		// When codebase tool is NOT available, only show ACE
 		return `**Code Search Strategy:**
-- \`ace-semantic_search\` - Symbol search with fuzzy matching and filtering
-- \`ace-find_definition\` - Go to definition of a symbol
-- \`ace-find_references\` - Find all usages of a symbol
-- \`ace-text_search\` - Literal text/regex search (for strings, comments, TODOs)`;
+- \`ace-search\` - Unified ACE code search. Required \`action\`: semantic_search (fuzzy symbol search), find_definition (go to definition), find_references (usages), file_outline, text_search (literal/regex)`;
 	}
 }
 

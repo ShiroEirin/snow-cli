@@ -290,6 +290,9 @@ export type TranslationKeys = {
 		optionHigh: string;
 		optionXHigh: string;
 		optionMax: string;
+		modelSelectFilterLabel: string;
+		modelSelectModelCount: string;
+		modelSelectScrollHint: string;
 	};
 	// Custom Headers Screen
 	customHeaders: {
@@ -461,6 +464,8 @@ export type TranslationKeys = {
 		solarizedDarkInfo: string;
 		nord: string;
 		nordInfo: string;
+		tiffany: string;
+		tiffanyInfo: string;
 		custom: string;
 		customInfo: string;
 		editCustom: string;
@@ -592,7 +597,6 @@ export type TranslationKeys = {
 			backend: string;
 			loop: string;
 			profiles: string;
-			models: string;
 			subAgentDepth: string;
 			export: string;
 			custom: string;
@@ -611,7 +615,7 @@ export type TranslationKeys = {
 			hybridCompress: string;
 			team: string;
 			branch: string; // Fork conversation into a new branch
-		worktree: string; // Git branch management panel
+			worktree: string; // Git branch management panel
 			diff: string;
 			connect: string;
 			disconnect: string;
@@ -658,6 +662,24 @@ export type TranslationKeys = {
 			};
 		};
 	};
+	// File search list (`@` panel)
+	fileList: {
+		loadingFiles: string;
+		noFilesFound: string;
+		// Used while a deeper rescan is queued or running
+		searchingDeeper: string; // {depth}
+		// Inline status while streaming results in
+		scanning: string; // {count}
+		scanningDeeper: string; // {depth} {count}
+		// Hint shown at the bottom of the list when more directories are still
+		// available to scan, telling the user how to trigger a deeper search.
+		deeperSearchHint: string;
+		// Header labels
+		contentSearchHeader: string;
+		filesHeader: string; // {mode}
+		treeMode: string;
+		listMode: string;
+	};
 	// IDE Select Panel
 	ideSelectPanel: {
 		title: string;
@@ -678,6 +700,8 @@ export type TranslationKeys = {
 		moreAbove: string;
 		moreBelow: string;
 		escHint: string;
+		// 提示用户按右方向键打开当前光标聚焦 profile 的编辑面板
+		editHint: string;
 		activeLabel: string;
 		searchLabel: string;
 		noResults: string;
@@ -761,43 +785,6 @@ export type TranslationKeys = {
 		hint: string;
 		fileHint: string;
 	};
-
-	modelsPanel: {
-		title: string;
-		subtitle: string;
-		tabAdvanced: string;
-		tabBasic: string;
-		tabThinking: string;
-		currentModel: string;
-		notSet: string;
-		loadingModels: string;
-		hint: string;
-		manualInputTitle: string;
-		manualInputHint: string;
-		filterLabel: string;
-		manualInputOption: string;
-		requestMethod: string;
-		showThinkingProcess: string;
-		enableThinking: string;
-		thinkingMode: string;
-		thinkingStrength: string;
-		inputNumberHint: string;
-		escCancel: string;
-		navigationHint: string;
-		notSupported: string;
-		advancedModelLabel: string;
-		basicModelLabel: string;
-		thinkingLabel: string;
-		requestMethodNotSupportedForThinking: string;
-		requestMethodNotSupportedForThinkingStrength: string;
-		anthropicSpeed: string;
-		saveFailed: string;
-		modelSaveFailed: string;
-		tipLabel: string;
-		modelCount: string;
-		scrollHint: string;
-	};
-
 	// Hooks
 	hooks: {
 		pressCtrlCAgain: string;
@@ -1662,6 +1649,29 @@ export type TranslationKeys = {
 		exitImageDisabled: string;
 		failedDisableExitImage: string;
 		setAsExitImage: string;
+	};
+	agentPickerPanel: {
+		title: string;
+		noAgentsWarning: string;
+		selectAgent: string;
+		escHint: string;
+		noDescription: string;
+		scrollHint: string;
+		moreAbove: string;
+		moreBelow: string;
+	};
+	todoPickerPanel: {
+		title: string;
+		scanning: string;
+		noTodosFound: string;
+		noMatchSearch: string;
+		typeToClearSearch: string;
+		selectTodos: string;
+		filteringLabel: string;
+		typeToFilterHint: string;
+		typeToSearchHint: string;
+		selectedCount: string;
+		noDescription: string;
 	};
 	exitScreen: {
 		title: string;
