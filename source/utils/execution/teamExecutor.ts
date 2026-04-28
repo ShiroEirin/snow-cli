@@ -20,7 +20,10 @@ import type {
 	UserInteractionCallback,
 } from './toolExecutor.js';
 import {prepareToolPlane} from '../session/vcpCompatibility/toolPlaneFacade.js';
-import type {ToolExecutionBinding} from '../session/vcpCompatibility/toolExecutionBinding.js';
+import {
+	isBridgeToolMutationSensitive,
+	type ToolExecutionBinding,
+} from '../session/vcpCompatibility/toolExecutionBinding.js';
 import {rewriteToolArgsForWorktree} from '../team/teamWorktree.js';
 import {
 	projectToolMessagesForContext,
@@ -71,7 +74,10 @@ export interface TeammateExecutionResult {
 }
 
 export function projectTeammateMessagesForModel(
-	config: {backendMode?: 'native' | 'vcp'; toolTransport?: 'local' | 'bridge' | 'hybrid'},
+	config: {
+		backendMode?: 'native' | 'vcp';
+		toolTransport?: 'local' | 'bridge' | 'hybrid';
+	},
 	messages: ChatMessage[],
 ): ChatMessage[] {
 	return shouldProjectToolContext(config)
@@ -279,9 +285,15 @@ export function isPlanApprovalProtectedTool(
 		return true;
 	}
 
-	return binding?.kind === 'local'
-		? PLAN_APPROVAL_PROTECTED_LOCAL_TOOLS.has(binding.toolName)
-		: false;
+	if (binding?.kind === 'local') {
+		return PLAN_APPROVAL_PROTECTED_LOCAL_TOOLS.has(binding.toolName);
+	}
+
+	if (binding?.kind === 'bridge') {
+		return isBridgeToolMutationSensitive(binding);
+	}
+
+	return false;
 }
 
 export async function executeTeammate(
@@ -641,7 +653,11 @@ ${role ? `Your role: ${role}` : ''}
 						const COMPRESS_RETRY_BASE_DELAY = 1000;
 						let compressionResult;
 
-						for (let retryAttempt = 0; retryAttempt <= COMPRESS_MAX_RETRIES; retryAttempt++) {
+						for (
+							let retryAttempt = 0;
+							retryAttempt <= COMPRESS_MAX_RETRIES;
+							retryAttempt++
+						) {
 							try {
 								compressionResult = await compressSubAgentContext(
 									messages,
@@ -651,12 +667,16 @@ ${role ? `Your role: ${role}` : ''}
 										model,
 										requestMethod: config.requestMethod,
 										maxTokens: config.maxTokens,
+										baseUrl: config.baseUrl,
+										backendMode: config.backendMode,
+										toolTransport: config.toolTransport,
 									},
 								);
 								break;
 							} catch (retryError) {
 								if (retryAttempt < COMPRESS_MAX_RETRIES) {
-									const retryDelay = COMPRESS_RETRY_BASE_DELAY * Math.pow(2, retryAttempt);
+									const retryDelay =
+										COMPRESS_RETRY_BASE_DELAY * Math.pow(2, retryAttempt);
 									if (onMessage) {
 										onMessage({
 											type: 'sub_agent_message',
@@ -666,12 +686,17 @@ ${role ? `Your role: ${role}` : ''}
 												type: 'context_compress_retrying',
 												attempt: retryAttempt + 1,
 												maxRetries: COMPRESS_MAX_RETRIES,
-												error: retryError instanceof Error ? retryError.message : String(retryError),
+												error:
+													retryError instanceof Error
+														? retryError.message
+														: String(retryError),
 											},
 										});
 									}
 									console.warn(
-										`[Teammate:${memberName}] Compression failed, retrying (${retryAttempt + 1}/${COMPRESS_MAX_RETRIES}) in ${retryDelay / 1000}s...`,
+										`[Teammate:${memberName}] Compression failed, retrying (${
+											retryAttempt + 1
+										}/${COMPRESS_MAX_RETRIES}) in ${retryDelay / 1000}s...`,
 										retryError,
 									);
 									await new Promise(resolve => setTimeout(resolve, retryDelay));

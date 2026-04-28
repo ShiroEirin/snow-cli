@@ -10,6 +10,7 @@ import {
 	clearToolExecutionBindingsSession,
 	filterToolExecutionBindings,
 	getToolExecutionBinding,
+	isBridgeToolMutationSensitive,
 	normalizeBridgeArgumentAliases,
 	registerToolExecutionBindings,
 	rotateToolExecutionBindingsSession,
@@ -34,11 +35,26 @@ test.afterEach(() => {
 	clearToolExecutionBindingsSession('review-session');
 });
 
-test.serial('resolve execution binding from explicit tool plane key', (t: any) => {
-	rotateToolExecutionBindingsSession({
-		sessionKey: 'chat-session',
-		nextToolPlaneKey: 'plane-a',
-		bindings: [
+test.serial(
+	'resolve execution binding from explicit tool plane key',
+	(t: any) => {
+		rotateToolExecutionBindingsSession({
+			sessionKey: 'chat-session',
+			nextToolPlaneKey: 'plane-a',
+			bindings: [
+				{
+					kind: 'bridge',
+					toolName: 'vcp-fileoperator-readfile',
+					pluginName: 'FileOperator',
+					displayName: 'FileOperator',
+					commandName: 'ReadFile',
+					stringifyArgumentNames: [],
+				},
+			],
+		});
+
+		t.deepEqual(
+			getToolExecutionBinding('vcp-fileoperator-readfile', 'plane-a'),
 			{
 				kind: 'bridge',
 				toolName: 'vcp-fileoperator-readfile',
@@ -47,154 +63,111 @@ test.serial('resolve execution binding from explicit tool plane key', (t: any) =
 				commandName: 'ReadFile',
 				stringifyArgumentNames: [],
 			},
-		],
-	});
+		);
+	},
+);
 
-	t.deepEqual(
-		getToolExecutionBinding('vcp-fileoperator-readfile', 'plane-a'),
-		{
-			kind: 'bridge',
-			toolName: 'vcp-fileoperator-readfile',
-			pluginName: 'FileOperator',
-			displayName: 'FileOperator',
-			commandName: 'ReadFile',
-			stringifyArgumentNames: [],
-		},
-	);
-});
-
-test.serial('resolve execution binding from latest session plane key fallback', (t: any) => {
-	rotateToolExecutionBindingsSession({
-		sessionKey: 'chat-session',
-		nextToolPlaneKey: 'plane-b',
-		bindings: [
-			{
-				kind: 'bridge',
-				toolName: 'vcp-codesearcher-searchcode',
-				pluginName: 'CodeSearcher',
-				displayName: 'CodeSearcher',
-				commandName: 'SearchCode',
-				stringifyArgumentNames: [],
-			},
-		],
-	});
-
-	t.deepEqual(
-		getToolExecutionBinding('vcp-codesearcher-searchcode', 'chat-session'),
-		{
-			kind: 'bridge',
-			toolName: 'vcp-codesearcher-searchcode',
-			pluginName: 'CodeSearcher',
-			displayName: 'CodeSearcher',
-			commandName: 'SearchCode',
-			stringifyArgumentNames: [],
-		},
-	);
-});
-
-test.serial('resolve session binding when explicit session lookup misses direct resource', (t: any) => {
-	rotateToolExecutionBindingsSession({
-		sessionKey: 'chat-session',
-		nextToolPlaneKey: 'plane-b',
-		bindings: [
-			{
-				kind: 'bridge',
-				toolName: 'vcp-codesearcher-searchcode',
-				pluginName: 'CodeSearcher',
-				displayName: 'CodeSearcher',
-				commandName: 'SearchCode',
-				stringifyArgumentNames: [],
-			},
-		],
-	});
-
-	registerToolExecutionBindings('chat-session', [
-		{
-			kind: 'local',
-			toolName: 'filesystem-read',
-		},
-	]);
-
-	t.deepEqual(
-		getToolExecutionBinding('vcp-codesearcher-searchcode', 'chat-session'),
-		{
-			kind: 'bridge',
-			toolName: 'vcp-codesearcher-searchcode',
-			pluginName: 'CodeSearcher',
-			displayName: 'CodeSearcher',
-			commandName: 'SearchCode',
-			stringifyArgumentNames: [],
-		},
-	);
-});
-test.serial('drop stale session fallback after explicit plane cleanup', (t: any) => {
-	rotateToolExecutionBindingsSession({
-		sessionKey: 'chat-session',
-		nextToolPlaneKey: 'plane-b',
-		bindings: [
-			{
-				kind: 'bridge',
-				toolName: 'vcp-codesearcher-searchcode',
-				pluginName: 'CodeSearcher',
-				displayName: 'CodeSearcher',
-				commandName: 'SearchCode',
-				stringifyArgumentNames: [],
-			},
-		],
-	});
-
-	clearToolExecutionBindings('plane-b');
-
-	t.is(
-		getToolExecutionBinding('vcp-codesearcher-searchcode', 'chat-session'),
-		undefined,
-	);
-});
-
-test.serial('resolve fallback binding from default tool plane when no explicit plane key exists', (t: any) => {
-	registerToolExecutionBindings(undefined, [
-		{
-			kind: 'bridge',
-			toolName: 'vcp-imagecomposer-editimage',
-			pluginName: 'ImageComposer',
-			displayName: 'ImageComposer',
-			commandName: 'EditImage',
-			stringifyArgumentNames: [],
-			argumentBindings: [
+test.serial(
+	'resolve execution binding from latest session plane key fallback',
+	(t: any) => {
+		rotateToolExecutionBindingsSession({
+			sessionKey: 'chat-session',
+			nextToolPlaneKey: 'plane-b',
+			bindings: [
 				{
-					name: 'imageUrl',
-					aliases: ['fileUrl'],
-					fileUrlCompatible: true,
+					kind: 'bridge',
+					toolName: 'vcp-codesearcher-searchcode',
+					pluginName: 'CodeSearcher',
+					displayName: 'CodeSearcher',
+					commandName: 'SearchCode',
+					stringifyArgumentNames: [],
 				},
 			],
-		},
-	]);
+		});
 
-	t.deepEqual(
-		getToolExecutionBinding('vcp-imagecomposer-editimage'),
-		{
-			kind: 'bridge',
-			toolName: 'vcp-imagecomposer-editimage',
-			pluginName: 'ImageComposer',
-			displayName: 'ImageComposer',
-			commandName: 'EditImage',
-			stringifyArgumentNames: [],
-			argumentBindings: [
+		t.deepEqual(
+			getToolExecutionBinding('vcp-codesearcher-searchcode', 'chat-session'),
+			{
+				kind: 'bridge',
+				toolName: 'vcp-codesearcher-searchcode',
+				pluginName: 'CodeSearcher',
+				displayName: 'CodeSearcher',
+				commandName: 'SearchCode',
+				stringifyArgumentNames: [],
+			},
+		);
+	},
+);
+
+test.serial(
+	'resolve session binding when explicit session lookup misses direct resource',
+	(t: any) => {
+		rotateToolExecutionBindingsSession({
+			sessionKey: 'chat-session',
+			nextToolPlaneKey: 'plane-b',
+			bindings: [
 				{
-					name: 'imageUrl',
-					aliases: ['fileUrl'],
-					fileUrlCompatible: true,
+					kind: 'bridge',
+					toolName: 'vcp-codesearcher-searchcode',
+					pluginName: 'CodeSearcher',
+					displayName: 'CodeSearcher',
+					commandName: 'SearchCode',
+					stringifyArgumentNames: [],
 				},
 			],
-		},
-	);
-});
+		});
 
-test.serial('do not leak session scoped bindings into undefined key fallback lookups', (t: any) => {
-	rotateToolExecutionBindingsSession({
-		sessionKey: 'chat-session',
-		nextToolPlaneKey: 'plane-b',
-		bindings: [
+		registerToolExecutionBindings('chat-session', [
+			{
+				kind: 'local',
+				toolName: 'filesystem-read',
+			},
+		]);
+
+		t.deepEqual(
+			getToolExecutionBinding('vcp-codesearcher-searchcode', 'chat-session'),
+			{
+				kind: 'bridge',
+				toolName: 'vcp-codesearcher-searchcode',
+				pluginName: 'CodeSearcher',
+				displayName: 'CodeSearcher',
+				commandName: 'SearchCode',
+				stringifyArgumentNames: [],
+			},
+		);
+	},
+);
+test.serial(
+	'drop stale session fallback after explicit plane cleanup',
+	(t: any) => {
+		rotateToolExecutionBindingsSession({
+			sessionKey: 'chat-session',
+			nextToolPlaneKey: 'plane-b',
+			bindings: [
+				{
+					kind: 'bridge',
+					toolName: 'vcp-codesearcher-searchcode',
+					pluginName: 'CodeSearcher',
+					displayName: 'CodeSearcher',
+					commandName: 'SearchCode',
+					stringifyArgumentNames: [],
+				},
+			],
+		});
+
+		clearToolExecutionBindings('plane-b');
+
+		t.is(
+			getToolExecutionBinding('vcp-codesearcher-searchcode', 'chat-session'),
+			undefined,
+		);
+	},
+);
+
+test.serial(
+	'resolve fallback binding from default tool plane when no explicit plane key exists',
+	(t: any) => {
+		registerToolExecutionBindings(undefined, [
 			{
 				kind: 'bridge',
 				toolName: 'vcp-imagecomposer-editimage',
@@ -210,17 +183,137 @@ test.serial('do not leak session scoped bindings into undefined key fallback loo
 					},
 				],
 			},
-		],
-	});
+		]);
 
-	t.is(getToolExecutionBinding('vcp-imagecomposer-editimage'), undefined);
-});
+		t.deepEqual(getToolExecutionBinding('vcp-imagecomposer-editimage'), {
+			kind: 'bridge',
+			toolName: 'vcp-imagecomposer-editimage',
+			pluginName: 'ImageComposer',
+			displayName: 'ImageComposer',
+			commandName: 'EditImage',
+			stringifyArgumentNames: [],
+			argumentBindings: [
+				{
+					name: 'imageUrl',
+					aliases: ['fileUrl'],
+					fileUrlCompatible: true,
+				},
+			],
+		});
+	},
+);
 
-test.serial('keep session-scoped bindings isolated across multiple planes for the same tool name', (t: any) => {
-	rotateToolExecutionBindingsSession({
-		sessionKey: 'design-session',
-		nextToolPlaneKey: 'design-plane',
-		bindings: [
+test.serial(
+	'preserve bridge stable identity fields in binding registry',
+	(t: any) => {
+		registerToolExecutionBindings('plane-a', [
+			{
+				kind: 'bridge',
+				toolName: 'vcp-fileoperatorpublic-readfile',
+				pluginName: 'FileOperatorPublic',
+				originName: 'FileOperator',
+				publicName: 'FileOperatorPublic',
+				toolId: 'vcp_bridge:fileoperator',
+				displayName: 'Marketing File Operator',
+				commandName: 'ReadFile',
+				stringifyArgumentNames: [],
+			},
+		]);
+
+		t.deepEqual(
+			getToolExecutionBinding('vcp-fileoperatorpublic-readfile', 'plane-a'),
+			{
+				kind: 'bridge',
+				toolName: 'vcp-fileoperatorpublic-readfile',
+				pluginName: 'FileOperatorPublic',
+				originName: 'FileOperator',
+				publicName: 'FileOperatorPublic',
+				toolId: 'vcp_bridge:fileoperator',
+				displayName: 'Marketing File Operator',
+				commandName: 'ReadFile',
+				stringifyArgumentNames: [],
+			},
+		);
+	},
+);
+
+test.serial(
+	'do not leak session scoped bindings into undefined key fallback lookups',
+	(t: any) => {
+		rotateToolExecutionBindingsSession({
+			sessionKey: 'chat-session',
+			nextToolPlaneKey: 'plane-b',
+			bindings: [
+				{
+					kind: 'bridge',
+					toolName: 'vcp-imagecomposer-editimage',
+					pluginName: 'ImageComposer',
+					displayName: 'ImageComposer',
+					commandName: 'EditImage',
+					stringifyArgumentNames: [],
+					argumentBindings: [
+						{
+							name: 'imageUrl',
+							aliases: ['fileUrl'],
+							fileUrlCompatible: true,
+						},
+					],
+				},
+			],
+		});
+
+		t.is(getToolExecutionBinding('vcp-imagecomposer-editimage'), undefined);
+	},
+);
+
+test.serial(
+	'keep session-scoped bindings isolated across multiple planes for the same tool name',
+	(t: any) => {
+		rotateToolExecutionBindingsSession({
+			sessionKey: 'design-session',
+			nextToolPlaneKey: 'design-plane',
+			bindings: [
+				{
+					kind: 'bridge',
+					toolName: 'vcp-imagecomposer-editimage',
+					pluginName: 'ImageComposer',
+					displayName: 'ImageComposer',
+					commandName: 'EditImage',
+					stringifyArgumentNames: [],
+					argumentBindings: [
+						{
+							name: 'imageUrl',
+							aliases: ['fileUrl'],
+							fileUrlCompatible: true,
+						},
+					],
+				},
+			],
+		});
+		rotateToolExecutionBindingsSession({
+			sessionKey: 'review-session',
+			nextToolPlaneKey: 'review-plane',
+			bindings: [
+				{
+					kind: 'bridge',
+					toolName: 'vcp-imagecomposer-editimage',
+					pluginName: 'ImageComposer',
+					displayName: 'ImageComposer',
+					commandName: 'EditImage',
+					stringifyArgumentNames: [],
+					argumentBindings: [
+						{
+							name: 'sourceUrl',
+							aliases: ['path'],
+							fileUrlCompatible: true,
+						},
+					],
+				},
+			],
+		});
+
+		t.deepEqual(
+			getToolExecutionBinding('vcp-imagecomposer-editimage', 'design-session'),
 			{
 				kind: 'bridge',
 				toolName: 'vcp-imagecomposer-editimage',
@@ -236,12 +329,9 @@ test.serial('keep session-scoped bindings isolated across multiple planes for th
 					},
 				],
 			},
-		],
-	});
-	rotateToolExecutionBindingsSession({
-		sessionKey: 'review-session',
-		nextToolPlaneKey: 'review-plane',
-		bindings: [
+		);
+		t.deepEqual(
+			getToolExecutionBinding('vcp-imagecomposer-editimage', 'review-session'),
 			{
 				kind: 'bridge',
 				toolName: 'vcp-imagecomposer-editimage',
@@ -257,55 +347,60 @@ test.serial('keep session-scoped bindings isolated across multiple planes for th
 					},
 				],
 			},
-		],
-	});
+		);
+	},
+);
 
-	t.deepEqual(
-		getToolExecutionBinding('vcp-imagecomposer-editimage', 'design-session'),
-		{
-			kind: 'bridge',
-			toolName: 'vcp-imagecomposer-editimage',
-			pluginName: 'ImageComposer',
-			displayName: 'ImageComposer',
-			commandName: 'EditImage',
-			stringifyArgumentNames: [],
-			argumentBindings: [
+test.serial(
+	'filter execution bindings down to the retained tool plane',
+	(t: any) => {
+		rotateToolExecutionBindingsSession({
+			sessionKey: 'chat-session',
+			nextToolPlaneKey: 'plane-b',
+			bindings: [
 				{
-					name: 'imageUrl',
-					aliases: ['fileUrl'],
-					fileUrlCompatible: true,
+					kind: 'local',
+					toolName: 'filesystem-read',
+				},
+				{
+					kind: 'bridge',
+					toolName: 'vcp-codesearcher-searchcode',
+					pluginName: 'CodeSearcher',
+					displayName: 'CodeSearcher',
+					commandName: 'SearchCode',
+					stringifyArgumentNames: [],
 				},
 			],
-		},
-	);
-	t.deepEqual(
-		getToolExecutionBinding('vcp-imagecomposer-editimage', 'review-session'),
-		{
-			kind: 'bridge',
-			toolName: 'vcp-imagecomposer-editimage',
-			pluginName: 'ImageComposer',
-			displayName: 'ImageComposer',
-			commandName: 'EditImage',
-			stringifyArgumentNames: [],
-			argumentBindings: [
+		});
+
+		t.deepEqual(
+			filterToolExecutionBindings(
+				['vcp-codesearcher-searchcode', 'send_message_to_agent'],
+				'plane-b',
+			),
+			[
 				{
-					name: 'sourceUrl',
-					aliases: ['path'],
-					fileUrlCompatible: true,
+					kind: 'bridge',
+					toolName: 'vcp-codesearcher-searchcode',
+					pluginName: 'CodeSearcher',
+					displayName: 'CodeSearcher',
+					commandName: 'SearchCode',
+					stringifyArgumentNames: [],
 				},
 			],
-		},
-	);
-});
+		);
+	},
+);
 
-test.serial('filter execution bindings down to the retained tool plane', (t: any) => {
-	rotateToolExecutionBindingsSession({
-		sessionKey: 'chat-session',
-		nextToolPlaneKey: 'plane-b',
-		bindings: [
+test.serial(
+	'coerce description-derived bridge arguments to strings before execution',
+	(t: any) => {
+		const normalizedArgs = coerceBridgeExecutionArguments(
 			{
-				kind: 'local',
-				toolName: 'filesystem-read',
+				query: 'router',
+				context_lines: 2,
+				case_sensitive: false,
+				filters: ['ts', 'tsx'],
 			},
 			{
 				kind: 'bridge',
@@ -313,201 +408,224 @@ test.serial('filter execution bindings down to the retained tool plane', (t: any
 				pluginName: 'CodeSearcher',
 				displayName: 'CodeSearcher',
 				commandName: 'SearchCode',
-				stringifyArgumentNames: [],
+				stringifyArgumentNames: ['context_lines', 'case_sensitive', 'filters'],
 			},
-		],
-	});
+		);
 
-	t.deepEqual(
-		filterToolExecutionBindings(
-			['vcp-codesearcher-searchcode', 'send_message_to_agent'],
-			'plane-b',
-		),
-		[
-			{
-				kind: 'bridge',
-				toolName: 'vcp-codesearcher-searchcode',
-				pluginName: 'CodeSearcher',
-				displayName: 'CodeSearcher',
-				commandName: 'SearchCode',
-				stringifyArgumentNames: [],
-			},
-		],
-	);
-});
+		t.deepEqual(normalizedArgs, {
+			query: 'router',
+			context_lines: '2',
+			case_sensitive: 'false',
+			filters: '["ts","tsx"]',
+		});
+	},
+);
 
-test.serial('coerce description-derived bridge arguments to strings before execution', (t: any) => {
-	const normalizedArgs = coerceBridgeExecutionArguments(
-		{
+test.serial(
+	'leave structured bridge arguments untouched when no stringify contract exists',
+	(t: any) => {
+		const originalArgs = {
 			query: 'router',
 			context_lines: 2,
 			case_sensitive: false,
-			filters: ['ts', 'tsx'],
-		},
-		{
+		};
+		const normalizedArgs = coerceBridgeExecutionArguments(originalArgs, {
 			kind: 'bridge',
 			toolName: 'vcp-codesearcher-searchcode',
 			pluginName: 'CodeSearcher',
 			displayName: 'CodeSearcher',
 			commandName: 'SearchCode',
-			stringifyArgumentNames: ['context_lines', 'case_sensitive', 'filters'],
-		},
-	);
-
-	t.deepEqual(normalizedArgs, {
-		query: 'router',
-		context_lines: '2',
-		case_sensitive: 'false',
-		filters: '["ts","tsx"]',
-	});
-});
-
-test.serial('leave structured bridge arguments untouched when no stringify contract exists', (t: any) => {
-	const originalArgs = {
-		query: 'router',
-		context_lines: 2,
-		case_sensitive: false,
-	};
-	const normalizedArgs = coerceBridgeExecutionArguments(originalArgs, {
-		kind: 'bridge',
-		toolName: 'vcp-codesearcher-searchcode',
-		pluginName: 'CodeSearcher',
-		displayName: 'CodeSearcher',
-		commandName: 'SearchCode',
-		stringifyArgumentNames: [],
-	});
-
-	t.deepEqual(normalizedArgs, originalArgs);
-});
-
-test.serial('normalize bridge argument aliases and local file paths before execution', (t: any) => {
-	const normalizedArgs = coerceBridgeExecutionArguments(
-		{
-			fileUrl: 'H:/repo/assets/cover.png',
-			prompt: 'make it brighter',
-		},
-		{
-			kind: 'bridge',
-			toolName: 'vcp-imagecomposer-editimage',
-			pluginName: 'ImageComposer',
-			displayName: 'ImageComposer',
-			commandName: 'EditImage',
 			stringifyArgumentNames: [],
-			argumentBindings: [
-				{
-					name: 'imageUrl',
-					aliases: ['fileUrl', 'image_path'],
-					fileUrlCompatible: true,
-				},
-			],
-		},
-	);
+		});
 
-	t.false('fileUrl' in normalizedArgs);
-	t.is(normalizedArgs['imageUrl'], 'file:///H:/repo/assets/cover.png');
-	t.is(normalizedArgs['prompt'], 'make it brighter');
-});
+		t.deepEqual(normalizedArgs, originalArgs);
+	},
+);
 
-test.serial('normalize bridge argument aliases without coercing file-url compatible values yet', (t: any) => {
-	const normalizedArgs = normalizeBridgeArgumentAliases(
-		{
-			fileUrl: 'assets/cover.png',
-			prompt: 'make it brighter',
-		},
-		{
-			kind: 'bridge',
-			toolName: 'vcp-imagecomposer-editimage',
-			pluginName: 'ImageComposer',
-			displayName: 'ImageComposer',
-			commandName: 'EditImage',
-			stringifyArgumentNames: [],
-			argumentBindings: [
-				{
-					name: 'imageUrl',
-					aliases: ['fileUrl', 'image_path'],
-					fileUrlCompatible: true,
-				},
-			],
-		},
-	);
-
-	t.false('fileUrl' in normalizedArgs);
-	t.is(normalizedArgs['imageUrl'], 'assets/cover.png');
-	t.is(normalizedArgs['prompt'], 'make it brighter');
-});
-
-test.serial('apply alias normalization before description-derived stringify coercion', (t: any) => {
-	const normalizedArgs = coerceBridgeExecutionArguments(
-		{
-			image_path: './fixtures/demo.png',
-			options: {
-				mode: 'fast',
+test.serial(
+	'normalize bridge argument aliases and local file paths before execution',
+	(t: any) => {
+		const normalizedArgs = coerceBridgeExecutionArguments(
+			{
+				fileUrl: 'H:/repo/assets/cover.png',
+				prompt: 'make it brighter',
 			},
-		},
-		{
-			kind: 'bridge',
-			toolName: 'vcp-imagecomposer-editimage',
-			pluginName: 'ImageComposer',
-			displayName: 'ImageComposer',
-			commandName: 'EditImage',
-			stringifyArgumentNames: ['options'],
-			argumentBindings: [
-				{
-					name: 'imageUrl',
-					aliases: ['image_path'],
-					fileUrlCompatible: true,
+			{
+				kind: 'bridge',
+				toolName: 'vcp-imagecomposer-editimage',
+				pluginName: 'ImageComposer',
+				displayName: 'ImageComposer',
+				commandName: 'EditImage',
+				stringifyArgumentNames: [],
+				argumentBindings: [
+					{
+						name: 'imageUrl',
+						aliases: ['fileUrl', 'image_path'],
+						fileUrlCompatible: true,
+					},
+				],
+			},
+		);
+
+		t.false('fileUrl' in normalizedArgs);
+		t.is(normalizedArgs['imageUrl'], 'file:///H:/repo/assets/cover.png');
+		t.is(normalizedArgs['prompt'], 'make it brighter');
+	},
+);
+
+test.serial(
+	'normalize bridge argument aliases without coercing file-url compatible values yet',
+	(t: any) => {
+		const normalizedArgs = normalizeBridgeArgumentAliases(
+			{
+				fileUrl: 'assets/cover.png',
+				prompt: 'make it brighter',
+			},
+			{
+				kind: 'bridge',
+				toolName: 'vcp-imagecomposer-editimage',
+				pluginName: 'ImageComposer',
+				displayName: 'ImageComposer',
+				commandName: 'EditImage',
+				stringifyArgumentNames: [],
+				argumentBindings: [
+					{
+						name: 'imageUrl',
+						aliases: ['fileUrl', 'image_path'],
+						fileUrlCompatible: true,
+					},
+				],
+			},
+		);
+
+		t.false('fileUrl' in normalizedArgs);
+		t.is(normalizedArgs['imageUrl'], 'assets/cover.png');
+		t.is(normalizedArgs['prompt'], 'make it brighter');
+	},
+);
+
+test.serial(
+	'apply alias normalization before description-derived stringify coercion',
+	(t: any) => {
+		const normalizedArgs = coerceBridgeExecutionArguments(
+			{
+				image_path: './fixtures/demo.png',
+				options: {
+					mode: 'fast',
 				},
-			],
-		},
-	);
+			},
+			{
+				kind: 'bridge',
+				toolName: 'vcp-imagecomposer-editimage',
+				pluginName: 'ImageComposer',
+				displayName: 'ImageComposer',
+				commandName: 'EditImage',
+				stringifyArgumentNames: ['options'],
+				argumentBindings: [
+					{
+						name: 'imageUrl',
+						aliases: ['image_path'],
+						fileUrlCompatible: true,
+					},
+				],
+			},
+		);
 
-	t.is(
-		normalizedArgs['imageUrl'],
-		FIXTURES_DEMO_FILE_URL,
-	);
-	t.is(normalizedArgs['options'], '{"mode":"fast"}');
-});
+		t.is(normalizedArgs['imageUrl'], FIXTURES_DEMO_FILE_URL);
+		t.is(normalizedArgs['options'], '{"mode":"fast"}');
+	},
+);
 
-test.serial('normalize nested file-url compatible objects without rewriting unrelated nested strings', (t: any) => {
-	const normalizedArgs = coerceBridgeExecutionArguments(
-		{
+test.serial(
+	'normalize nested file-url compatible objects without rewriting unrelated nested strings',
+	(t: any) => {
+		const normalizedArgs = coerceBridgeExecutionArguments(
+			{
+				payload: {
+					imageUrl: './fixtures/demo.png',
+					prompt: 'keep.colors.warm',
+					items: [
+						{
+							filePath: '../assets/reference.png',
+							label: 'reference.image',
+						},
+					],
+				},
+			},
+			{
+				kind: 'bridge',
+				toolName: 'vcp-imagecomposer-editimage',
+				pluginName: 'ImageComposer',
+				displayName: 'ImageComposer',
+				commandName: 'EditImage',
+				stringifyArgumentNames: [],
+				argumentBindings: [
+					{
+						name: 'payload',
+						fileUrlCompatible: true,
+					},
+				],
+			},
+		);
+
+		t.deepEqual(normalizedArgs, {
 			payload: {
-				imageUrl: './fixtures/demo.png',
+				imageUrl: FIXTURES_DEMO_FILE_URL,
 				prompt: 'keep.colors.warm',
 				items: [
 					{
-						filePath: '../assets/reference.png',
+						filePath: ASSETS_REFERENCE_FILE_URL,
 						label: 'reference.image',
 					},
 				],
 			},
-		},
-		{
+		});
+	},
+);
+
+test('bridge mutation sensitivity fails closed when readOnly conflicts with mutating effect', (t: any) => {
+	t.true(
+		isBridgeToolMutationSensitive({
 			kind: 'bridge',
-			toolName: 'vcp-imagecomposer-editimage',
-			pluginName: 'ImageComposer',
-			displayName: 'ImageComposer',
-			commandName: 'EditImage',
+			toolName: 'vcp-fileoperator-writefile',
+			pluginName: 'FileOperator',
+			displayName: 'FileOperator',
+			commandName: 'WriteFile',
+			metadata: {
+				effect: 'write',
+				readOnly: true,
+			},
 			stringifyArgumentNames: [],
-			argumentBindings: [
-				{
-					name: 'payload',
-					fileUrlCompatible: true,
-				},
-			],
-		},
+		}),
 	);
 
-	t.deepEqual(normalizedArgs, {
-		payload: {
-			imageUrl: FIXTURES_DEMO_FILE_URL,
-			prompt: 'keep.colors.warm',
-			items: [
-				{
-					filePath: ASSETS_REFERENCE_FILE_URL,
-					label: 'reference.image',
-				},
-			],
-		},
-	});
+	t.true(
+		isBridgeToolMutationSensitive({
+			kind: 'bridge',
+			toolName: 'vcp-fileoperator-writefile',
+			pluginName: 'FileOperator',
+			displayName: 'FileOperator',
+			commandName: 'WriteFile',
+			metadata: {
+				effect: 'read',
+				readOnly: true,
+			},
+			stringifyArgumentNames: [],
+		}),
+	);
+
+	t.false(
+		isBridgeToolMutationSensitive({
+			kind: 'bridge',
+			toolName: 'vcp-fileoperator-readfile',
+			pluginName: 'FileOperator',
+			displayName: 'FileOperator',
+			commandName: 'ReadFile',
+			metadata: {
+				effect: 'read',
+				readOnly: true,
+			},
+			stringifyArgumentNames: [],
+		}),
+	);
 });

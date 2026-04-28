@@ -46,18 +46,28 @@ import {createStreamingResponse} from '../../api/responses.js';
 import {createStreamingAnthropicCompletion} from '../../api/anthropic.js';
 import {createStreamingGeminiCompletion} from '../../api/gemini.js';
 import {getSnowConfig} from '../config/apiConfig.js';
+import type {ApiConfig} from '../config/apiConfig.js';
 import type {ResponseStreamChunk} from '../../api/responses.js';
 import type {AnthropicStreamChunk} from '../../api/anthropic.js';
 import type {GeminiStreamChunk} from '../../api/gemini.js';
 import type {StreamChunk} from '../../api/chat.js';
 import {executeToolCall, type ToolCall} from '../execution/toolExecutor.js';
+import type {MCPTool} from '../execution/mcpToolsManager.js';
 import {prepareToolPlane} from '../session/vcpCompatibility/toolPlaneFacade.js';
+import {applyVcpOutboundMessageTransforms} from '../session/vcpCompatibility/applyOutboundMessageTransforms.js';
 import {
-	clearBridgeToolSnapshotSession,
-} from '../session/vcpCompatibility/toolSnapshot.js';
-import {
-	clearToolExecutionBindingsSession,
-} from '../session/vcpCompatibility/toolExecutionBinding.js';
+	resolveVcpModeRequest,
+	type VcpModeResolution,
+} from '../session/vcpCompatibility/mode.js';
+import {sanitizeAssistantContent} from '../../hooks/conversation/utils/assistantContentSanitizer.js';
+import {clearBridgeToolSnapshotSession} from '../session/vcpCompatibility/toolSnapshot.js';
+import {clearToolExecutionBindingsSession} from '../session/vcpCompatibility/toolExecutionBinding.js';
+import {createAcpVcpDisplaySanitizer} from './acpVcpDisplaySanitizer.js';
+
+export {
+	createAcpVcpDisplaySanitizer,
+	type AcpDisplaySanitizer,
+} from './acpVcpDisplaySanitizer.js';
 
 // ACP 协议版本
 const ACP_PROTOCOL_VERSION: ProtocolVersion = 1;
@@ -74,6 +84,38 @@ interface AcpSession {
 
 // 工具调用状态类型
 type ToolCallStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export type AcpStreamRequestContext = {
+	resolvedRequest: VcpModeResolution;
+	transformedMessages: ChatMessage[];
+};
+
+export function buildAcpStreamRequestContext(options: {
+	config: ApiConfig;
+	model: string;
+	messages: ChatMessage[];
+	tools: MCPTool[];
+}): AcpStreamRequestContext {
+	const {config, model, messages, tools} = options;
+	const activeTools = tools.length > 0 ? tools : undefined;
+	const resolvedRequest = resolveVcpModeRequest(config, {
+		model,
+		tools: activeTools,
+		toolChoice: 'auto',
+	});
+	const transformedMessages = applyVcpOutboundMessageTransforms({
+		config: {
+			...config,
+			requestMethod: resolvedRequest.requestMethod,
+		},
+		messages,
+	});
+
+	return {
+		resolvedRequest,
+		transformedMessages,
+	};
+}
 
 /**
  * ACP Manager 类
@@ -340,17 +382,24 @@ class AcpManager {
 			sessionKey: session.id,
 		});
 		const mcpTools = preparedToolPlane.tools;
+		const {resolvedRequest, transformedMessages} = buildAcpStreamRequestContext(
+			{
+				config,
+				model,
+				messages: session.messages,
+				tools: mcpTools,
+			},
+		);
+		const requestTools = resolvedRequest.tools ?? mcpTools;
+		const displaySanitizer = resolvedRequest.enabled
+			? createAcpVcpDisplaySanitizer()
+			: null;
 
 		// 流式响应处理
 		let fullContent = '';
 		const toolCalls: ToolCall[] = [];
 
-		// 流式回调
-		const onChunk = async (chunk: string, _isThinking: boolean) => {
-			if (isCancelled()) return;
-
-			fullContent += chunk;
-			// 发送消息块
+		const sendAgentMessageChunk = async (chunk: string) => {
 			await conn
 				.sessionUpdate({
 					sessionId: session.id,
@@ -360,6 +409,19 @@ class AcpManager {
 					} as SessionUpdate,
 				})
 				.catch(() => {});
+		};
+
+		// 流式回调
+		const onChunk = async (chunk: string, _isThinking: boolean) => {
+			if (isCancelled()) return;
+
+			fullContent += chunk;
+			const displayChunk = displaySanitizer
+				? displaySanitizer.push(chunk)
+				: chunk;
+			if (displayChunk) {
+				await sendAgentMessageChunk(displayChunk);
+			}
 		};
 
 		// 思考内容缓冲区
@@ -385,8 +447,8 @@ class AcpManager {
 				.catch(() => {});
 		};
 
-		// 根据配置的 requestMethod 选择正确的 API 链路
-		const requestMethod = config.requestMethod || 'chat';
+		// VCP 后端始终走 HTTP chat 链路，但保留原始配置驱动的工具清洗策略。
+		const requestMethod = resolvedRequest.requestMethod;
 
 		// 处理流式响应的通用逻辑
 		const processStreamChunk = async (
@@ -449,9 +511,9 @@ class AcpManager {
 				case 'responses': {
 					const stream = createStreamingResponse(
 						{
-							messages: session.messages,
+							messages: transformedMessages,
 							model,
-							tools: mcpTools,
+							tools: requestTools,
 							store: false,
 						},
 						controller.signal,
@@ -465,9 +527,9 @@ class AcpManager {
 				case 'anthropic': {
 					const stream = createStreamingAnthropicCompletion(
 						{
-							messages: session.messages,
+							messages: transformedMessages,
 							model,
-							tools: mcpTools,
+							tools: requestTools,
 						},
 						controller.signal,
 					);
@@ -480,9 +542,9 @@ class AcpManager {
 				case 'gemini': {
 					const stream = createStreamingGeminiCompletion(
 						{
-							messages: session.messages,
+							messages: transformedMessages,
 							model,
-							tools: mcpTools,
+							tools: requestTools,
 						},
 						controller.signal,
 					);
@@ -496,9 +558,9 @@ class AcpManager {
 				default: {
 					const stream = createStreamingChatCompletion(
 						{
-							messages: session.messages,
+							messages: transformedMessages,
 							model,
-							tools: mcpTools,
+							tools: requestTools,
 						},
 						controller.signal,
 					);
@@ -516,10 +578,19 @@ class AcpManager {
 			throw error;
 		}
 
+		if (displaySanitizer) {
+			const trailingDisplayChunk = displaySanitizer.flush();
+			if (trailingDisplayChunk) {
+				await sendAgentMessageChunk(trailingDisplayChunk);
+			}
+		}
+
 		// 添加助手消息
 		const assistantMessage: ChatMessage = {
 			role: 'assistant',
-			content: fullContent,
+			content: resolvedRequest.enabled
+				? sanitizeAssistantContent(fullContent)
+				: fullContent,
 		};
 
 		// 如果有思考内容，添加到消息中（thinking 模型需要）

@@ -5,6 +5,7 @@ import {mkdirSync, rmSync} from 'fs';
 import {fileURLToPath, pathToFileURL} from 'url';
 import {
 	getToolExecutionBinding,
+	isBridgeToolMutationSensitive,
 	normalizeBridgeArgumentAliases,
 	type BridgeToolExecutionBinding,
 } from '../session/vcpCompatibility/toolExecutionBinding.js';
@@ -451,10 +452,8 @@ export function enforceWorktreePath(
 		const candidateRelativePath = relative(candidateRoot, candidatePath);
 		return (
 			candidateRelativePath === '' ||
-			(
-				!candidateRelativePath.startsWith('..') &&
-				!isAbsolute(candidateRelativePath)
-			)
+			(!candidateRelativePath.startsWith('..') &&
+				!isAbsolute(candidateRelativePath))
 		);
 	};
 
@@ -467,13 +466,17 @@ export function enforceWorktreePath(
 
 		if (isWithin(mainRoot, resolved)) {
 			const rel = relative(mainRoot, resolved);
-			return resolve(resolvedWorktree, rel);
+			const remapped = resolve(resolvedWorktree, rel);
+			return isWithin(resolvedWorktree, remapped) ? remapped : null;
 		}
 
 		return null;
 	}
 
-	return resolve(resolvedWorktree, filePath);
+	const resolvedRelativePath = resolve(resolvedWorktree, filePath);
+	return isWithin(resolvedWorktree, resolvedRelativePath)
+		? resolvedRelativePath
+		: null;
 }
 
 function looksLikeBareFileNameCandidate(value: string): boolean {
@@ -490,7 +493,7 @@ function looksLikeWorktreePathCandidate(
 	}
 
 	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(normalizedValue)) {
-		return normalizedValue.startsWith('file://');
+		return normalizedValue.toLowerCase().startsWith('file://');
 	}
 
 	return (
@@ -557,7 +560,7 @@ function rewriteBridgeValueForWorktree(
 			return {value};
 		}
 
-		if (normalizedValue.startsWith('file://')) {
+		if (normalizedValue.toLowerCase().startsWith('file://')) {
 			try {
 				const remappedPath = enforceWorktreePath(
 					fileURLToPath(normalizedValue),
@@ -567,7 +570,7 @@ function rewriteBridgeValueForWorktree(
 					? {value, blockedPath: value}
 					: {value: pathToFileURL(remappedPath).toString()};
 			} catch {
-				return {value};
+				return {value, blockedPath: value};
 			}
 		}
 
@@ -616,6 +619,88 @@ function rewriteBridgeValueForWorktree(
 	return {value};
 }
 
+function findUnsafeBridgePathLikeValue(
+	value: unknown,
+	traversalMode: BridgeRewriteTraversalMode = 'root',
+): string | undefined {
+	if (typeof value === 'string') {
+		const normalizedValue = value.trim();
+		if (
+			normalizedValue &&
+			looksLikeWorktreePathCandidate(
+				normalizedValue,
+				traversalMode !== 'neutral',
+			)
+		) {
+			return normalizedValue;
+		}
+
+		return undefined;
+	}
+
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			const unsafePath = findUnsafeBridgePathLikeValue(item, traversalMode);
+			if (unsafePath) {
+				return unsafePath;
+			}
+		}
+
+		return undefined;
+	}
+
+	if (typeof value === 'object' && value !== null) {
+		for (const [key, item] of Object.entries(value)) {
+			const unsafePath = findUnsafeBridgePathLikeValue(
+				item,
+				looksLikePathPropertyName(key) ? 'keyedPath' : 'neutral',
+			);
+			if (unsafePath) {
+				return unsafePath;
+			}
+		}
+	}
+
+	return undefined;
+}
+
+function findUnprotectedBridgePathArgument(
+	args: Record<string, unknown>,
+	binding: BridgeToolExecutionBinding,
+): string | undefined {
+	const fileUrlCompatibleNames = new Set(
+		(binding.argumentBindings || [])
+			.filter(argumentBinding => argumentBinding.fileUrlCompatible)
+			.map(argumentBinding => argumentBinding.name),
+	);
+	const pathLikeNames = new Set(
+		(binding.argumentBindings || [])
+			.filter(
+				argumentBinding =>
+					argumentBinding.pathLike || argumentBinding.fileUrlCompatible,
+			)
+			.map(argumentBinding => argumentBinding.name),
+	);
+
+	for (const [key, value] of Object.entries(args)) {
+		if (fileUrlCompatibleNames.has(key)) {
+			continue;
+		}
+
+		const unsafePath = findUnsafeBridgePathLikeValue(
+			value,
+			pathLikeNames.has(key) || looksLikePathPropertyName(key)
+				? 'keyedPath'
+				: 'neutral',
+		);
+		if (unsafePath) {
+			return unsafePath;
+		}
+	}
+
+	return undefined;
+}
+
 function rewriteBridgeArgsForWorktree(
 	toolName: string,
 	args: Record<string, unknown>,
@@ -652,6 +737,22 @@ function rewriteBridgeArgsForWorktree(
 		}
 
 		rewrittenArgs[argumentBinding.name] = rewrittenValue.value;
+	}
+
+	if (isBridgeToolMutationSensitive(bridgeBinding)) {
+		const unsafePath = findUnprotectedBridgePathArgument(
+			rewrittenArgs,
+			bridgeBinding,
+		);
+		if (unsafePath) {
+			return {
+				args,
+				error:
+					`[Worktree Enforcement] Bridge tool "${toolName}" received path-like argument ` +
+					`"${unsafePath}" without explicit file:// worktree binding. Refusing to execute outside ` +
+					`the teammate worktree (${worktreePath}).`,
+			};
+		}
 	}
 
 	return {args: rewrittenArgs};

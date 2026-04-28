@@ -36,9 +36,15 @@ export interface CompatibilityStreamingSuppressor {
 	 * the final VCP-aware render path takes over.
 	 *
 	 * @param line - Streaming line candidate.
+	 * @param options - Optional caller-owned stream state.
 	 * @returns Whether the line should be suppressed from incremental UI output.
 	 */
-	shouldSuppress(line: string): boolean;
+	shouldSuppress(
+		line: string,
+		options?: {
+			inFencedCodeBlock?: boolean;
+		},
+	): boolean;
 
 	/**
 	 * Resets the suppressor to its initial state for the next streaming round.
@@ -54,15 +60,41 @@ export interface CompatibilityStreamingSuppressor {
  */
 export function createCompatibilityStreamingSuppressor(): CompatibilityStreamingSuppressor {
 	let currentState: VcpStreamingSuppressionState = null;
+	let inFencedCodeBlock = false;
 
 	return {
-		shouldSuppress(line: string): boolean {
+		shouldSuppress(
+			line: string,
+			options?: {
+				inFencedCodeBlock?: boolean;
+			},
+		): boolean {
+			if (options?.inFencedCodeBlock !== undefined) {
+				if (options.inFencedCodeBlock) {
+					return false;
+				}
+
+				const decision = getVcpStreamingSuppressionDecision(line, currentState);
+				currentState = decision.nextState;
+				return decision.suppress;
+			}
+
+			if (line.trimStart().startsWith('```')) {
+				inFencedCodeBlock = !inFencedCodeBlock;
+				return false;
+			}
+
+			if (inFencedCodeBlock) {
+				return false;
+			}
+
 			const decision = getVcpStreamingSuppressionDecision(line, currentState);
 			currentState = decision.nextState;
 			return decision.suppress;
 		},
 		reset(): void {
 			currentState = null;
+			inFencedCodeBlock = false;
 		},
 	};
 }

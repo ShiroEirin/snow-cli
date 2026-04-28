@@ -10,6 +10,7 @@ import {
 const CONVENTIONAL_THOUGHT_REGEX =
 	/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/gi;
 const FENCED_CODE_BLOCK_REGEX = /```[\s\S]*?```/g;
+const INLINE_CODE_SPAN_REGEX = /(?<!`)`(?!`)[^\r\n`]+`(?!`)/g;
 
 type MatchBuilder<T> = (match: RegExpExecArray) => T;
 
@@ -113,20 +114,24 @@ function normalizeTextPart(text: string): string {
 
 function collectProtectedRanges(text: string): ProtectedRange[] {
 	const ranges: ProtectedRange[] = [];
-	const regex = new RegExp(
-		FENCED_CODE_BLOCK_REGEX.source,
-		FENCED_CODE_BLOCK_REGEX.flags.includes('g')
-			? FENCED_CODE_BLOCK_REGEX.flags
-			: `${FENCED_CODE_BLOCK_REGEX.flags}g`,
-	);
-	let match: RegExpExecArray | null;
+	const protectedRegexes = [FENCED_CODE_BLOCK_REGEX, INLINE_CODE_SPAN_REGEX];
 
-	while ((match = regex.exec(text)) !== null) {
-		const wholeMatch = match[0] || '';
-		ranges.push({
-			start: match.index,
-			end: match.index + wholeMatch.length,
-		});
+	for (const protectedRegex of protectedRegexes) {
+		const regex = new RegExp(
+			protectedRegex.source,
+			protectedRegex.flags.includes('g')
+				? protectedRegex.flags
+				: `${protectedRegex.flags}g`,
+		);
+		let match: RegExpExecArray | null;
+
+		while ((match = regex.exec(text)) !== null) {
+			const wholeMatch = match[0] || '';
+			ranges.push({
+				start: match.index,
+				end: match.index + wholeMatch.length,
+			});
+		}
 	}
 
 	return ranges;
@@ -137,16 +142,16 @@ function overlapsProtectedRange(
 	end: number,
 	protectedRanges: readonly ProtectedRange[],
 ): boolean {
-	return protectedRanges.some(
-		range => start < range.end && end > range.start,
-	);
+	return protectedRanges.some(range => start < range.end && end > range.start);
 }
 
 function startsInProtectedRange(
 	start: number,
 	protectedRanges: readonly ProtectedRange[],
 ): boolean {
-	return protectedRanges.some(range => start >= range.start && start < range.end);
+	return protectedRanges.some(
+		range => start >= range.start && start < range.end,
+	);
 }
 
 function collectRegexMatches<T extends VcpDisplayBlock>(
@@ -196,7 +201,7 @@ export function parseDelimitedFields(content: string): VcpDelimitedField[] {
 	while ((match = regex.exec(content)) !== null) {
 		fields.push({
 			key: (match[1] || '').trim(),
-			value: (match[2] || '').trim(),
+			value: (match[2] || match[3] || '').trim(),
 		});
 	}
 
@@ -311,9 +316,10 @@ function buildToolResultBlock(content: string): VcpToolResultBlock {
 	const statusText = parsedFields.statusText?.trim() || '';
 	const resultContent = parsedFields.content?.trim() || trimmedContent;
 	const normalizedStatusText = statusText.toLowerCase();
-	const status = normalizedStatusText.includes('error') || statusText.includes('❌')
-		? 'error'
-		: normalizedStatusText.includes('success') || statusText.includes('✅')
+	const status =
+		normalizedStatusText.includes('error') || statusText.includes('❌')
+			? 'error'
+			: normalizedStatusText.includes('success') || statusText.includes('✅')
 			? 'success'
 			: 'unknown';
 
@@ -328,10 +334,25 @@ function buildToolResultBlock(content: string): VcpToolResultBlock {
 
 function buildDailyNoteBlock(content: string): VcpDailyNoteBlock {
 	const trimmedContent = content.trim();
-	const maid = trimmedContent.match(/^Maid:\s*(.+)$/m)?.[1]?.trim();
-	const date = trimmedContent.match(/^Date:\s*(.+)$/m)?.[1]?.trim();
+	const fields = parseDelimitedFields(trimmedContent);
+	const findDelimitedValue = (...keys: string[]) =>
+		fields.find(field =>
+			keys.some(key => field.key.toLowerCase() === key.toLowerCase()),
+		)?.value;
+	const findPlainLineValue = (key: string) =>
+		trimmedContent
+			.match(new RegExp(`^${key}:\\s*([^\\n\\r]*)`, 'm'))?.[1]
+			?.trim();
+	const findPlainRestValue = (key: string) =>
+		trimmedContent
+			.match(new RegExp(`^${key}:\\s*([\\s\\S]*)$`, 'm'))?.[1]
+			?.trim();
+	const maid =
+		findDelimitedValue('Maid', 'maidName') || findPlainLineValue('Maid');
+	const date = findDelimitedValue('Date') || findPlainLineValue('Date');
 	const noteContent =
-		trimmedContent.match(/^Content:\s*([\s\S]*)$/m)?.[1]?.trim() ||
+		findDelimitedValue('Content') ||
+		findPlainRestValue('Content') ||
 		trimmedContent;
 
 	return {
@@ -345,7 +366,8 @@ function buildDailyNoteBlock(content: string): VcpDailyNoteBlock {
 function buildRoleDividerBlock(match: RegExpExecArray): VcpRoleDividerBlock {
 	return {
 		type: 'roleDivider',
-		role: ((match[2] || '').toLowerCase() as VcpRoleDividerBlock['role']) || 'user',
+		role:
+			((match[2] || '').toLowerCase() as VcpRoleDividerBlock['role']) || 'user',
 		isEnd: Boolean(match[1]),
 	};
 }

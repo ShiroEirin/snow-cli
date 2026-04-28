@@ -190,7 +190,11 @@ test('getManifest forwards normalized tool filters and caches by filter shape', 
 	const client = new SnowBridgeClient() as any;
 	const observedPayloads: Array<Record<string, unknown>> = [];
 
-	client.sendRequest = async ({payload}: {payload: Record<string, unknown>}) => {
+	client.sendRequest = async ({
+		payload,
+	}: {
+		payload: Record<string, unknown>;
+	}) => {
 		observedPayloads.push(payload);
 		return {
 			status: 'success',
@@ -200,7 +204,11 @@ test('getManifest forwards normalized tool filters and caches by filter shape', 
 
 	const firstManifest = await client.getManifest(bridgeConfig, {
 		toolFilters: {
-			excludeExactToolNames: ['vcp-demo-run', 'vcp-demo-run', 'filesystem-read'],
+			excludeExactToolNames: [
+				'vcp-demo-run',
+				'vcp-demo-run',
+				'filesystem-read',
+			],
 		},
 	});
 	const sharedManifest = await client.getManifest(hybridConfig, {
@@ -234,7 +242,11 @@ test('getManifest forwards profile-aware bridge filters', async (t: any) => {
 	const client = new SnowBridgeClient() as any;
 	const observedPayloads: Array<Record<string, unknown>> = [];
 
-	client.sendRequest = async ({payload}: {payload: Record<string, unknown>}) => {
+	client.sendRequest = async ({
+		payload,
+	}: {
+		payload: Record<string, unknown>;
+	}) => {
 		observedPayloads.push(payload);
 		return {
 			status: 'success',
@@ -353,12 +365,16 @@ test('getManifest keeps manifest cache bounded with LRU-style eviction', async (
 	}
 
 	t.is(client.manifestCache.size, 100);
-	t.false(client.manifestCache.has(client.buildConnectionKey({
-		baseUrl: 'http://127.0.0.1:6005',
-		bridgeVcpKey: '0',
-		bridgeAccessToken: '',
-		toolTransport: 'bridge',
-	})));
+	t.false(
+		client.manifestCache.has(
+			client.buildConnectionKey({
+				baseUrl: 'http://127.0.0.1:6005',
+				bridgeVcpKey: '0',
+				bridgeAccessToken: '',
+				toolTransport: 'bridge',
+			}),
+		),
+	);
 	client.disconnect();
 });
 
@@ -446,6 +462,50 @@ test('executeTool preserves the bridge status envelope for upper seams', async (
 		enabled: false,
 		state: 'completed',
 		event: 'result',
+	});
+	client.disconnect();
+});
+
+test('executeTool forwards stable bridge identity fields in execution payload', async (t: any) => {
+	const client = new SnowBridgeClient() as any;
+	let observedPayload: Record<string, unknown> | undefined;
+
+	client.ensureConnected = async () => {};
+	client.sendConnectedRequest = async (request: {
+		payload: Record<string, unknown>;
+	}) => {
+		observedPayload = request.payload;
+		return {
+			status: 'success',
+			result: {
+				ok: true,
+			},
+		};
+	};
+
+	await client.executeTool({
+		config: bridgeConfig,
+		toolName: 'FileOperator',
+		originName: 'FileOperator',
+		pluginName: 'FileOperatorPublic',
+		publicName: 'FileOperatorPublic',
+		toolId: 'vcp_bridge:fileoperator',
+		toolArgs: {
+			command: 'ReadFile',
+			path: 'demo.txt',
+		},
+	});
+
+	t.like(observedPayload, {
+		toolName: 'FileOperator',
+		originName: 'FileOperator',
+		pluginName: 'FileOperatorPublic',
+		publicName: 'FileOperatorPublic',
+		toolId: 'vcp_bridge:fileoperator',
+		toolArgs: {
+			command: 'ReadFile',
+			path: 'demo.txt',
+		},
 	});
 	client.disconnect();
 });
@@ -594,12 +654,26 @@ test('getManifest revalidates metadata-aware cache entries before ttl expiry', a
 		{
 			status: 'success',
 			revision: 'rev-1',
-			plugins: [{name: 'rev-1-plugin', displayName: 'rev-1', description: '', bridgeCommands: []}],
+			plugins: [
+				{
+					name: 'rev-1-plugin',
+					displayName: 'rev-1',
+					description: '',
+					bridgeCommands: [],
+				},
+			],
 		},
 		{
 			status: 'success',
 			revision: 'rev-2',
-			plugins: [{name: 'rev-2-plugin', displayName: 'rev-2', description: '', bridgeCommands: []}],
+			plugins: [
+				{
+					name: 'rev-2-plugin',
+					displayName: 'rev-2',
+					description: '',
+					bridgeCommands: [],
+				},
+			],
 		},
 	];
 	let sendCount = 0;

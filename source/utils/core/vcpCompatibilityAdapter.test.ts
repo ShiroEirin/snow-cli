@@ -57,6 +57,41 @@ test('compatibility streaming suppressor preserves VCP shell suppression and res
 	t.false(suppressor.shouldSuppress('Plain text'));
 });
 
+test('compatibility streaming suppressor ignores protocol samples inside fenced code', t => {
+	const suppressor = createCompatibilityStreamingSuppressor();
+
+	t.false(suppressor.shouldSuppress('```text'));
+	t.false(suppressor.shouldSuppress('<<<[TOOL_REQUEST]>>>'));
+	t.false(suppressor.shouldSuppress('tool_name=LightMemo'));
+	t.false(suppressor.shouldSuppress('```'));
+	t.false(suppressor.shouldSuppress('After'));
+});
+
+test('compatibility streaming suppressor respects caller-owned fenced code state', t => {
+	const suppressor = createCompatibilityStreamingSuppressor();
+
+	t.false(
+		suppressor.shouldSuppress('```text', {
+			inFencedCodeBlock: false,
+		}),
+	);
+	t.false(
+		suppressor.shouldSuppress('<<<[TOOL_REQUEST]>>>', {
+			inFencedCodeBlock: true,
+		}),
+	);
+	t.false(
+		suppressor.shouldSuppress('```', {
+			inFencedCodeBlock: true,
+		}),
+	);
+	t.true(
+		suppressor.shouldSuppress('<<<[TOOL_REQUEST]>>>', {
+			inFencedCodeBlock: false,
+		}),
+	);
+});
+
 test('resolve compatibility request method keeps VCP compression routing behavior', t => {
 	t.is(
 		resolveCompatibilityRequestMethod(

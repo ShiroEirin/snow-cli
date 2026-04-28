@@ -169,7 +169,11 @@ export async function processStreamRound(ctx: {
 			return;
 		}
 
-		if (vcpStreamingSuppressor.shouldSuppress(line)) {
+		if (
+			vcpStreamingSuppressor.shouldSuppress(line, {
+				inFencedCodeBlock: inCodeBlock,
+			})
+		) {
 			flushTableBuffer();
 			flushListBuffer();
 			return;

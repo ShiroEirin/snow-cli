@@ -47,6 +47,28 @@ function registerImageComposerBinding(): void {
 	]);
 }
 
+function registerWriteFileBinding(): void {
+	registerToolExecutionBindings(undefined, [
+		{
+			kind: 'bridge',
+			toolName: 'vcp-fileoperator-writefile',
+			pluginName: 'ServerFileOperator',
+			displayName: 'Server File Operator',
+			commandName: 'WriteFile',
+			metadata: {
+				effect: 'write',
+			},
+			stringifyArgumentNames: [],
+			argumentBindings: [
+				{
+					name: 'filePath',
+					pathLike: true,
+				},
+			],
+		},
+	]);
+}
+
 test('remap main workspace absolute paths into teammate worktree on Windows-compatible paths', (t: any) => {
 	const worktreePath = resolvePath(
 		process.cwd(),
@@ -61,6 +83,19 @@ test('remap main workspace absolute paths into teammate worktree on Windows-comp
 		enforceWorktreePath(mainWorkspaceFile, worktreePath),
 		resolvePath(worktreePath, 'assets', 'cover.png'),
 	);
+});
+
+test('block relative traversal outside teammate worktree', (t: any) => {
+	const worktreePath = resolvePath(
+		process.cwd(),
+		'.snow',
+		'worktrees',
+		'design',
+		'alice',
+	);
+
+	t.is(enforceWorktreePath('../bob/secret.ts', worktreePath), null);
+	t.is(enforceWorktreePath('../../outside.ts', worktreePath), null);
 });
 
 test('rewrite bridge alias file paths against teammate worktree before bridge execution', (t: any) => {
@@ -189,6 +224,28 @@ test('rewrite bridge args against the provided session binding instead of the gl
 	t.is(result.args.sourceUrl, undefined);
 });
 
+test('block malformed bridge file URLs instead of passing them through', (t: any) => {
+	registerImageComposerBinding();
+	const worktreePath = resolvePath(
+		process.cwd(),
+		'.snow',
+		'worktrees',
+		'design',
+		'alice',
+	);
+
+	const result = rewriteToolArgsForWorktree(
+		BRIDGE_TOOL_NAME,
+		{
+			image_path: 'file:///%E0%A4%A',
+		},
+		worktreePath,
+	);
+
+	t.truthy(result.error);
+	t.true(result.error?.includes('file:///%E0%A4%A'));
+});
+
 test('rewrite nested bridge file-url fields without mutating unrelated nested strings', (t: any) => {
 	registerToolExecutionBindings(undefined, [
 		{
@@ -248,4 +305,91 @@ test('rewrite nested bridge file-url fields without mutating unrelated nested st
 			],
 		},
 	});
+});
+
+test('block mutating bridge path-like args without file-url compatibility metadata', (t: any) => {
+	registerWriteFileBinding();
+	const worktreePath = resolvePath(
+		process.cwd(),
+		'.snow',
+		'worktrees',
+		'design',
+		'alice',
+	);
+
+	const result = rewriteToolArgsForWorktree(
+		'vcp-fileoperator-writefile',
+		{
+			filePath: 'src/demo.ts',
+			content: 'hello',
+		},
+		worktreePath,
+	);
+
+	t.truthy(result.error);
+	t.true(result.error?.includes('without explicit file:// worktree binding'));
+	t.deepEqual(result.args, {
+		filePath: 'src/demo.ts',
+		content: 'hello',
+	});
+});
+
+test('block mutating bridge path-like args with uppercase file URL scheme', (t: any) => {
+	registerWriteFileBinding();
+	const worktreePath = resolvePath(
+		process.cwd(),
+		'.snow',
+		'worktrees',
+		'design',
+		'alice',
+	);
+
+	const result = rewriteToolArgsForWorktree(
+		'vcp-fileoperator-writefile',
+		{
+			filePath: 'FILE:///D:/outside/demo.ts',
+			content: 'hello',
+		},
+		worktreePath,
+	);
+
+	t.truthy(result.error);
+	t.true(result.error?.includes('FILE:///D:/outside/demo.ts'));
+});
+
+test('block mutating bridge nested path-like args without file-url compatibility metadata', (t: any) => {
+	registerToolExecutionBindings(undefined, [
+		{
+			kind: 'bridge',
+			toolName: 'vcp-fileoperator-applydiff',
+			pluginName: 'ServerFileOperator',
+			displayName: 'Server File Operator',
+			commandName: 'ApplyDiff',
+			metadata: {
+				effect: 'write',
+			},
+			stringifyArgumentNames: [],
+		},
+	]);
+	const worktreePath = resolvePath(
+		process.cwd(),
+		'.snow',
+		'worktrees',
+		'design',
+		'alice',
+	);
+
+	const result = rewriteToolArgsForWorktree(
+		'vcp-fileoperator-applydiff',
+		{
+			payload: {
+				targetPath: 'src/demo.ts',
+				diff: '@@ -1 +1 @@',
+			},
+		},
+		worktreePath,
+	);
+
+	t.truthy(result.error);
+	t.true(result.error?.includes('src/demo.ts'));
 });

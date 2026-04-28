@@ -1,5 +1,25 @@
 const ROLE_DIVIDER_LINE_REGEX =
 	/^<<<\[(?:END_)?ROLE_DIVIDE_(?:SYSTEM|ASSISTANT|USER)\]>>>$/;
+const TOOL_REQUEST_START_MARKERS = [
+	'<<<[TOOL_REQUEST]>>>',
+	'<<<TOOL_REQUEST>>>',
+] as const;
+const TOOL_REQUEST_END_MARKERS = [
+	'<<<[END_TOOL_REQUEST]>>>',
+	'<<<END_TOOL_REQUEST>>>',
+] as const;
+
+function startsWithAnyMarker(
+	line: string,
+	markers: readonly string[],
+): boolean {
+	const trimmedLine = line.trimStart();
+	return markers.some(marker => trimmedLine.startsWith(marker));
+}
+
+function includesAnyMarker(line: string, markers: readonly string[]): boolean {
+	return markers.some(marker => line.includes(marker));
+}
 
 export type VcpStreamingSuppressionState =
 	| 'toolRequest'
@@ -19,9 +39,7 @@ export function getVcpStreamingSuppressionDecision(
 
 	switch (currentState) {
 		case 'toolRequest': {
-			const shouldClose =
-				trimmedLine.startsWith('<<<[END_TOOL_REQUEST]>>>') ||
-				trimmedLine.startsWith('<<<END_TOOL_REQUEST>>>');
+			const shouldClose = includesAnyMarker(line, TOOL_REQUEST_END_MARKERS);
 			return {
 				suppress: true,
 				nextState: shouldClose ? null : currentState,
@@ -31,14 +49,16 @@ export function getVcpStreamingSuppressionDecision(
 		case 'toolResult': {
 			return {
 				suppress: true,
-				nextState: trimmedLine.includes('VCP调用结果结束]]') ? null : currentState,
+				nextState: trimmedLine.includes('VCP调用结果结束]]')
+					? null
+					: currentState,
 			};
 		}
 
 		case 'dailyNote': {
 			return {
 				suppress: true,
-				nextState: trimmedLine.startsWith('<<<DailyNoteEnd>>>') ? null : currentState,
+				nextState: line.includes('<<<DailyNoteEnd>>>') ? null : currentState,
 			};
 		}
 
@@ -63,13 +83,8 @@ export function getVcpStreamingSuppressionDecision(
 		};
 	}
 
-	if (
-		trimmedLine.startsWith('<<<[TOOL_REQUEST]>>>') ||
-		trimmedLine.startsWith('<<<TOOL_REQUEST>>>')
-	) {
-		const closesImmediately =
-			trimmedLine.includes('<<<[END_TOOL_REQUEST]>>>') ||
-			trimmedLine.includes('<<<END_TOOL_REQUEST>>>');
+	if (startsWithAnyMarker(line, TOOL_REQUEST_START_MARKERS)) {
+		const closesImmediately = includesAnyMarker(line, TOOL_REQUEST_END_MARKERS);
 		return {
 			suppress: true,
 			nextState: closesImmediately ? null : 'toolRequest',
@@ -79,14 +94,18 @@ export function getVcpStreamingSuppressionDecision(
 	if (trimmedLine.startsWith('<<<DailyNoteStart>>>')) {
 		return {
 			suppress: true,
-			nextState: trimmedLine.includes('<<<DailyNoteEnd>>>') ? null : 'dailyNote',
+			nextState: trimmedLine.includes('<<<DailyNoteEnd>>>')
+				? null
+				: 'dailyNote',
 		};
 	}
 
-	if (trimmedLine.includes('[[VCP调用结果信息汇总:')) {
+	if (line.trimStart().startsWith('[[VCP调用结果信息汇总:')) {
 		return {
 			suppress: true,
-			nextState: trimmedLine.includes('VCP调用结果结束]]') ? null : 'toolResult',
+			nextState: trimmedLine.includes('VCP调用结果结束]]')
+				? null
+				: 'toolResult',
 		};
 	}
 

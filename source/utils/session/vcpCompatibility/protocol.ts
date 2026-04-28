@@ -21,7 +21,7 @@ export const VCP_ROLE_DIVIDER_REGEX =
 	/<<<\[(END_)?ROLE_DIVIDE_(SYSTEM|ASSISTANT|USER)\]>>>/g;
 
 export const VCP_START_END_FIELD_REGEX =
-	/([A-Za-z0-9_]+)\s*:\s*「始」([\s\S]*?)「末」\s*,?/g;
+	/([A-Za-z0-9_]+)\s*:\s*(?:「始ESCAPE」([\s\S]*?)「末ESCAPE」|「始」([\s\S]*?)「末」)\s*,?/g;
 
 export const VCP_ROLE_DIVIDER_BLOCK_MARKERS = {
 	system: {

@@ -55,7 +55,7 @@ test('plan approval blocks real local mutating tools', (t: any) => {
 	);
 });
 
-test('plan approval keeps read-only and bridge tools outside the block list', (t: any) => {
+test('plan approval keeps read-only tools outside the block list', (t: any) => {
 	t.false(isPlanApprovalProtectedTool('filesystem-read'));
 	t.false(
 		isPlanApprovalProtectedTool('vcp-search-findnote', {
@@ -64,6 +64,49 @@ test('plan approval keeps read-only and bridge tools outside the block list', (t
 			pluginName: 'Search',
 			displayName: 'Search',
 			commandName: 'FindNote',
+			metadata: {
+				effect: 'read',
+				readOnly: true,
+			},
+		}),
+	);
+});
+
+test('plan approval blocks mutating bridge tools before approval', (t: any) => {
+	t.true(
+		isPlanApprovalProtectedTool('vcp-fileoperator-writefile', {
+			kind: 'bridge',
+			toolName: 'vcp-fileoperator-writefile',
+			pluginName: 'ServerFileOperator',
+			displayName: 'Server File Operator',
+			commandName: 'WriteFile',
+			metadata: {
+				effect: 'write',
+			},
+		}),
+	);
+	t.true(
+		isPlanApprovalProtectedTool('vcp-shell-runcommand', {
+			kind: 'bridge',
+			toolName: 'vcp-shell-runcommand',
+			pluginName: 'Shell',
+			displayName: 'Shell',
+			commandName: 'RunCommand',
+			metadata: {
+				effect: 'command',
+			},
+		}),
+	);
+	t.true(
+		isPlanApprovalProtectedTool('vcp-custom-touch', {
+			kind: 'bridge',
+			toolName: 'vcp-custom-touch',
+			pluginName: 'Custom',
+			displayName: 'Custom',
+			commandName: 'Touch',
+			metadata: {
+				requiresApproval: true,
+			},
 		}),
 	);
 });
@@ -120,7 +163,7 @@ test('plan approval blocks mutating manage actions but keeps read actions execut
 			({
 				kind: 'local',
 				toolName,
-			}) as any,
+			} as any),
 	});
 
 	t.deepEqual(
@@ -313,14 +356,14 @@ test('prepareTeammateProviderRequest resolves provider before outbound transform
 			requestMethod: 'chat',
 		} as any,
 		model: 'gpt-5',
-		allowedTools: [{type: 'function', function: {name: 'filesystem-read'}}] as any,
+		allowedTools: [
+			{type: 'function', function: {name: 'filesystem-read'}},
+		] as any,
 		messages: [{role: 'user', content: 'hello'}],
 		resolveVcpModeRequest: (_config, _args) => ({
 			enabled: true,
 			requestMethod: 'responses',
-			tools: [
-				{type: 'function', function: {name: 'filesystem-read'}},
-			] as any,
+			tools: [{type: 'function', function: {name: 'filesystem-read'}}] as any,
 			toolChoice: 'auto',
 		}),
 	});
@@ -343,15 +386,15 @@ test('createTeammateProviderStream dispatches provider-specific payloads', (t: a
 			maxTokens: 2048,
 		} as any,
 		model: 'claude',
-		allowedTools: [{type: 'function', function: {name: 'filesystem-read'}}] as any,
+		allowedTools: [
+			{type: 'function', function: {name: 'filesystem-read'}},
+		] as any,
 		messages: [{role: 'user', content: 'hello'}],
 		currentSessionId: 'session-1',
 		resolveVcpModeRequest: (_config, _args) => ({
 			enabled: true,
 			requestMethod: 'anthropic',
-			tools: [
-				{type: 'function', function: {name: 'filesystem-read'}},
-			] as any,
+			tools: [{type: 'function', function: {name: 'filesystem-read'}}] as any,
 			toolChoice: 'auto',
 		}),
 		streamFactories: {
@@ -380,15 +423,15 @@ test('createTeammateProviderStream dispatches provider-specific payloads', (t: a
 			maxTokens: 2048,
 		} as any,
 		model: 'gpt-5',
-		allowedTools: [{type: 'function', function: {name: 'filesystem-read'}}] as any,
+		allowedTools: [
+			{type: 'function', function: {name: 'filesystem-read'}},
+		] as any,
 		messages: [{role: 'user', content: 'hello'}],
 		currentSessionId: 'session-2',
 		resolveVcpModeRequest: (_config, _args) => ({
 			enabled: true,
 			requestMethod: 'responses',
-			tools: [
-				{type: 'function', function: {name: 'filesystem-read'}},
-			] as any,
+			tools: [{type: 'function', function: {name: 'filesystem-read'}}] as any,
 			toolChoice: 'required',
 		}),
 		streamFactories: {
@@ -434,7 +477,9 @@ test('createTeammateProviderStream dispatches provider-specific payloads', (t: a
 			maxTokens: 2048,
 		} as any,
 		model: 'gemini-2.5-pro',
-		allowedTools: [{type: 'function', function: {name: 'filesystem-read'}}] as any,
+		allowedTools: [
+			{type: 'function', function: {name: 'filesystem-read'}},
+		] as any,
 		messages: [{role: 'user', content: 'hello'}],
 		resolveVcpModeRequest: () => ({
 			enabled: true,
@@ -468,7 +513,9 @@ test('createTeammateProviderStream dispatches provider-specific payloads', (t: a
 			maxTokens: 2048,
 		} as any,
 		model: 'gpt-5-chat',
-		allowedTools: [{type: 'function', function: {name: 'filesystem-read'}}] as any,
+		allowedTools: [
+			{type: 'function', function: {name: 'filesystem-read'}},
+		] as any,
 		messages: [{role: 'user', content: 'hello'}],
 		resolveVcpModeRequest: () => ({
 			enabled: true,
@@ -552,7 +599,7 @@ test('regular teammate helpers keep approval and execution behavior stable', asy
 				({
 					kind: 'local',
 					toolName: 'filesystem-edit',
-				}) as any,
+				} as any),
 		}),
 		{
 			blockedCalls: [toolCall],
@@ -610,7 +657,59 @@ test('regular teammate helpers keep approval and execution behavior stable', asy
 			content: 'ok',
 		},
 	]);
-t.deepEqual(emitted, ['ok']);
+	t.deepEqual(emitted, ['ok']);
+});
+
+test('partitionPlanApprovalRegularCalls blocks mutating bridge bindings', (t: any) => {
+	const writeCall = {
+		id: 'bridge-write',
+		type: 'function',
+		function: {
+			name: 'vcp-fileoperator-writefile',
+			arguments: JSON.stringify({filePath: 'src/demo.ts'}),
+		},
+	};
+	const readCall = {
+		id: 'bridge-read',
+		type: 'function',
+		function: {
+			name: 'vcp-fileoperator-readfile',
+			arguments: JSON.stringify({filePath: 'src/demo.ts'}),
+		},
+	};
+
+	const partitioned = partitionPlanApprovalRegularCalls({
+		toolCalls: [writeCall, readCall] as any,
+		toolPlaneKey: 'plane-key-1',
+		isPlanApprovalProtectedTool,
+		getToolExecutionBindingImpl: toolName =>
+			toolName === 'vcp-fileoperator-writefile'
+				? ({
+						kind: 'bridge',
+						toolName,
+						pluginName: 'ServerFileOperator',
+						displayName: 'Server File Operator',
+						commandName: 'WriteFile',
+						metadata: {effect: 'write'},
+				  } as any)
+				: ({
+						kind: 'bridge',
+						toolName,
+						pluginName: 'ServerFileOperator',
+						displayName: 'Server File Operator',
+						commandName: 'ReadFile',
+						metadata: {effect: 'read', readOnly: true},
+				  } as any),
+	});
+
+	t.deepEqual(
+		partitioned.blockedCalls.map(toolCall => toolCall.id),
+		['bridge-write'],
+	);
+	t.deepEqual(
+		partitioned.executableCalls.map(toolCall => toolCall.id),
+		['bridge-read'],
+	);
 });
 
 test('projectTeammateMessagesForModel keeps local vcp teammate history raw', (t: any) => {

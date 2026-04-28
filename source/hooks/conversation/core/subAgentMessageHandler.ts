@@ -57,7 +57,11 @@ function notifyTeammateStreamListeners(): void {
 
 function notifySubAgentStreamListeners(): void {
 	for (const listener of _subAgentStreamListeners) {
-		try { listener(); } catch { /* noop */ }
+		try {
+			listener();
+		} catch {
+			/* noop */
+		}
 	}
 }
 
@@ -561,7 +565,11 @@ export class SubAgentUIHandler {
 			return;
 		}
 
-		if (state.vcpStreamingSuppressor.shouldSuppress(line)) {
+		if (
+			state.vcpStreamingSuppressor.shouldSuppress(line, {
+				inFencedCodeBlock: state.inCodeBlock,
+			})
+		) {
 			if (state.tableBuffer) {
 				this.emitStreamLine(
 					lines,
@@ -910,7 +918,11 @@ export class SubAgentUIHandler {
 			...prev,
 			{
 				role: 'subagent' as const,
-				content: `\x1b[36m⚇ ${subAgentMessage.agentName}\x1b[0m \x1b[33m⟳ Compression retry (${msg.attempt}/${msg.maxRetries})...\x1b[0m${msg.error ? ` \x1b[90m${msg.error}\x1b[0m` : ''}`,
+				content: `\x1b[36m⚇ ${
+					subAgentMessage.agentName
+				}\x1b[0m \x1b[33m⟳ Compression retry (${msg.attempt}/${
+					msg.maxRetries
+				})...\x1b[0m${msg.error ? ` \x1b[90m${msg.error}\x1b[0m` : ''}`,
 				streaming: false,
 				subAgent: {
 					agentId: subAgentMessage.agentId,

@@ -183,6 +183,66 @@ query:「始」第一行[@tag]
 	t.false(transcript.includes('- query: 第一行[@tag]\n第二行'));
 });
 
+test('parse ESCAPE-delimited TOOL_REQUEST fields without changing normal fields', t => {
+	const input = `前文
+<<<[TOOL_REQUEST]>>>
+tool_name:「始ESCAPE」DailyNote「末ESCAPE」,
+command:「始ESCAPE」create「末ESCAPE」,
+Content:「始ESCAPE」第一行
+包含旧标记 「始」不会提前结束「末」
+第三行「末ESCAPE」,
+plain:「始」普通字段「末」
+<<<[END_TOOL_REQUEST]>>>
+后文`;
+
+	const result = parseVcpDisplayBlocks(input);
+	const toolRequest = result.blocks.find(block => block.type === 'toolRequest');
+
+	t.truthy(toolRequest);
+	if (toolRequest?.type === 'toolRequest') {
+		t.is(toolRequest.toolName, 'DailyNote');
+		t.deepEqual(
+			toolRequest.fields.map(field => field.key),
+			['tool_name', 'command', 'Content', 'plain'],
+		);
+		t.is(toolRequest.fields[1]?.value, 'create');
+		t.true(
+			toolRequest.fields[2]?.value.includes(
+				'包含旧标记 「始」不会提前结束「末」',
+			),
+		);
+		t.is(toolRequest.fields[3]?.value, '普通字段');
+	}
+});
+
+test('parse ESCAPE-delimited DailyNote fields into note summaries', t => {
+	const input = `正文
+<<<DailyNoteStart>>>
+Maid:「始ESCAPE」Nova「末ESCAPE」
+Date:「始ESCAPE」2026.04.28「末ESCAPE」
+Content:「始ESCAPE」第一行
+第二行 with 「始」literal「末」
+「末ESCAPE」
+<<<DailyNoteEnd>>>
+尾部`;
+
+	const result = parseVcpDisplayBlocks(input);
+	const dailyNote = result.blocks.find(block => block.type === 'dailyNote');
+
+	t.truthy(dailyNote);
+	if (dailyNote?.type === 'dailyNote') {
+		t.is(dailyNote.maid, 'Nova');
+		t.is(dailyNote.date, '2026.04.28');
+		t.true(dailyNote.content.includes('第二行 with 「始」literal「末」'));
+		t.false(dailyNote.content.includes('「始ESCAPE」'));
+	}
+
+	const transcript = formatVcpContentForTranscript(input);
+	t.true(transcript.includes('VCP-DailyNote：Nova | 2026.04.28'));
+	t.true(transcript.includes('- Content: 第一行\n  第二行'));
+	t.true(transcript.includes('尾部'));
+});
+
 test('parse bracketless TOOL_REQUEST blocks as VCP tool requests', t => {
 	const input = `前文
 <<<TOOL_REQUEST>>>
@@ -215,6 +275,17 @@ tool_name:「始」LightMemo「末」
 	t.is(result.blocks.length, 0);
 	t.true(result.mainText.includes('<<<[TOOL_REQUEST]>>>'));
 	t.true(result.mainText.includes('这里不是实际调用。'));
+});
+
+test('ignore VCP-looking protocol samples inside inline code spans', t => {
+	const input =
+		'协议示例 `<<<[TOOL_REQUEST]>>>tool_name:「始」LightMemo「末」<<<[END_TOOL_REQUEST]>>>` 不应解析。';
+
+	const result = parseVcpDisplayBlocks(input);
+
+	t.is(result.blocks.length, 0);
+	t.true(result.mainText.includes('`<<<[TOOL_REQUEST]>>>'));
+	t.true(result.mainText.includes('不应解析'));
 });
 
 test('parse english TOOL_RESULT fields into transcript summaries', t => {
@@ -324,6 +395,59 @@ test('suppress VCP protocol shells during streaming until final render takes ove
 	t.is(decision.nextState, null);
 });
 
+test('streaming suppression allows indentation but not inline protocol examples', t => {
+	let decision = getVcpStreamingSuppressionDecision(
+		'   <<<[TOOL_REQUEST]>>>',
+		null,
+	);
+	t.true(decision.suppress);
+	t.is(decision.nextState, 'toolRequest');
+
+	decision = getVcpStreamingSuppressionDecision(
+		'   <<<[END_TOOL_REQUEST]>>>',
+		'toolRequest',
+	);
+	t.true(decision.suppress);
+	t.is(decision.nextState, null);
+
+	decision = getVcpStreamingSuppressionDecision(
+		'   [[VCP调用结果信息汇总: - 工具名称: LightMemo VCP调用结果结束]]',
+		null,
+	);
+	t.true(decision.suppress);
+	t.is(decision.nextState, null);
+
+	decision = getVcpStreamingSuppressionDecision(
+		'示例 `[[VCP调用结果信息汇总:` 只是说明文字',
+		null,
+	);
+	t.false(decision.suppress);
+	t.is(decision.nextState, null);
+
+	decision = getVcpStreamingSuppressionDecision(
+		'正文里提到 <<<[TOOL_REQUEST]>>> 不是协议行',
+		null,
+	);
+	t.false(decision.suppress);
+	t.is(decision.nextState, null);
+});
+
+test('streaming suppression closes states when end markers share a line with payload', t => {
+	let decision = getVcpStreamingSuppressionDecision(
+		'tool_name:「始」LightMemo「末」<<<[END_TOOL_REQUEST]>>>',
+		'toolRequest',
+	);
+	t.true(decision.suppress);
+	t.is(decision.nextState, null);
+
+	decision = getVcpStreamingSuppressionDecision(
+		'title:「始」daily「末」<<<DailyNoteEnd>>>',
+		'dailyNote',
+	);
+	t.true(decision.suppress);
+	t.is(decision.nextState, null);
+});
+
 test('parse conventional thinking blocks alongside VCP blocks', t => {
 	const input = `<thinking>
 先检查上下文
@@ -333,7 +457,9 @@ test('parse conventional thinking blocks alongside VCP blocks', t => {
 [--- 元思考链结束 ---]`;
 
 	const result = parseVcpDisplayBlocks(input);
-	const thoughtBlocks = result.blocks.filter(block => block.type === 'thoughtChain');
+	const thoughtBlocks = result.blocks.filter(
+		block => block.type === 'thoughtChain',
+	);
 
 	t.is(thoughtBlocks.length, 2);
 	t.true(

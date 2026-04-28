@@ -1,14 +1,12 @@
 import type {BackendMode, ToolTransport} from '../config/apiConfig.js';
+import {resolveToolTransport} from './vcpCompatibility/toolRouteArbiter.js';
 
 export function buildHistoryToolMessage<
 	T extends {
 		content: string;
 		historyContent?: string;
 	},
->(
-	result: T,
-	messageStatus?: 'pending' | 'success' | 'error',
-) {
+>(result: T, messageStatus?: 'pending' | 'success' | 'error') {
 	return {
 		...result,
 		...(messageStatus ? {messageStatus} : {}),
@@ -80,10 +78,7 @@ export function buildConversationToolMessage<
 		content: string;
 		historyContent?: string;
 	},
->(
-	result: T,
-	messageStatus?: 'pending' | 'success' | 'error',
-) {
+>(result: T, messageStatus?: 'pending' | 'success' | 'error') {
 	return projectToolMessageForContext({
 		...result,
 		...(messageStatus ? {messageStatus} : {}),
@@ -102,7 +97,8 @@ export function projectToolMessageForContext<
 	}
 
 	const projectionSource = message.historyContent || message.content;
-	const projectedContent = normalizeProjectedToolMessageContent(projectionSource);
+	const projectedContent =
+		normalizeProjectedToolMessageContent(projectionSource);
 	if (!projectedContent) {
 		return message;
 	}
@@ -187,5 +183,7 @@ export function shouldProjectToolContext(config: {
 	backendMode?: BackendMode;
 	toolTransport?: ToolTransport;
 }): boolean {
-	return !(config.backendMode === 'vcp' && config.toolTransport === 'local');
+	return !(
+		config.backendMode === 'vcp' && resolveToolTransport(config) === 'local'
+	);
 }

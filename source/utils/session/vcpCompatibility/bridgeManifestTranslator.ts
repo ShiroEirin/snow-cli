@@ -4,6 +4,11 @@ import type {
 	BridgeToolArgumentBinding,
 	BridgeToolExecutionBinding,
 } from './toolExecutionBinding.js';
+import type {
+	BridgeToolEffect,
+	BridgeToolMetadata,
+	SnowBridgeToolIdentityFields,
+} from './types.js';
 
 export type BridgeManifestCommand = {
 	commandName?: string;
@@ -20,14 +25,9 @@ export type BridgeManifestCommand = {
 	approvalTimeoutMs?: number;
 };
 
-export type BridgeMetadataSidecar = {
-	revision?: string;
-	reloadedAt?: string;
-	requiresApproval?: boolean;
-	approvalTimeoutMs?: number;
-};
+export type BridgeMetadataSidecar = BridgeToolMetadata;
 
-export type BridgeManifestPlugin = {
+export type BridgeManifestPlugin = SnowBridgeToolIdentityFields & {
 	name: string;
 	displayName: string;
 	description: string;
@@ -78,6 +78,7 @@ type BridgeToolParameterDefinition = {
 	source: 'structured' | 'description';
 	aliases?: string[];
 	fileUrlCompatible?: boolean;
+	pathLike?: boolean;
 };
 
 const warnedBridgeManifestShapes = new Set<string>();
@@ -91,13 +92,19 @@ function warnBridgeManifestShapeOnce(reason: string): void {
 	logger.warn(`[SnowBridge] Manifest compatibility warning: ${reason}`);
 }
 
-function warnIfBridgeManifestShapeIsSuspicious(manifest: BridgeManifestResponse): void {
+function warnIfBridgeManifestShapeIsSuspicious(
+	manifest: BridgeManifestResponse,
+): void {
 	if (!manifest.bridgeVersion) {
-		warnBridgeManifestShapeOnce('missing bridgeVersion; translator is using compatibility mode.');
+		warnBridgeManifestShapeOnce(
+			'missing bridgeVersion; translator is using compatibility mode.',
+		);
 	}
 
 	if (!Array.isArray(manifest.plugins)) {
-		warnBridgeManifestShapeOnce('plugins is not an array; no bridge tools can be translated.');
+		warnBridgeManifestShapeOnce(
+			'plugins is not an array; no bridge tools can be translated.',
+		);
 	}
 }
 const SUPPORTED_BRIDGE_PLUGIN_TYPES = new Set([
@@ -145,14 +152,51 @@ function normalizeMetadataNumber(value: unknown): number | undefined {
 	return undefined;
 }
 
+function normalizeBridgeToolEffect(
+	value: unknown,
+): BridgeToolEffect | undefined {
+	const normalizedValue = String(value || '')
+		.trim()
+		.toLowerCase();
+	if (!normalizedValue) {
+		return undefined;
+	}
+
+	if (
+		/^(?:read|readonly|read_only|list|query|search|find|lookup|get|status|inspect)$/.test(
+			normalizedValue,
+		)
+	) {
+		return 'read';
+	}
+
+	if (
+		/^(?:write|mutate|modify|create|edit|update|save|patch|apply|move|copy|upload)$/.test(
+			normalizedValue,
+		)
+	) {
+		return 'write';
+	}
+
+	if (/^(?:delete|remove|unlink|erase|clear|purge)$/.test(normalizedValue)) {
+		return 'delete';
+	}
+
+	if (
+		/^(?:command|execute|exec|run|shell|terminal|script|spawn)$/.test(
+			normalizedValue,
+		)
+	) {
+		return 'command';
+	}
+
+	return normalizedValue === 'unknown' ? 'unknown' : undefined;
+}
+
 function normalizeStringList(value: unknown): string[] {
 	if (Array.isArray(value)) {
 		return Array.from(
-			new Set(
-				value
-					.map(item => String(item || '').trim())
-					.filter(Boolean),
-			),
+			new Set(value.map(item => String(item || '').trim()).filter(Boolean)),
 		);
 	}
 
@@ -208,6 +252,21 @@ export function mergeBridgeMetadataSidecars(
 		);
 		if (approvalTimeoutMs !== undefined) {
 			mergedMetadata.approvalTimeoutMs = approvalTimeoutMs;
+		}
+
+		const readOnly = normalizeMetadataBoolean(candidate['readOnly']);
+		if (readOnly !== undefined) {
+			mergedMetadata.readOnly = readOnly;
+		}
+
+		const effect = normalizeBridgeToolEffect(
+			candidate['effect'] ||
+				candidate['toolEffect'] ||
+				candidate['mutability'] ||
+				candidate['operationType'],
+		);
+		if (effect !== undefined) {
+			mergedMetadata.effect = effect;
 		}
 	}
 
@@ -572,6 +631,7 @@ function normalizeParameterDefinition(
 		source?: 'structured' | 'description';
 		aliases?: string[];
 		fileUrlCompatible?: boolean;
+		pathLike?: boolean;
 	},
 ): BridgeToolParameterDefinition {
 	const description = options?.description?.trim();
@@ -599,7 +659,60 @@ function normalizeParameterDefinition(
 		schema,
 		...(options?.aliases?.length ? {aliases: options.aliases} : {}),
 		...(options?.fileUrlCompatible ? {fileUrlCompatible: true} : {}),
+		...(options?.pathLike ? {pathLike: true} : {}),
 	};
+}
+
+function tokenizeBridgeName(value: string): string[] {
+	return value
+		.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+		.split(/[^a-zA-Z0-9]+/)
+		.map(token => token.trim().toLowerCase())
+		.filter(Boolean)
+		.map(token => {
+			if (token.endsWith('ies')) {
+				return `${token.slice(0, -3)}y`;
+			}
+
+			if (token.length > 1 && token.endsWith('s')) {
+				return token.slice(0, -1);
+			}
+
+			return token;
+		});
+}
+
+function resolvePathLikeParameter(
+	name: string,
+	hints: Array<string | undefined>,
+): boolean {
+	const tokens = tokenizeBridgeName(name);
+	if (
+		tokens.some(token =>
+			[
+				'path',
+				'file',
+				'url',
+				'uri',
+				'directory',
+				'dir',
+				'folder',
+				'cwd',
+				'output',
+				'target',
+				'source',
+				'image',
+			].includes(token),
+		)
+	) {
+		return true;
+	}
+
+	return hints.some(hint =>
+		/(?:file:\/\/|file url|file-uri|file path|absolute path|path to|路径|目录|文件|本地路径)/iu.test(
+			String(hint || ''),
+		),
+	);
 }
 
 function normalizeParameterAliasName(value: string): string {
@@ -645,9 +758,7 @@ function parseParameterNameAliases(rawName: string): {
 	};
 }
 
-function extractAliasHints(
-	...hints: Array<string | undefined>
-): string[] {
+function extractAliasHints(...hints: Array<string | undefined>): string[] {
 	const aliasCandidates: string[] = [];
 
 	for (const hint of hints) {
@@ -803,9 +914,7 @@ function normalizeParameterDefinitions(
 				? candidate.description
 				: undefined;
 		const typeHint =
-			typeof candidate.type === 'string'
-				? candidate.type
-				: description;
+			typeof candidate.type === 'string' ? candidate.type : description;
 		const aliases = Array.from(
 			new Set([
 				...parsedParameterName.aliases,
@@ -817,6 +926,9 @@ function normalizeParameterDefinitions(
 			parameter as Record<string, unknown>,
 			[typeHint, description],
 		);
+		const pathLike =
+			fileUrlCompatible ||
+			resolvePathLikeParameter(name, [typeHint, description]);
 
 		definitions.set(
 			name,
@@ -831,6 +943,7 @@ function normalizeParameterDefinitions(
 				source: 'structured',
 				...(aliases.length > 0 ? {aliases} : {}),
 				...(fileUrlCompatible ? {fileUrlCompatible: true} : {}),
+				...(pathLike ? {pathLike: true} : {}),
 			}),
 		);
 	}
@@ -906,7 +1019,9 @@ function isLegacyProtocolLine(line: string): boolean {
 		/^\s*(?:[-*•]|\d+\.)?\s*`?(?:command|action|tool_name)`?(?:\s*[（(][^)）]+[)）])?\s*[:：]\s*(?:固定为|固定值|always|must be|is fixed to)/i.test(
 			line,
 		) ||
-		/[「『]始(?:ESCAPE|exp)?[」』]|[「『]末(?:ESCAPE|exp)?[」』]/iu.test(line) ||
+		/[「『]始(?:ESCAPE|exp)?[」』]|[「『]末(?:ESCAPE|exp)?[」』]/iu.test(
+			line,
+		) ||
 		/^\**\s*(?:请使用以下格式|必须按照以下格式|请严格使用|支持串语法|支持批量调用)/i.test(
 			line,
 		)
@@ -1024,10 +1139,13 @@ function extractParameterDefinitionsFromDescription(
 				...extractAliasHints(meta, parameterDescription),
 			]),
 		).filter(alias => alias !== name);
-		const fileUrlCompatible = resolveFileUrlCompatibility(
-			{},
-			[meta, parameterDescription],
-		);
+		const fileUrlCompatible = resolveFileUrlCompatibility({}, [
+			meta,
+			parameterDescription,
+		]);
+		const pathLike =
+			fileUrlCompatible ||
+			resolvePathLikeParameter(name, [meta, parameterDescription]);
 
 		definitions.set(
 			name,
@@ -1038,6 +1156,7 @@ function extractParameterDefinitionsFromDescription(
 				source: 'description',
 				...(aliases.length > 0 ? {aliases} : {}),
 				...(fileUrlCompatible ? {fileUrlCompatible: true} : {}),
+				...(pathLike ? {pathLike: true} : {}),
 			}),
 		);
 	}
@@ -1103,6 +1222,126 @@ function resolveBridgeCommandName(
 	return normalizedCandidate || null;
 }
 
+function inferBridgeToolEffect(options: {
+	plugin: BridgeManifestPlugin;
+	command: BridgeManifestCommand;
+	commandName: string;
+	parameterDefinitions: BridgeToolParameterDefinition[];
+}): BridgeToolEffect {
+	const rawText = [
+		options.commandName,
+		options.command.description,
+		options.plugin.displayName,
+		options.plugin.name,
+		options.plugin.description,
+	]
+		.filter(Boolean)
+		.join(' ');
+	const normalizedText = rawText.toLowerCase();
+
+	if (/\b(?:delete|remove|unlink|erase|clear|purge)\b/i.test(rawText)) {
+		return 'delete';
+	}
+
+	if (
+		/\b(?:execute|exec|run|shell|terminal|command|script|spawn)\b/i.test(
+			rawText,
+		)
+	) {
+		return 'command';
+	}
+
+	if (
+		/\b(?:write|edit|replace|create|update|save|apply|patch|move|copy|upload|append|organize|associate)\b/i.test(
+			rawText,
+		)
+	) {
+		return 'write';
+	}
+
+	if (
+		/\b(?:read|get|list|query|search|find|lookup|inspect|status|describe|preview|fetch)\b/i.test(
+			rawText,
+		)
+	) {
+		return 'read';
+	}
+
+	if (/(delete|remove|unlink|erase|clear|purge)/i.test(normalizedText)) {
+		return 'delete';
+	}
+
+	if (
+		/(execute|exec|run|shell|terminal|command|script|spawn)/i.test(
+			normalizedText,
+		)
+	) {
+		return 'command';
+	}
+
+	if (
+		/(write|edit|replace|create|update|save|apply|patch|move|copy|upload|append|organize|associate)/i.test(
+			normalizedText,
+		)
+	) {
+		return 'write';
+	}
+
+	if (
+		/(read|get|list|query|search|find|lookup|inspect|status|describe|preview|fetch)/i.test(
+			normalizedText,
+		)
+	) {
+		return 'read';
+	}
+
+	return options.parameterDefinitions.some(parameter => parameter.pathLike)
+		? 'unknown'
+		: 'read';
+}
+
+function buildBridgeToolMetadata(options: {
+	metadata?: BridgeMetadataSidecar;
+	plugin: BridgeManifestPlugin;
+	command: BridgeManifestCommand;
+	commandName: string;
+	parameterDefinitions: BridgeToolParameterDefinition[];
+}): BridgeMetadataSidecar | undefined {
+	const effect =
+		options.metadata?.effect ||
+		inferBridgeToolEffect({
+			plugin: options.plugin,
+			command: options.command,
+			commandName: options.commandName,
+			parameterDefinitions: options.parameterDefinitions,
+		});
+	const readOnly =
+		options.metadata?.readOnly ?? (effect === 'read' ? true : undefined);
+	const mergedMetadata: BridgeMetadataSidecar = {
+		...(options.metadata || {}),
+		effect,
+		...(readOnly !== undefined ? {readOnly} : {}),
+	};
+
+	return Object.keys(mergedMetadata).length > 0 ? mergedMetadata : undefined;
+}
+
+function resolveBridgePluginIdentity(
+	plugin: BridgeManifestPlugin,
+): Required<Pick<SnowBridgeToolIdentityFields, 'originName' | 'publicName'>> &
+	Pick<SnowBridgeToolIdentityFields, 'toolId'> {
+	const pluginName = normalizeMetadataString(plugin.name) || plugin.name;
+	const originName = normalizeMetadataString(plugin.originName) || pluginName;
+	const publicName = normalizeMetadataString(plugin.publicName) || pluginName;
+	const toolId = normalizeMetadataString(plugin.toolId);
+
+	return {
+		originName,
+		publicName,
+		...(toolId ? {toolId} : {}),
+	};
+}
+
 function shouldTranslateBridgePlugin(plugin: BridgeManifestPlugin): boolean {
 	if (!plugin.pluginType) {
 		return true;
@@ -1124,6 +1363,7 @@ export function translateBridgeManifestToToolPlane(
 			continue;
 		}
 
+		const pluginIdentity = resolveBridgePluginIdentity(plugin);
 		const pluginTools: MCPServiceTools['tools'] = [];
 
 		for (const command of plugin.bridgeCommands) {
@@ -1155,27 +1395,34 @@ export function translateBridgeManifestToToolPlane(
 				.filter(
 					parameter =>
 						(parameter.aliases && parameter.aliases.length > 0) ||
-						parameter.fileUrlCompatible === true,
+						parameter.fileUrlCompatible === true ||
+						parameter.pathLike === true,
 				)
 				.map(parameter => ({
 					name: parameter.name,
 					...(parameter.aliases && parameter.aliases.length > 0
 						? {aliases: parameter.aliases}
 						: {}),
-					...(parameter.fileUrlCompatible
-						? {fileUrlCompatible: true}
-						: {}),
+					...(parameter.fileUrlCompatible ? {fileUrlCompatible: true} : {}),
+					...(parameter.pathLike ? {pathLike: true} : {}),
 				}));
 			const parameters = buildParametersSchema(parameterDefinitions, {
 				strictDescriptionContract:
 					structuredParameterDefinitions.length === 0 &&
 					hasStrictDescriptionContract(command.description || ''),
 			});
-			const metadata = mergeBridgeMetadataSidecars(
+			const rawMetadata = mergeBridgeMetadataSidecars(
 				normalizedManifest.metadata,
 				plugin.metadata,
 				command.metadata,
 			);
+			const metadata = buildBridgeToolMetadata({
+				metadata: rawMetadata,
+				plugin,
+				command,
+				commandName,
+				parameterDefinitions,
+			});
 
 			modelTools.push({
 				type: 'function',
@@ -1197,12 +1444,14 @@ export function translateBridgeManifestToToolPlane(
 				kind: 'bridge',
 				toolName,
 				pluginName: plugin.name,
+				originName: pluginIdentity.originName,
+				publicName: pluginIdentity.publicName,
+				...(pluginIdentity.toolId ? {toolId: pluginIdentity.toolId} : {}),
 				displayName: plugin.displayName,
 				commandName,
+				...(metadata ? {metadata} : {}),
 				stringifyArgumentNames,
-				...(argumentBindings.length > 0
-					? {argumentBindings}
-					: {}),
+				...(argumentBindings.length > 0 ? {argumentBindings} : {}),
 			});
 		}
 
@@ -1218,6 +1467,8 @@ export function translateBridgeManifestToToolPlane(
 		modelTools,
 		servicesInfo,
 		bindings,
-		...(normalizedManifest.metadata ? {metadata: normalizedManifest.metadata} : {}),
+		...(normalizedManifest.metadata
+			? {metadata: normalizedManifest.metadata}
+			: {}),
 	};
 }

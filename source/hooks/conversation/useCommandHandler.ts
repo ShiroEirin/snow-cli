@@ -96,8 +96,7 @@ export async function executeContextCompression(
 			shouldProjectToolContext(apiConfig)
 				? projectToolMessagesForContext(sessionMessages)
 				: sessionMessages
-		).map(
-			projectedMessage => {
+		).map(projectedMessage => {
 			return {
 				role: projectedMessage.role,
 				content: projectedMessage.content,
@@ -117,14 +116,14 @@ export async function executeContextCompression(
 
 		// ── Hybrid Compress path: AI summary + preserved rounds with truncated tool results ──
 		if (useHybridCompress) {
-			const hybridResult = await performHybridCompression(
-				chatMessages,
-				{
-					model: apiConfig.advancedModel || 'gpt-5',
-					requestMethod: apiConfig.requestMethod,
-					maxTokens: apiConfig.maxTokens,
-				},
-			);
+			const hybridResult = await performHybridCompression(chatMessages, {
+				model: apiConfig.advancedModel || 'gpt-5',
+				requestMethod: apiConfig.requestMethod,
+				maxTokens: apiConfig.maxTokens,
+				baseUrl: apiConfig.baseUrl,
+				backendMode: apiConfig.backendMode,
+				toolTransport: apiConfig.toolTransport,
+			});
 
 			if (!hybridResult.compressed) {
 				onStatusUpdate?.({
@@ -870,10 +869,7 @@ export function useCommandHandler(options: CommandHandlerOptions) {
 							'../../utils/execution/mcpToolsManager.js'
 						);
 						const todoService = getTodoService();
-						await todoService.copyTodoList(
-							currentSession.id,
-							forkedSession.id,
-						);
+						await todoService.copyTodoList(currentSession.id, forkedSession.id);
 					} catch {
 						// Non-critical
 					}
@@ -906,7 +902,10 @@ export function useCommandHandler(options: CommandHandlerOptions) {
 						error instanceof Error ? error.message : 'Unknown error';
 					const errorMessage: Message = {
 						role: 'command',
-						content: `${t.commandPanel.commandOutput.branchFork?.failed || 'Failed to fork session'}: ${errorMsg}`,
+						content: `${
+							t.commandPanel.commandOutput.branchFork?.failed ||
+							'Failed to fork session'
+						}: ${errorMsg}`,
 						commandName: commandName,
 					};
 					options.setMessages(prev => [...prev, errorMessage]);

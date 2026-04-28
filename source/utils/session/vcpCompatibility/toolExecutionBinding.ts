@@ -1,6 +1,11 @@
 import {resolve as resolvePath} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import type {MCPTool} from '../../execution/mcpToolsManager.js';
+import type {
+	BridgeToolEffect,
+	BridgeToolMetadata,
+	SnowBridgeToolIdentityFields,
+} from './types.js';
 import {SessionLeaseStore} from './sessionLeaseStore.js';
 import {DEFAULT_TOOL_PLANE_KEY} from './constants.js';
 
@@ -15,14 +20,16 @@ export type BridgeToolExecutionBinding = {
 	pluginName: string;
 	displayName: string;
 	commandName: string;
+	metadata?: BridgeToolMetadata;
 	stringifyArgumentNames?: string[];
 	argumentBindings?: BridgeToolArgumentBinding[];
-};
+} & SnowBridgeToolIdentityFields;
 
 export type BridgeToolArgumentBinding = {
 	name: string;
 	aliases?: string[];
 	fileUrlCompatible?: boolean;
+	pathLike?: boolean;
 };
 
 export type ToolExecutionBinding =
@@ -33,50 +40,29 @@ const TOOL_EXECUTION_BINDING_TTL_MS = 6 * 60 * 60 * 1000;
 const TOOL_EXECUTION_BINDING_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 const DEFAULT_TOOL_PLANE_LOOKUP_KEY = DEFAULT_TOOL_PLANE_KEY.trim();
 
-const bindingLeaseStore = new SessionLeaseStore<Map<string, ToolExecutionBinding>>(
-	{
-		defaultKey: DEFAULT_TOOL_PLANE_KEY,
-		ttlMs: TOOL_EXECUTION_BINDING_TTL_MS,
-		sweepIntervalMs: TOOL_EXECUTION_BINDING_SWEEP_INTERVAL_MS,
-	},
-);
-const bindingPlaneRegistry = new Map<string, Map<string, ToolExecutionBinding>>();
+const bindingLeaseStore = new SessionLeaseStore<
+	Map<string, ToolExecutionBinding>
+>({
+	defaultKey: DEFAULT_TOOL_PLANE_KEY,
+	ttlMs: TOOL_EXECUTION_BINDING_TTL_MS,
+	sweepIntervalMs: TOOL_EXECUTION_BINDING_SWEEP_INTERVAL_MS,
+});
 const bindingSessionRegistry = new Map<string, string>();
-let fallbackBindingsByToolName = new Map<string, ToolExecutionBinding>();
 
 function resolveBindingLookupKey(key?: string): string {
 	const normalizedKey = key?.trim();
 	return normalizedKey ? normalizedKey : DEFAULT_TOOL_PLANE_LOOKUP_KEY;
 }
 
-function rebuildFallbackBindings(): void {
-	const defaultBindingPlane = bindingPlaneRegistry.get(
-		DEFAULT_TOOL_PLANE_LOOKUP_KEY,
-	);
-	fallbackBindingsByToolName = defaultBindingPlane
-		? new Map(defaultBindingPlane)
-		: new Map<string, ToolExecutionBinding>();
-}
-
-function registerBindingPlane(
-	resourceKey: string,
-	bindingPlane: Map<string, ToolExecutionBinding>,
-): void {
-	bindingPlaneRegistry.delete(resourceKey);
-	bindingPlaneRegistry.set(resourceKey, bindingPlane);
-	rebuildFallbackBindings();
-}
-
 function clearRegisteredBindingPlane(resourceKey: string): void {
-	bindingPlaneRegistry.delete(resourceKey);
-
-	for (const [sessionKey, registeredResourceKey] of bindingSessionRegistry.entries()) {
+	for (const [
+		sessionKey,
+		registeredResourceKey,
+	] of bindingSessionRegistry.entries()) {
 		if (registeredResourceKey === resourceKey) {
 			bindingSessionRegistry.delete(sessionKey);
 		}
 	}
-
-	rebuildFallbackBindings();
 }
 
 export function buildLocalToolExecutionBindings(
@@ -102,7 +88,7 @@ export function registerToolExecutionBindings(
 		toolPlaneKey,
 		bindingPlane,
 	);
-	registerBindingPlane(resolvedToolPlaneKey, bindingPlane);
+	clearRegisteredBindingPlane(resolvedToolPlaneKey);
 }
 
 export function rotateToolExecutionBindingsSession(options: {
@@ -120,7 +106,6 @@ export function rotateToolExecutionBindingsSession(options: {
 		nextResourceKey: options.nextToolPlaneKey,
 		value: bindingPlane,
 	});
-	registerBindingPlane(resolvedResourceKey, bindingPlane);
 	bindingSessionRegistry.set(
 		resolveBindingLookupKey(options.sessionKey),
 		resolvedResourceKey,
@@ -158,15 +143,24 @@ export function getToolExecutionBinding(
 			return directBinding;
 		}
 
-		const registeredResourceKey = bindingSessionRegistry.get(normalizedToolPlaneKey);
-		if (registeredResourceKey && registeredResourceKey !== normalizedToolPlaneKey) {
-			return bindingLeaseStore.getResource(registeredResourceKey)?.get(toolName);
+		const registeredResourceKey = bindingSessionRegistry.get(
+			normalizedToolPlaneKey,
+		);
+		if (
+			registeredResourceKey &&
+			registeredResourceKey !== normalizedToolPlaneKey
+		) {
+			return bindingLeaseStore
+				.getResource(registeredResourceKey)
+				?.get(toolName);
 		}
 
 		return undefined;
 	}
 
-	return fallbackBindingsByToolName.get(toolName);
+	return bindingLeaseStore
+		.getResource(DEFAULT_TOOL_PLANE_LOOKUP_KEY)
+		?.get(toolName);
 }
 
 export function filterToolExecutionBindings(
@@ -196,6 +190,119 @@ export function filterToolExecutionBindings(
 	return filteredBindings;
 }
 
+const MUTATING_BRIDGE_EFFECTS = new Set<BridgeToolEffect>([
+	'write',
+	'delete',
+	'command',
+]);
+
+function inferBridgeToolEffectFromName(
+	binding: BridgeToolExecutionBinding,
+): BridgeToolEffect {
+	const rawName = `${binding.pluginName} ${binding.displayName} ${binding.commandName}`;
+	const normalizedName = rawName.toLowerCase();
+
+	if (/\b(?:delete|remove|unlink|erase|clear|purge)\b/i.test(rawName)) {
+		return 'delete';
+	}
+
+	if (
+		/\b(?:exec|execute|run|shell|terminal|command|script|spawn)\b/i.test(
+			rawName,
+		)
+	) {
+		return 'command';
+	}
+
+	if (
+		/\b(?:write|edit|replace|create|update|save|apply|patch|move|copy|upload|append|organize|associate)\b/i.test(
+			rawName,
+		)
+	) {
+		return 'write';
+	}
+
+	if (
+		/\b(?:read|get|list|query|search|find|lookup|inspect|status|describe|preview|fetch)\b/i.test(
+			rawName,
+		)
+	) {
+		return 'read';
+	}
+
+	if (/(delete|remove|unlink|erase|clear|purge)/i.test(normalizedName)) {
+		return 'delete';
+	}
+
+	if (
+		/(exec|execute|run|shell|terminal|command|script|spawn)/i.test(
+			normalizedName,
+		)
+	) {
+		return 'command';
+	}
+
+	if (
+		/(write|edit|replace|create|update|save|apply|patch|move|copy|upload|append|organize|associate)/i.test(
+			normalizedName,
+		)
+	) {
+		return 'write';
+	}
+
+	if (
+		/(read|get|list|query|search|find|lookup|inspect|status|describe|preview|fetch)/i.test(
+			normalizedName,
+		)
+	) {
+		return 'read';
+	}
+
+	return 'unknown';
+}
+
+export function resolveBridgeToolEffect(
+	binding: BridgeToolExecutionBinding,
+): BridgeToolEffect {
+	return binding.metadata?.effect || inferBridgeToolEffectFromName(binding);
+}
+
+export function hasBridgePathLikeArguments(
+	binding: BridgeToolExecutionBinding,
+): boolean {
+	return (binding.argumentBindings || []).some(
+		argumentBinding =>
+			argumentBinding.pathLike || argumentBinding.fileUrlCompatible,
+	);
+}
+
+export function isBridgeToolMutationSensitive(
+	binding: BridgeToolExecutionBinding,
+): boolean {
+	if (binding.metadata?.requiresApproval === true) {
+		return true;
+	}
+
+	const explicitEffect = binding.metadata?.effect;
+	const inferredEffect = inferBridgeToolEffectFromName(binding);
+	if (
+		(explicitEffect && MUTATING_BRIDGE_EFFECTS.has(explicitEffect)) ||
+		MUTATING_BRIDGE_EFFECTS.has(inferredEffect)
+	) {
+		return true;
+	}
+
+	if (
+		binding.metadata?.readOnly === true ||
+		explicitEffect === 'read' ||
+		inferredEffect === 'read'
+	) {
+		return false;
+	}
+
+	return hasBridgePathLikeArguments(binding);
+}
+
 function stringifyBridgeArgumentValue(value: unknown): unknown {
 	if (typeof value === 'string') {
 		return value;
@@ -216,9 +323,7 @@ function stringifyBridgeArgumentValue(value: unknown): unknown {
 	}
 }
 
-function isPlainObject(
-	value: unknown,
-): value is Record<string, unknown> {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -294,11 +399,8 @@ function normalizeBridgeFileUrlValue(
 		const normalizedValue = value.trim();
 		if (
 			!normalizedValue ||
-			normalizedValue.startsWith('file://') ||
-			!looksLikeLocalPathCandidate(
-				normalizedValue,
-				traversalMode !== 'neutral',
-			)
+			normalizedValue.toLowerCase().startsWith('file://') ||
+			!looksLikeLocalPathCandidate(normalizedValue, traversalMode !== 'neutral')
 		) {
 			return value;
 		}
@@ -329,10 +431,7 @@ export function normalizeBridgeArgumentAliases(
 	args: Record<string, unknown>,
 	binding: BridgeToolExecutionBinding,
 ): Record<string, unknown> {
-	if (
-		!binding.argumentBindings ||
-		binding.argumentBindings.length === 0
-	) {
+	if (!binding.argumentBindings || binding.argumentBindings.length === 0) {
 		return {...args};
 	}
 
@@ -348,10 +447,7 @@ export function normalizeBridgeArgumentAliases(
 		);
 		const providedAlias = aliases.find(alias => alias in normalizedArgs);
 
-		if (
-			!(argumentBinding.name in normalizedArgs) &&
-			providedAlias
-		) {
+		if (!(argumentBinding.name in normalizedArgs) && providedAlias) {
 			normalizedArgs[argumentBinding.name] = normalizedArgs[providedAlias];
 		}
 

@@ -79,10 +79,23 @@ test('vcp outbound projection transform only activates for vcp chat mode', t => 
 			})) as any,
 		}),
 	);
+	t.false(
+		vcpOutboundProjectionTransform.shouldApply({
+			config: {
+				backendMode: 'vcp',
+				requestMethod: 'chat',
+			},
+			messages: Array.from({length: 8}, () => ({
+				role: 'assistant',
+				content: 'older assistant',
+			})) as any,
+		}),
+	);
 	t.true(
 		vcpOutboundProjectionTransform.shouldApply({
 			config: {
 				backendMode: 'vcp',
+				toolTransport: 'bridge',
 				requestMethod: 'chat',
 			},
 			messages: Array.from({length: 8}, () => ({
@@ -140,6 +153,29 @@ test('applyVcpOutboundMessageTransforms keeps projection disabled in vcp local m
 		config: {
 			backendMode: 'vcp',
 			toolTransport: 'local',
+			requestMethod: 'chat',
+		},
+		messages: messages as any,
+	});
+
+	t.is(transformed[0]?.content, '<div>older assistant</div>');
+});
+
+test('applyVcpOutboundMessageTransforms treats missing toolTransport as vcp local mode', t => {
+	const messages = [
+		{role: 'assistant' as const, content: '<div>older assistant</div>'},
+		{role: 'assistant' as const, content: 'assistant 1'},
+		{role: 'assistant' as const, content: 'assistant 2'},
+		{role: 'assistant' as const, content: 'assistant 3'},
+		{role: 'assistant' as const, content: 'assistant 4'},
+		{role: 'assistant' as const, content: 'assistant 5'},
+		{role: 'assistant' as const, content: 'assistant 6'},
+		{role: 'assistant' as const, content: 'assistant 7'},
+	];
+
+	const transformed = applyVcpOutboundMessageTransforms({
+		config: {
+			backendMode: 'vcp',
 			requestMethod: 'chat',
 		},
 		messages: messages as any,

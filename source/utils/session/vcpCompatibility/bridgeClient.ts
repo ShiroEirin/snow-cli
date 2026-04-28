@@ -98,11 +98,7 @@ type BridgeConnectionConfig = SnowBridgeApiConfig &
 
 function normalizeUniqueStrings(values: unknown[]): string[] {
 	return Array.from(
-		new Set(
-			values
-				.map(value => String(value || '').trim())
-				.filter(Boolean),
-		),
+		new Set(values.map(value => String(value || '').trim()).filter(Boolean)),
 	).sort((left, right) => left.localeCompare(right));
 }
 
@@ -176,17 +172,11 @@ function normalizeBridgeStatusEvent(
 			? {...(data['asyncStatus'] as Record<string, unknown>)}
 			: {};
 	const taskId =
-		String(
-			data['taskId'] ||
-				asyncStatusCandidate['taskId'] ||
-				'',
-		).trim() || undefined;
+		String(data['taskId'] || asyncStatusCandidate['taskId'] || '').trim() ||
+		undefined;
 	const status =
-		String(
-			data['status'] ||
-				asyncStatusCandidate['state'] ||
-				'',
-		).trim() || undefined;
+		String(data['status'] || asyncStatusCandidate['state'] || '').trim() ||
+		undefined;
 	const asyncStatus: BridgeAsyncStatus = {
 		...asyncStatusCandidate,
 		...(taskId ? {taskId} : {}),
@@ -245,8 +235,7 @@ export class SnowBridgeClient {
 	private buildBridgeRequestHeaders(
 		config: BridgeTransportConfig,
 	): Record<string, string> {
-		const toolMode =
-			config.toolTransport === 'hybrid' ? 'hybrid' : 'bridge';
+		const toolMode = config.toolTransport === 'hybrid' ? 'hybrid' : 'bridge';
 
 		return {
 			'x-snow-client': 'snow-cli',
@@ -257,7 +246,10 @@ export class SnowBridgeClient {
 	}
 
 	private buildWebSocketUrl(
-		config: Pick<SnowBridgeApiConfig, 'baseUrl' | 'bridgeWsUrl' | 'bridgeVcpKey'>,
+		config: Pick<
+			SnowBridgeApiConfig,
+			'baseUrl' | 'bridgeWsUrl' | 'bridgeVcpKey'
+		>,
 	): string {
 		const explicitBridgeWsUrl = (config.bridgeWsUrl || '').trim();
 		if (explicitBridgeWsUrl) {
@@ -280,7 +272,9 @@ export class SnowBridgeClient {
 
 		const parsed = new URL(config.baseUrl);
 		parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
-		parsed.pathname = `/vcp-distributed-server/VCP_Key=${encodeURIComponent(key)}`;
+		parsed.pathname = `/vcp-distributed-server/VCP_Key=${encodeURIComponent(
+			key,
+		)}`;
 		parsed.search = '';
 		parsed.hash = '';
 		return parsed.toString();
@@ -308,9 +302,7 @@ export class SnowBridgeClient {
 		this.cleanupSocket();
 	}
 
-	clearManifestCache(
-		config?: BridgeConnectionConfig,
-	): void {
+	clearManifestCache(config?: BridgeConnectionConfig): void {
 		if (!config) {
 			this.manifestCache.clear();
 			this.pendingManifestRequests.clear();
@@ -425,7 +417,9 @@ export class SnowBridgeClient {
 					...(response.metadata !== undefined
 						? {metadata: response.metadata}
 						: {}),
-					...(response.sidecar !== undefined ? {sidecar: response.sidecar} : {}),
+					...(response.sidecar !== undefined
+						? {sidecar: response.sidecar}
+						: {}),
 					...(response.revision !== undefined
 						? {revision: response.revision}
 						: {}),
@@ -469,7 +463,9 @@ export class SnowBridgeClient {
 		void this.loadManifest(options).catch(error => {
 			this.manifestCache.delete(options.manifestCacheKey);
 			console.warn(
-				`[SnowBridge] Background manifest refresh failed for ${options.connectionKey}: ${formatBridgeErrorMessage(error)}`,
+				`[SnowBridge] Background manifest refresh failed for ${
+					options.connectionKey
+				}: ${formatBridgeErrorMessage(error)}`,
 			);
 		});
 	}
@@ -574,9 +570,7 @@ export class SnowBridgeClient {
 		}
 	}
 
-	private async ensureConnected(
-		config: BridgeConnectionConfig,
-	): Promise<void> {
+	private async ensureConnected(config: BridgeConnectionConfig): Promise<void> {
 		const nextConnectionKey = this.buildConnectionKey(config);
 		if (
 			this.socket?.readyState === WebSocket.OPEN &&
@@ -652,9 +646,7 @@ export class SnowBridgeClient {
 		) => 'continue_waiting' | void;
 	}): Promise<TResponse> {
 		return new Promise<TResponse>((resolve, reject) => {
-			const requestId = String(
-				options.payload['requestId'] || randomUUID(),
-			);
+			const requestId = String(options.payload['requestId'] || randomUUID());
 			const timeoutMs = options.timeoutMs ?? 20_000;
 			const payload = {
 				type: options.type,
@@ -743,6 +735,10 @@ export class SnowBridgeClient {
 	async executeTool(options: {
 		config: BridgeConnectionConfig;
 		toolName: string;
+		originName?: string;
+		pluginName?: string;
+		publicName?: string;
+		toolId?: string;
 		toolArgs: Record<string, unknown>;
 		onStatus?: BridgeStatusListener;
 		abortSignal?: AbortSignal;
@@ -774,30 +770,33 @@ export class SnowBridgeClient {
 			}
 
 			aborted = true;
-			this.rejectPendingRequest(
-				requestId,
-				new Error(abortMessage),
-			);
+			this.rejectPendingRequest(requestId, new Error(abortMessage));
 			void this.cancelTool({
 				config: options.config,
 				requestId,
 				invocationId,
-			}).catch(error => {
-				console.warn(
-					`[SnowBridge] Failed to cancel tool "${options.toolName}" (${requestId}): ${
-						error instanceof Error ? error.message : String(error)
-					}`,
-				);
-			}).finally(() => {
-				this.pendingStatusListeners.delete(invocationId);
-			});
+			})
+				.catch(error => {
+					console.warn(
+						`[SnowBridge] Failed to cancel tool "${
+							options.toolName
+						}" (${requestId}): ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					);
+				})
+				.finally(() => {
+					this.pendingStatusListeners.delete(invocationId);
+				});
 		};
 
 		if (options.abortSignal) {
 			if (options.abortSignal.aborted) {
 				abortHandler();
 			} else {
-				options.abortSignal.addEventListener('abort', abortHandler, {once: true});
+				options.abortSignal.addEventListener('abort', abortHandler, {
+					once: true,
+				});
 			}
 		}
 
@@ -807,40 +806,44 @@ export class SnowBridgeClient {
 				throw new Error(abortMessage);
 			}
 
-			const response = await this.sendConnectedRequest<BridgeToolExecutionResponse>({
-				config: options.config,
-				type: 'execute_vcp_tool',
-				expectedType: 'vcp_tool_result',
-				payload: {
-					requestId,
-					invocationId,
-					toolName: options.toolName,
-					toolArgs: options.toolArgs,
-				},
-				timeoutMs: BRIDGE_EXECUTE_TIMEOUT_MS,
-				timeoutMessage: `SnowBridge tool execution timed out: ${options.toolName}`,
-				onEnvelope: (envelopeType, data) => {
-					if (envelopeType !== 'vcp_tool_status') {
-						return;
-					}
+			const response =
+				await this.sendConnectedRequest<BridgeToolExecutionResponse>({
+					config: options.config,
+					type: 'execute_vcp_tool',
+					expectedType: 'vcp_tool_result',
+					payload: {
+						requestId,
+						invocationId,
+						toolName: options.toolName,
+						...(options.originName ? {originName: options.originName} : {}),
+						...(options.pluginName ? {pluginName: options.pluginName} : {}),
+						...(options.publicName ? {publicName: options.publicName} : {}),
+						...(options.toolId ? {toolId: options.toolId} : {}),
+						toolArgs: options.toolArgs,
+					},
+					timeoutMs: BRIDGE_EXECUTE_TIMEOUT_MS,
+					timeoutMessage: `SnowBridge tool execution timed out: ${options.toolName}`,
+					onEnvelope: (envelopeType, data) => {
+						if (envelopeType !== 'vcp_tool_status') {
+							return;
+						}
 
-					if (
-						data['async'] === true ||
-						data['status'] === 'accepted' ||
-						data['taskId']
-					) {
-						this.armPendingTimer(
-							requestId,
-							BRIDGE_ASYNC_EXECUTE_TIMEOUT_MS,
-						);
-					}
+						if (
+							data['async'] === true ||
+							data['status'] === 'accepted' ||
+							data['taskId']
+						) {
+							this.armPendingTimer(requestId, BRIDGE_ASYNC_EXECUTE_TIMEOUT_MS);
+						}
 
-					return 'continue_waiting';
-				},
-			});
+						return 'continue_waiting';
+					},
+				});
 
 			if (response.status !== 'success') {
-				throw new Error(response.error?.message || 'SnowBridge tool execution failed.');
+				throw new Error(
+					response.error?.message || 'SnowBridge tool execution failed.',
+				);
 			}
 
 			return statusEvents.length > 0

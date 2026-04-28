@@ -463,6 +463,47 @@ test('preserve manifest metadata sidecar at the translator seam', (t: any) => {
 		reloadedAt: '2026-04-04T10:00:00.000Z',
 		requiresApproval: true,
 		approvalTimeoutMs: 45_000,
+		effect: 'read',
+		readOnly: true,
+	});
+});
+
+test('preserve SnowBridge stable identity fields without using display names', (t: any) => {
+	const toolPlane = translateBridgeManifestToToolPlane({
+		plugins: [
+			{
+				name: 'FileOperatorPublicAlias',
+				publicName: 'FileOperatorPublic',
+				originName: 'FileOperator',
+				toolId: 'vcp_bridge:fileoperator',
+				displayName: 'Marketing File Operator',
+				description: 'File tools.',
+				pluginType: 'synchronous',
+				bridgeCommands: [
+					{
+						commandName: 'ReadFile',
+						description: 'Read file.',
+						parameters: [],
+					},
+				],
+			},
+		],
+	});
+
+	t.is(
+		toolPlane.modelTools[0]?.function.name,
+		'vcp-fileoperatorpublicalias-readfile',
+	);
+	t.is(toolPlane.servicesInfo[0]?.serviceName, 'vcp-fileoperatorpublicalias');
+	t.like(toolPlane.bindings[0], {
+		kind: 'bridge',
+		toolName: 'vcp-fileoperatorpublicalias-readfile',
+		pluginName: 'FileOperatorPublicAlias',
+		originName: 'FileOperator',
+		publicName: 'FileOperatorPublic',
+		toolId: 'vcp_bridge:fileoperator',
+		displayName: 'Marketing File Operator',
+		commandName: 'ReadFile',
 	});
 });
 
@@ -485,6 +526,8 @@ test('command metadata sidecar overrides plugin approval hints without leaking i
 						sidecar: {
 							requiresApproval: false,
 							approvalTimeoutMs: 15_000,
+							effect: 'read',
+							readOnly: true,
 						},
 					},
 				],
@@ -495,6 +538,14 @@ test('command metadata sidecar overrides plugin approval hints without leaking i
 	t.deepEqual(toolPlane.modelTools[0]?.metadata, {
 		requiresApproval: false,
 		approvalTimeoutMs: 15_000,
+		effect: 'read',
+		readOnly: true,
+	});
+	t.deepEqual(toolPlane.bindings[0]?.metadata, {
+		requiresApproval: false,
+		approvalTimeoutMs: 15_000,
+		effect: 'read',
+		readOnly: true,
 	});
 	t.false(
 		Object.prototype.hasOwnProperty.call(
@@ -519,8 +570,7 @@ test('collect argument alias and file-url compatibility hints from structured br
 						parameters: [
 							{
 								name: 'imageUrl',
-								description:
-									'主图，支持 file:// 本地路径。别名: image_path。',
+								description: '主图，支持 file:// 本地路径。别名: image_path。',
 								required: true,
 								type: 'string',
 								binding: {
@@ -543,6 +593,7 @@ test('collect argument alias and file-url compatibility hints from structured br
 			name: 'imageUrl',
 			aliases: ['fileUrl', 'image_path'],
 			fileUrlCompatible: true,
+			pathLike: true,
 		},
 	]);
 });
@@ -580,6 +631,50 @@ test('infer argument alias and file-url compatibility from description-only brid
 			name: 'imageUrl',
 			aliases: ['fileUrl', 'image_path'],
 			fileUrlCompatible: true,
+			pathLike: true,
+		},
+	]);
+});
+
+test('infer path-like bridge parameters and mutating command metadata for worktree safety', (t: any) => {
+	const toolPlane = translateBridgeManifestToToolPlane({
+		plugins: [
+			{
+				name: 'ServerFileOperator',
+				displayName: 'Server File Operator',
+				description: 'File operations.',
+				pluginType: 'synchronous',
+				bridgeCommands: [
+					{
+						commandName: 'WriteFile',
+						description: 'Write a file.',
+						parameters: [
+							{
+								name: 'filePath',
+								description: 'Absolute file path.',
+								type: 'string',
+								required: true,
+							},
+							{
+								name: 'content',
+								description: 'File content.',
+								type: 'string',
+								required: true,
+							},
+						],
+					},
+				],
+			},
+		],
+	});
+
+	t.deepEqual(toolPlane.bindings[0]?.metadata, {
+		effect: 'write',
+	});
+	t.deepEqual(toolPlane.bindings[0]?.argumentBindings, [
+		{
+			name: 'filePath',
+			pathLike: true,
 		},
 	]);
 });

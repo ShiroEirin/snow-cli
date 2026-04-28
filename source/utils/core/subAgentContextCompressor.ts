@@ -16,7 +16,12 @@ import {createStreamingResponse} from '../../api/responses.js';
 import {createStreamingGeminiCompletion} from '../../api/gemini.js';
 import {createStreamingAnthropicCompletion} from '../../api/anthropic.js';
 import type {ChatMessage} from '../../api/types.js';
-import type {BackendMode, RequestMethod} from '../config/apiConfig.js';
+import type {
+	BackendMode,
+	RequestMethod,
+	ToolTransport,
+} from '../config/apiConfig.js';
+import {resolveVcpModeRequest} from '../session/vcpCompatibility/mode.js';
 
 /** Threshold percentage to trigger compression */
 const COMPRESS_THRESHOLD = 80;
@@ -100,7 +105,11 @@ export interface SubAgentCompressionResult {
 	messages: ChatMessage[];
 	beforeTokens?: number;
 	afterTokensEstimate?: number;
-	compressionApiUsage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+	compressionApiUsage?: {
+		prompt_tokens: number;
+		completion_tokens: number;
+		total_tokens: number;
+	};
 }
 
 /**
@@ -134,7 +143,10 @@ export function countMessagesTokens(messages: ChatMessage[]): number {
 	} catch (error) {
 		console.error('[SubAgentCompressor] tiktoken counting failed:', error);
 		// Rough fallback: ~4 chars per token
-		const totalChars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+		const totalChars = messages.reduce(
+			(sum, m) => sum + (m.content?.length || 0),
+			0,
+		);
 		return Math.round(totalChars / 4);
 	}
 }
@@ -158,7 +170,9 @@ export function shouldCompressSubAgentContext(
 	totalTokens: number,
 	maxContextTokens: number,
 ): boolean {
-	return getContextPercentage(totalTokens, maxContextTokens) >= COMPRESS_THRESHOLD;
+	return (
+		getContextPercentage(totalTokens, maxContextTokens) >= COMPRESS_THRESHOLD
+	);
 }
 
 /**
@@ -192,7 +206,11 @@ function findRecentRoundsStartIndex(
 				i--;
 			}
 			// Now i points to the assistant message with tool_calls
-			if (i >= 0 && messages[i]?.role === 'assistant' && messages[i]?.tool_calls?.length) {
+			if (
+				i >= 0 &&
+				messages[i]?.role === 'assistant' &&
+				messages[i]?.tool_calls?.length
+			) {
 				roundCount++;
 				i--;
 			}
@@ -266,7 +284,7 @@ function prepareMessagesForAICompression(
 	messages.push({
 		role: 'system',
 		content:
-			'You are a technical summarization assistant. Your job is to compress a tool-using AI agent\'s conversation history into a concise but complete handover document.',
+			"You are a technical summarization assistant. Your job is to compress a tool-using AI agent's conversation history into a concise but complete handover document.",
 	});
 
 	// Build transcript (excluding tool results)
@@ -294,7 +312,27 @@ function prepareMessagesForAICompression(
 
 interface AISummaryResult {
 	messages: ChatMessage[];
-	apiUsage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+	apiUsage?: {
+		prompt_tokens: number;
+		completion_tokens: number;
+		total_tokens: number;
+	};
+}
+
+type SubAgentCompressionApiConfig = {
+	model: string;
+	requestMethod: RequestMethod;
+	maxTokens?: number;
+	configProfile?: string;
+	baseUrl?: string;
+	backendMode?: BackendMode;
+	toolTransport?: ToolTransport;
+};
+
+export function resolveSubAgentCompressionRequestMethod(
+	config: SubAgentCompressionApiConfig,
+): RequestMethod {
+	return resolveVcpModeRequest(config, {model: config.model}).requestMethod;
 }
 
 /**
@@ -309,14 +347,7 @@ interface AISummaryResult {
 async function aiSummaryCompress(
 	messages: ChatMessage[],
 	keepRounds: number,
-	config: {
-		model: string;
-		requestMethod: RequestMethod;
-		maxTokens?: number;
-		configProfile?: string;
-		baseUrl?: string;
-		backendMode?: BackendMode;
-	},
+	config: SubAgentCompressionApiConfig,
 ): Promise<AISummaryResult> {
 	const preserveStartIndex = findRecentRoundsStartIndex(messages, keepRounds);
 
@@ -329,12 +360,14 @@ async function aiSummaryCompress(
 	const preservedMessages = messages.slice(preserveStartIndex);
 
 	// Generate summary using the appropriate API
-	const compressionMessages = prepareMessagesForAICompression(messagesToCompress);
+	const compressionMessages =
+		prepareMessagesForAICompression(messagesToCompress);
 	let summary = '';
 	let apiUsage: AISummaryResult['apiUsage'];
+	const requestMethod = resolveSubAgentCompressionRequestMethod(config);
 
 	try {
-		switch (config.requestMethod) {
+		switch (requestMethod) {
 			case 'gemini': {
 				for await (const chunk of createStreamingGeminiCompletion({
 					model: config.model,
@@ -441,7 +474,11 @@ async function aiSummaryCompress(
 /**
  * Find the tool name for a tool message by searching preceding assistant messages.
  */
-function findToolName(messages: ChatMessage[], idx: number, toolCallId?: string): string {
+function findToolName(
+	messages: ChatMessage[],
+	idx: number,
+	toolCallId?: string,
+): string {
 	for (let j = idx - 1; j >= 0; j--) {
 		const prev = messages[j];
 		if (prev?.role === 'assistant' && prev.tool_calls) {
@@ -514,7 +551,11 @@ function truncateToolResults(
 
 		// OLD messages: aggressive truncation (placeholders only)
 		if (i < preserveStartIndex) {
-			if (msg.role === 'tool' && msg.content && msg.content.length > MIN_TRUNCATION_LENGTH) {
+			if (
+				msg.role === 'tool' &&
+				msg.content &&
+				msg.content.length > MIN_TRUNCATION_LENGTH
+			) {
 				const toolName = findToolName(messages, i, msg.tool_call_id);
 				result.push({
 					...msg,
@@ -555,6 +596,7 @@ export async function compressSubAgentContext(
 		configProfile?: string;
 		baseUrl?: string;
 		backendMode?: BackendMode;
+		toolTransport?: ToolTransport;
 	},
 ): Promise<SubAgentCompressionResult> {
 	const percentage = getContextPercentage(totalTokens, maxContextTokens);
@@ -576,7 +618,11 @@ export async function compressSubAgentContext(
 	const beforeTokens = countMessagesTokens(messages);
 
 	// Primary: AI summary compression (same pattern as main flow)
-	const {messages: compressedMessages, apiUsage} = await aiSummaryCompress(messages, keepRounds, config);
+	const {messages: compressedMessages, apiUsage} = await aiSummaryCompress(
+		messages,
+		keepRounds,
+		config,
+	);
 
 	// If AI compression succeeded (returned different messages), use it
 	if (compressedMessages !== messages) {
@@ -596,7 +642,9 @@ export async function compressSubAgentContext(
 
 	// Fallback: AI compression returned original messages (failed or nothing to compress).
 	// Try smart truncation as a last resort to free some context space.
-	console.warn(`[SubAgentCompressor] AI compression ineffective, falling back to truncation`);
+	console.warn(
+		`[SubAgentCompressor] AI compression ineffective, falling back to truncation`,
+	);
 	const truncatedMessages = truncateToolResults(messages, keepRounds);
 	const afterTokens = countMessagesTokens(truncatedMessages);
 
@@ -635,6 +683,7 @@ export async function performHybridCompression(
 		configProfile?: string;
 		baseUrl?: string;
 		backendMode?: BackendMode;
+		toolTransport?: ToolTransport;
 	},
 	keepRounds: number = DEFAULT_KEEP_RECENT_ROUNDS,
 ): Promise<SubAgentCompressionResult> {
@@ -644,7 +693,11 @@ export async function performHybridCompression(
 
 	const beforeTokens = countMessagesTokens(messages);
 
-	const {messages: compressedMessages, apiUsage} = await aiSummaryCompress(messages, keepRounds, config);
+	const {messages: compressedMessages, apiUsage} = await aiSummaryCompress(
+		messages,
+		keepRounds,
+		config,
+	);
 
 	if (compressedMessages !== messages) {
 		const optimizedMessages = truncateOversizedToolResults(compressedMessages);

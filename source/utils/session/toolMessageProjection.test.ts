@@ -54,6 +54,7 @@ test('shouldProjectToolContext disables projection for vcp local mode only', t =
 	t.false(
 		shouldProjectToolContext({backendMode: 'vcp', toolTransport: 'local'}),
 	);
+	t.false(shouldProjectToolContext({backendMode: 'vcp'}));
 	t.true(
 		shouldProjectToolContext({backendMode: 'vcp', toolTransport: 'bridge'}),
 	);

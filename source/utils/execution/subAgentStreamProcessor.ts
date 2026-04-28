@@ -27,7 +27,7 @@ export function shouldApplySubAgentOutboundTransforms(config: {
 	backendMode?: string;
 	toolTransport?: string;
 }): boolean {
-	return config.backendMode === 'vcp' && config.toolTransport !== 'local';
+	return config.backendMode === 'vcp';
 }
 
 export function buildSubAgentStreamRequestContext(options: {
@@ -51,7 +51,7 @@ export function buildSubAgentStreamRequestContext(options: {
 				},
 				messages: options.messages,
 				allowProjectionBridge: false,
-			})
+		  })
 		: options.messages;
 
 	return {
@@ -75,7 +75,7 @@ export function createApiStream(
 			model,
 			messages,
 			allowedTools,
-	});
+		});
 
 	if (resolvedRequest.requestMethod === 'anthropic') {
 		return createStreamingAnthropicCompletion(
@@ -331,6 +331,7 @@ export async function handleContextCompression(
 						configProfile: ctx.agent.configProfile,
 						baseUrl: config.baseUrl,
 						backendMode: config.backendMode,
+						toolTransport: config.toolTransport,
 					},
 				);
 				break;

@@ -5,6 +5,15 @@ import {
 	getToolExecutionBinding,
 } from '../session/vcpCompatibility/toolExecutionBinding.js';
 
+type SnowBridgeExecuteToolOptions = Parameters<
+	typeof snowBridgeClient.executeTool
+>[0] & {
+	originName?: string;
+	pluginName?: string;
+	publicName?: string;
+	toolId?: string;
+};
+
 export async function executeBridgeToolCall(options: {
 	toolName: string;
 	args: Record<string, any>;
@@ -18,24 +27,29 @@ export async function executeBridgeToolCall(options: {
 		options.toolPlaneKey,
 	);
 	if (!executionBinding || executionBinding.kind !== 'bridge') {
-		throw new Error(
-			`Bridge tool binding not found for ${options.toolName}`,
-		);
+		throw new Error(`Bridge tool binding not found for ${options.toolName}`);
 	}
 
 	const bridgeArgs = coerceBridgeExecutionArguments(
 		options.args,
 		executionBinding,
 	);
-
-	return snowBridgeClient.executeTool({
+	const bridgeOriginName =
+		executionBinding.originName || executionBinding.pluginName;
+	const bridgeExecuteOptions: SnowBridgeExecuteToolOptions = {
 		config,
-		toolName: executionBinding.pluginName,
+		toolName: bridgeOriginName,
+		originName: bridgeOriginName,
+		pluginName: executionBinding.pluginName,
+		publicName: executionBinding.publicName || executionBinding.pluginName,
+		...(executionBinding.toolId ? {toolId: executionBinding.toolId} : {}),
 		toolArgs: {
 			...bridgeArgs,
 			command: executionBinding.commandName,
 		},
 		abortSignal: options.abortSignal,
 		onStatus: options.onStatus,
-	});
+	};
+
+	return snowBridgeClient.executeTool(bridgeExecuteOptions);
 }
