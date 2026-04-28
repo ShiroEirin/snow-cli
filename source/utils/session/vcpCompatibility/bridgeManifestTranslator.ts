@@ -898,7 +898,7 @@ function extractLegacySectionHint(line: string): string | null {
 
 function isLegacyProtocolLine(line: string): boolean {
 	return (
-		/(<<<\[(?:TOOL_REQUEST|END_TOOL_REQUEST|TOOL_REQUEST_EXP|END_TOOL_REQUEST_EXP)\]>>>)/i.test(
+		/(<<<\[(?:TOOL_REQUEST|END_TOOL_REQUEST|TOOL_REQUEST_EXP|END_TOOL_REQUEST_EXP|TOOL_REQUEST_ESCAPE|END_TOOL_REQUEST_ESCAPE)\]>>>)/i.test(
 			line,
 		) ||
 		/\b(?:TOOL_REQUEST|END_TOOL_REQUEST)\b/i.test(line) ||
@@ -906,7 +906,7 @@ function isLegacyProtocolLine(line: string): boolean {
 		/^\s*(?:[-*•]|\d+\.)?\s*`?(?:command|action|tool_name)`?(?:\s*[（(][^)）]+[)）])?\s*[:：]\s*(?:固定为|固定值|always|must be|is fixed to)/i.test(
 			line,
 		) ||
-		/[「『]始[」』]|[「『]末[」』]/u.test(line) ||
+		/[「『]始(?:ESCAPE|exp)?[」』]|[「『]末(?:ESCAPE|exp)?[」』]/iu.test(line) ||
 		/^\**\s*(?:请使用以下格式|必须按照以下格式|请严格使用|支持串语法|支持批量调用)/i.test(
 			line,
 		)

@@ -230,6 +230,64 @@ title:「始」Sunny Days「末」
 	);
 });
 
+test('strip VCPToolBox escaped protocol markers from bridge descriptions', (t: any) => {
+	const toolPlane = translateBridgeManifestToToolPlane({
+		plugins: [
+			{
+				name: 'FileOperator',
+				displayName: 'FileOperator',
+				description: 'File tools.',
+				pluginType: 'synchronous',
+				bridgeCommands: [
+					{
+						commandName: 'WriteEscapedFile',
+						description: `功能: 专用于写入内容本身包含VCP标准指令界定符的文件。
+转义规则:
+- 「始ESCAPE」 -> 「始」
+- 「末ESCAPE」 -> 「末」
+- <<<[TOOL_REQUEST_ESCAPE]>>> -> <<<[TOOL_REQUEST]>>>
+- <<<[END_TOOL_REQUEST_ESCAPE]>>> -> <<<[END_TOOL_REQUEST]>>>
+参数:
+- filePath (字符串, 必需): 要写入的文件的绝对路径。
+- content (字符串, 必需): 要写入文件的内容，其中应使用上述转义规则。
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FileOperator「末」,
+command:「始」WriteEscapedFile「末」,
+filePath:「始」/path/to/new_plugin/plugin-manifest.json「末」,
+content:「始」{"description":"<<<[TOOL_REQUEST_ESCAPE]>>> tool_name:「始ESCAPE」MyPlugin「末ESCAPE」"}「末」
+<<<[END_TOOL_REQUEST]>>>`,
+						parameters: [],
+					},
+				],
+			},
+		],
+	});
+
+	const tool = toolPlane.modelTools[0];
+	const parameters = getToolParameters(toolPlane);
+
+	t.truthy(tool);
+	t.false(tool?.function.description.includes('TOOL_REQUEST_ESCAPE'));
+	t.false(tool?.function.description.includes('END_TOOL_REQUEST_ESCAPE'));
+	t.false(tool?.function.description.includes('「始ESCAPE」'));
+	t.false(tool?.function.description.includes('「末ESCAPE」'));
+	t.false(tool?.function.description.includes('TOOL_REQUEST'));
+	t.true(
+		Object.prototype.hasOwnProperty.call(
+			parameters?.['properties'] || {},
+			'filePath',
+		),
+	);
+	t.true(
+		Object.prototype.hasOwnProperty.call(
+			parameters?.['properties'] || {},
+			'content',
+		),
+	);
+	t.deepEqual(parameters?.['required'], ['filePath', 'content']);
+});
+
 test('skip transport-like description parameters without hiding real user params', (t: any) => {
 	const toolPlane = translateBridgeManifestToToolPlane({
 		plugins: [
