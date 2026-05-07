@@ -1,6 +1,40 @@
 import test from 'ava';
 
-import {mapBridgePluginsToTools} from './toolBridge.js';
+import {
+	buildVcpToolBridgeRequestHeaders,
+	mapBridgePluginsToTools,
+} from './toolBridge.js';
+
+test('buildVcpToolBridgeRequestHeaders matches SnowBridge 2.1 metadata contract', t => {
+	t.deepEqual(
+		buildVcpToolBridgeRequestHeaders({
+			backendMode: 'vcp',
+			toolTransport: 'bridge',
+		}),
+		{
+			'x-snow-client': 'snow-cli',
+			'x-snow-protocol': 'function-calling',
+			'x-snow-tool-mode': 'bridge',
+			'x-snow-channel': 'bridge-ws',
+		},
+	);
+
+	t.is(
+		buildVcpToolBridgeRequestHeaders({
+			backendMode: 'vcp',
+			toolTransport: 'hybrid',
+		})['x-snow-tool-mode'],
+		'hybrid',
+	);
+
+	t.is(
+		buildVcpToolBridgeRequestHeaders({
+			backendMode: 'vcp',
+			toolTransport: 'local',
+		})['x-snow-tool-mode'],
+		'bridge',
+	);
+});
 
 test('map bridge plugins into Snow tool schemas', t => {
 	const mapped = mapBridgePluginsToTools([

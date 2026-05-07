@@ -173,6 +173,7 @@ const BRIDGE_EXECUTION_TIMEOUT_MS = 300000;
 const BRIDGE_CANCEL_TIMEOUT_MS = 5000;
 const MAX_COMMAND_SUMMARY_COUNT = 4;
 const SAFE_TOOL_NAME_REGEX = /^[A-Za-z0-9_-]{1,64}$/;
+const SNOW_BRIDGE_CHANNEL = 'bridge-ws';
 
 function isBridgeEnabled(config: VcpToolBridgeConfig): boolean {
 	return (
@@ -624,6 +625,22 @@ function buildClientInfo() {
 	};
 }
 
+/**
+ * Build the SnowBridge source metadata required by SnowBridge 2.1+.
+ */
+export function buildVcpToolBridgeRequestHeaders(
+	config: VcpToolBridgeConfig,
+): Record<string, string> {
+	const toolMode = config.toolTransport === 'hybrid' ? 'hybrid' : 'bridge';
+
+	return {
+		'x-snow-client': 'snow-cli',
+		'x-snow-protocol': 'function-calling',
+		'x-snow-tool-mode': toolMode,
+		'x-snow-channel': SNOW_BRIDGE_CHANNEL,
+	};
+}
+
 function buildBridgeConfigKey(config: VcpToolBridgeConfig): string {
 	return JSON.stringify({
 		backendMode: config.backendMode,
@@ -902,6 +919,7 @@ class VcpToolBridgeClient {
 					data: {
 						requestId,
 						accessToken: config.vcpToolBridgeToken?.trim() || undefined,
+						requestHeaders: buildVcpToolBridgeRequestHeaders(config),
 						clientInfo: buildClientInfo(),
 						toolFilters: splitFilterValues(config.vcpToolBridgeToolFilter),
 					},
@@ -954,6 +972,7 @@ class VcpToolBridgeClient {
 						requestId,
 						invocationId,
 						accessToken: config.vcpToolBridgeToken?.trim() || undefined,
+						requestHeaders: buildVcpToolBridgeRequestHeaders(config),
 						clientInfo: buildClientInfo(),
 					},
 				});
@@ -1070,6 +1089,7 @@ class VcpToolBridgeClient {
 					publicName: definition.publicName,
 					toolArgs: payloadArgs,
 					accessToken: config.vcpToolBridgeToken?.trim() || undefined,
+					requestHeaders: buildVcpToolBridgeRequestHeaders(config),
 					clientInfo: buildClientInfo(),
 				},
 			});
