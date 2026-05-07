@@ -10,8 +10,10 @@ export type PanelState = {
 	showSessionPanel: boolean;
 	showMcpPanel: boolean;
 	showUsagePanel: boolean;
+	showHelpPanel: boolean;
 	showCustomCommandConfig: boolean;
 	showSkillsCreation: boolean;
+	showSkillsListPanel: boolean;
 	showRoleCreation: boolean;
 	showRoleDeletion: boolean;
 	showRoleList: boolean;
@@ -25,6 +27,7 @@ export type PanelState = {
 	// 配置编辑面板：从 ProfilePanel 按右方向键进入，编辑指定 profile（不切换 active）
 	showProfileEditPanel: boolean;
 	editingProfileName: string | null;
+	showModelsPanel: boolean;
 	showDiffReviewPanel: boolean;
 	showConnectionPanel: boolean;
 	showNewPromptPanel: boolean;
@@ -41,11 +44,13 @@ export type PanelActions = {
 	setShowSessionPanel: Dispatch<SetStateAction<boolean>>;
 	setShowMcpPanel: Dispatch<SetStateAction<boolean>>;
 	setShowUsagePanel: Dispatch<SetStateAction<boolean>>;
+	setShowHelpPanel: Dispatch<SetStateAction<boolean>>;
 	setShowConnectionPanel: Dispatch<SetStateAction<boolean>>;
 	setShowNewPromptPanel: Dispatch<SetStateAction<boolean>>;
 	setConnectionPanelApiUrl: Dispatch<SetStateAction<string | undefined>>;
 	setShowCustomCommandConfig: Dispatch<SetStateAction<boolean>>;
 	setShowSkillsCreation: Dispatch<SetStateAction<boolean>>;
+	setShowSkillsListPanel: Dispatch<SetStateAction<boolean>>;
 	setShowRoleCreation: Dispatch<SetStateAction<boolean>>;
 	setShowRoleDeletion: Dispatch<SetStateAction<boolean>>;
 	setShowRoleList: Dispatch<SetStateAction<boolean>>;
@@ -58,6 +63,7 @@ export type PanelActions = {
 	setShowProfilePanel: Dispatch<SetStateAction<boolean>>;
 	setShowProfileEditPanel: Dispatch<SetStateAction<boolean>>;
 	setEditingProfileName: Dispatch<SetStateAction<string | null>>;
+	setShowModelsPanel: Dispatch<SetStateAction<boolean>>;
 	/**
 	 * 打开 ProfileEditPanel 编辑指定 profile：
 	 * 同时关闭 ProfilePanel（picker），切换为编辑视图。
@@ -88,8 +94,10 @@ export function usePanelState(): PanelState & PanelActions {
 	const [showSessionPanel, setShowSessionPanel] = useState(false);
 	const [showMcpPanel, setShowMcpPanel] = useState(false);
 	const [showUsagePanel, setShowUsagePanel] = useState(false);
+	const [showHelpPanel, setShowHelpPanel] = useState(false);
 	const [showCustomCommandConfig, setShowCustomCommandConfig] = useState(false);
 	const [showSkillsCreation, setShowSkillsCreation] = useState(false);
+	const [showSkillsListPanel, setShowSkillsListPanel] = useState(false);
 	const [showRoleCreation, setShowRoleCreation] = useState(false);
 	const [showRoleDeletion, setShowRoleDeletion] = useState(false);
 	const [showRoleList, setShowRoleList] = useState(false);
@@ -106,6 +114,7 @@ export function usePanelState(): PanelState & PanelActions {
 	const [editingProfileName, setEditingProfileName] = useState<string | null>(
 		null,
 	);
+	const [showModelsPanel, setShowModelsPanel] = useState(false);
 	const [showDiffReviewPanel, setShowDiffReviewPanel] = useState(false);
 	const [showConnectionPanel, setShowConnectionPanel] = useState(false);
 	const [showNewPromptPanel, setShowNewPromptPanel] = useState(false);
@@ -137,6 +146,7 @@ export function usePanelState(): PanelState & PanelActions {
 			showUsagePanel ||
 			showCustomCommandConfig ||
 			showSkillsCreation ||
+			showSkillsListPanel ||
 			showRoleCreation ||
 			showRoleDeletion ||
 			showRoleList ||
@@ -146,6 +156,7 @@ export function usePanelState(): PanelState & PanelActions {
 			showReviewCommitPanel ||
 			showBranchPanel ||
 			showProfilePanel ||
+			showModelsPanel ||
 			showDiffReviewPanel ||
 			showConnectionPanel ||
 			showNewPromptPanel ||
@@ -164,8 +175,11 @@ export function usePanelState(): PanelState & PanelActions {
 		setShowProfilePanel(true);
 		setProfileSearchQuery('');
 		const profiles = getAllProfiles();
-		const activeName = getActiveProfileName();
-		const activeIndex = profiles.findIndex(p => p.name === activeName);
+		// 使用内存中的 currentProfileName（displayName）定位光标，
+		// 避免其他终端切换 profile 写文件后，本终端读到的 active 与内存不一致
+		const activeIndex = profiles.findIndex(
+			p => p.displayName === currentProfileName,
+		);
 		setProfileSelectedIndex(activeIndex >= 0 ? activeIndex : 0);
 	};
 
@@ -221,6 +235,11 @@ export function usePanelState(): PanelState & PanelActions {
 			setShowUsagePanel(false);
 			return true;
 		}
+
+		if (showHelpPanel) {
+			setShowHelpPanel(false);
+			return true;
+		}
 		// CustomCommandConfigPanel handles its own ESC key logic internally
 		// Don't close it here - let the panel decide when to close
 		if (showCustomCommandConfig) {
@@ -231,6 +250,11 @@ export function usePanelState(): PanelState & PanelActions {
 		if (showSkillsCreation) {
 			return false; // Let SkillsCreationPanel handle ESC
 		}
+		if (showSkillsListPanel) {
+			setShowSkillsListPanel(false);
+			return true;
+		}
+
 		// RoleCreationPanel handles its own ESC key logic internally
 		// Don't close it here - let the panel decide when to close
 		if (showRoleCreation) {
@@ -300,6 +324,12 @@ export function usePanelState(): PanelState & PanelActions {
 			return true;
 		}
 
+		// ModelsPanel handles its own ESC key logic internally
+		// Don't close it here - let the panel decide when to close
+		if (showModelsPanel) {
+			return false; // Let ModelsPanel handle ESC
+		}
+
 		// NewPromptPanel handles its own ESC key logic internally
 		if (showNewPromptPanel) {
 			return false; // Let NewPromptPanel handle ESC
@@ -328,6 +358,7 @@ export function usePanelState(): PanelState & PanelActions {
 			showUsagePanel ||
 			showCustomCommandConfig ||
 			showSkillsCreation ||
+			showSkillsListPanel ||
 			showRoleCreation ||
 			showRoleDeletion ||
 			showRoleList ||
@@ -339,6 +370,7 @@ export function usePanelState(): PanelState & PanelActions {
 			showBranchPanel ||
 			showProfilePanel ||
 			showProfileEditPanel ||
+			showModelsPanel ||
 			showDiffReviewPanel ||
 			showConnectionPanel ||
 			showNewPromptPanel ||
@@ -353,8 +385,10 @@ export function usePanelState(): PanelState & PanelActions {
 		showSessionPanel,
 		showMcpPanel,
 		showUsagePanel,
+		showHelpPanel,
 		showCustomCommandConfig,
 		showSkillsCreation,
+		showSkillsListPanel,
 		showRoleCreation,
 		showRoleDeletion,
 		showRoleList,
@@ -367,6 +401,7 @@ export function usePanelState(): PanelState & PanelActions {
 		showProfilePanel,
 		showProfileEditPanel,
 		editingProfileName,
+		showModelsPanel,
 		showDiffReviewPanel,
 		showConnectionPanel,
 		showNewPromptPanel,
@@ -381,8 +416,10 @@ export function usePanelState(): PanelState & PanelActions {
 		setShowSessionPanel,
 		setShowMcpPanel,
 		setShowUsagePanel,
+		setShowHelpPanel,
 		setShowCustomCommandConfig,
 		setShowSkillsCreation,
+		setShowSkillsListPanel,
 		setShowRoleCreation,
 		setShowRoleDeletion,
 		setShowRoleList,
@@ -395,6 +432,7 @@ export function usePanelState(): PanelState & PanelActions {
 		setShowProfilePanel,
 		setShowProfileEditPanel,
 		setEditingProfileName,
+		setShowModelsPanel,
 		openProfileEdit,
 		closeProfileEditAndReturnToPicker,
 		setShowDiffReviewPanel,

@@ -19,6 +19,7 @@ import {isSensitiveCommand} from '../../utils/execution/sensitiveCommandManager.
 import {getTeamMode} from '../../utils/config/projectSettings.js';
 import {getCurrentTheme} from '../../utils/config/themeConfig.js';
 import {themes} from '../themes/index.js';
+import {useTerminalTitle} from '../../hooks/ui/useTerminalTitle.js';
 import {
 	containsVcpDisplayBlocks,
 	formatVcpDailyNoteLabel,
@@ -436,6 +437,7 @@ export default function HeadlessModeScreen({
 	const {stdout} = useStdout();
 	const workingDirectory = process.cwd();
 	const {t} = useI18n();
+	useTerminalTitle('Snow CLI - Headless Mode');
 
 	// Use custom hooks
 	const streamingState = useStreamingState();

@@ -33,6 +33,11 @@ const SubAgentDepthPanel = lazy(
 const ProfileEditPanel = lazy(
 	() => import('../../components/panels/ProfileEditPanel.js'),
 );
+const ModelsPanel = lazy(() =>
+	import('../../components/panels/ModelsPanel.js').then(m => ({
+		default: m.ModelsPanel,
+	})),
+);
 
 type SnapshotState = {
 	snapshotFileCount: Map<number, number>;
@@ -49,13 +54,14 @@ type Props = {
 	terminalWidth: number;
 	workingDirectory: string;
 	panelState: PanelState & PanelActions;
-	messages: Message[];
 	snapshotState: SnapshotState;
 	handleSessionPanelSelect: (sessionId: string) => Promise<void>;
 	showPermissionsPanel: boolean;
 	setShowPermissionsPanel: Dispatch<SetStateAction<boolean>>;
 	showSubAgentDepthPanel: boolean;
 	setShowSubAgentDepthPanel: Dispatch<SetStateAction<boolean>>;
+	modelsPanelAdvancedModel: string;
+	modelsPanelBasicModel: string;
 	alwaysApprovedTools: Set<string>;
 	removeFromAlwaysApproved: (toolName: string) => void;
 	clearAllAlwaysApproved: () => void;
@@ -72,13 +78,14 @@ export default function ChatScreenPanels({
 	terminalWidth,
 	workingDirectory,
 	panelState,
-	messages,
 	snapshotState,
 	handleSessionPanelSelect,
 	showPermissionsPanel,
 	setShowPermissionsPanel,
 	showSubAgentDepthPanel,
 	setShowSubAgentDepthPanel,
+	modelsPanelAdvancedModel,
+	modelsPanelBasicModel,
 	alwaysApprovedTools,
 	removeFromAlwaysApproved,
 	clearAllAlwaysApproved,
@@ -95,6 +102,7 @@ export default function ChatScreenPanels({
 				showSessionPanel={panelState.showSessionPanel}
 				showMcpPanel={panelState.showMcpPanel}
 				showUsagePanel={panelState.showUsagePanel}
+				showHelpPanel={panelState.showHelpPanel}
 				showCustomCommandConfig={panelState.showCustomCommandConfig}
 				showSkillsCreation={panelState.showSkillsCreation}
 				showRoleCreation={panelState.showRoleCreation}
@@ -105,12 +113,9 @@ export default function ChatScreenPanels({
 				showRoleSubagentList={panelState.showRoleSubagentList}
 				showWorkingDirPanel={panelState.showWorkingDirPanel}
 				showBranchPanel={panelState.showBranchPanel}
-				showDiffReviewPanel={panelState.showDiffReviewPanel}
 				showConnectionPanel={panelState.showConnectionPanel}
 				showTodoListPanel={panelState.showTodoListPanel}
 				connectionPanelApiUrl={panelState.connectionPanelApiUrl}
-				diffReviewMessages={messages}
-				diffReviewSnapshotFileCount={snapshotState.snapshotFileCount}
 				setShowSessionPanel={panelState.setShowSessionPanel}
 				setShowMcpPanel={panelState.setShowMcpPanel}
 				setShowCustomCommandConfig={panelState.setShowCustomCommandConfig}
@@ -123,7 +128,6 @@ export default function ChatScreenPanels({
 				setShowRoleSubagentList={panelState.setShowRoleSubagentList}
 				setShowWorkingDirPanel={panelState.setShowWorkingDirPanel}
 				setShowBranchPanel={panelState.setShowBranchPanel}
-				setShowDiffReviewPanel={panelState.setShowDiffReviewPanel}
 				setShowConnectionPanel={panelState.setShowConnectionPanel}
 				setShowTodoListPanel={panelState.setShowTodoListPanel}
 				handleSessionPanelSelect={handleSessionPanelSelect}
@@ -459,6 +463,27 @@ export default function ChatScreenPanels({
 					<PixelEditorScreen
 						onBack={() => panelState.setShowPixelEditor(false)}
 					/>
+				</Box>
+			)}
+
+			{panelState.showModelsPanel && (
+				<Box paddingX={1} flexDirection="column" width={terminalWidth}>
+					<Suspense
+						fallback={
+							<Box>
+								<Text>
+									<Spinner type="dots" /> Loading...
+								</Text>
+							</Box>
+						}
+					>
+						<ModelsPanel
+							advancedModel={modelsPanelAdvancedModel}
+							basicModel={modelsPanelBasicModel}
+							visible={panelState.showModelsPanel}
+							onClose={() => panelState.setShowModelsPanel(false)}
+						/>
+					</Suspense>
 				</Box>
 			)}
 

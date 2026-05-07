@@ -3,6 +3,7 @@ import {executeNotebookTool} from '../../../mcp/notebook.js';
 import {subAgentService} from '../../../mcp/subagent.js';
 import {teamService} from '../../../mcp/team.js';
 import {executeSkillTool} from '../../../mcp/skills.js';
+import type {HashlineOperation} from '../../../mcp/types/filesystem.types.js';
 
 type LocalExecutorParams = {
 	serviceName: string;
@@ -32,6 +33,15 @@ const LOCAL_TOOL_SERVICES = new Set([
 
 export function isLocalToolService(serviceName: string): boolean {
 	return LOCAL_TOOL_SERVICES.has(serviceName);
+}
+
+function buildLegacyLineEditOperation(args: any): HashlineOperation {
+	return {
+		type: 'replace',
+		startAnchor: String(args.startAnchor ?? args.startLine),
+		endAnchor: String(args.endAnchor ?? args.endLine ?? args.startLine),
+		content: String(args.newContent ?? ''),
+	};
 }
 
 export async function executeLocalToolCall(
@@ -104,25 +114,28 @@ export async function executeLocalToolCall(
 					);
 				}
 
-				if (
-					!Array.isArray(args.filePath) &&
-					(args.startLine === undefined ||
-						args.endLine === undefined ||
-						args.newContent === undefined)
-				) {
+				if (!Array.isArray(args.filePath) && !Array.isArray(args.operations)) {
 					throw new Error(
 						`Missing required parameters for filesystem-edit tool.\n` +
-							`For single file mode, 'startLine', 'endLine', and 'newContent' are required.\n` +
+							`For single file mode, 'operations' is required. Legacy startLine/endLine/newContent is accepted only when hashline anchors are provided by the caller.\n` +
 							`Received args: ${JSON.stringify(args, null, 2)}\n` +
-							`AI Tip: Provide startLine (number), endLine (number), and newContent (string).`,
+							`AI Tip: Read the file first, then provide operations with startAnchor/endAnchor/content from filesystem-read hashline anchors.`,
+					);
+				}
+
+				if (Array.isArray(args.filePath)) {
+					return filesystemService.editFile(
+						args.filePath,
+						undefined,
+						args.contextLines,
 					);
 				}
 
 				return filesystemService.editFile(
 					args.filePath,
-					args.startLine,
-					args.endLine,
-					args.newContent,
+					Array.isArray(args.operations)
+						? args.operations
+						: [buildLegacyLineEditOperation(args)],
 					args.contextLines,
 				);
 			case 'edit_search':

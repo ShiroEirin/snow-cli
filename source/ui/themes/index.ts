@@ -10,6 +10,7 @@ export type ThemeType =
 	| 'solarized-dark'
 	| 'nord'
 	| 'tiffany'
+	| 'macaron-pink'
 	| 'custom';
 
 export interface ThemeColors {
@@ -35,6 +36,8 @@ export interface ThemeColors {
 	logoGradient: [string, string, string];
 	// User message background
 	userMessageBackground: string;
+	// User message text color
+	userMessageText: string;
 	// Diff highlight opacity (0-1)
 	diffOpacity: number;
 }
@@ -58,6 +61,7 @@ export const defaultCustomColors: ThemeColors = {
 	cyan: 'cyan',
 	logoGradient: ['#d3d3d3', '#808080', '#505050'],
 	userMessageBackground: '#2a4a2a',
+	userMessageText: 'white',
 	diffOpacity: 1,
 };
 
@@ -109,6 +113,8 @@ export interface Theme {
 		logoGradient: [string, string, string];
 		// User message background
 		userMessageBackground: string;
+		// User message text color
+		userMessageText: string;
 		// Diff highlight opacity (0-1)
 		diffOpacity: number;
 	};
@@ -141,6 +147,8 @@ export const themes: Record<ThemeType, Theme> = {
 			logoGradient: ['#d3d3d3', '#808080', '#505050'],
 			// User message background - dark green
 			userMessageBackground: '#2a4a2a',
+			// User message text color
+			userMessageText: 'white',
 			// Diff highlight opacity
 			diffOpacity: 1,
 		},
@@ -171,6 +179,8 @@ export const themes: Record<ThemeType, Theme> = {
 			logoGradient: ['#606060', '#404040', '#202020'],
 			// User message background - light green
 			userMessageBackground: '#d4f1d4',
+			// User message text color
+			userMessageText: 'white',
 			// Diff highlight opacity
 			diffOpacity: 1,
 		},
@@ -201,6 +211,8 @@ export const themes: Record<ThemeType, Theme> = {
 			logoGradient: ['#58a6ff', '#1f6feb', '#0d419d'],
 			// User message background - GitHub dark green
 			userMessageBackground: '#1a4d2e',
+			// User message text color
+			userMessageText: 'white',
 			// Diff highlight opacity
 			diffOpacity: 1,
 		},
@@ -231,6 +243,8 @@ export const themes: Record<ThemeType, Theme> = {
 			logoGradient: ['#ff006e', '#8338ec', '#00f5ff'],
 			// User message background - rainbow green
 			userMessageBackground: '#16697a',
+			// User message text color
+			userMessageText: 'white',
 			// Diff highlight opacity
 			diffOpacity: 1,
 		},
@@ -261,6 +275,8 @@ export const themes: Record<ThemeType, Theme> = {
 			logoGradient: ['#2aa198', '#268bd2', '#6c71c4'],
 			// User message background - Solarized green
 			userMessageBackground: '#0a3d2c',
+			// User message text color
+			userMessageText: 'white',
 			// Diff highlight opacity
 			diffOpacity: 1,
 		},
@@ -291,6 +307,8 @@ export const themes: Record<ThemeType, Theme> = {
 			logoGradient: ['#88c0d0', '#81a1c1', '#5e81ac'],
 			// User message background - Nord green
 			userMessageBackground: '#1d3a2f',
+			// User message text color
+			userMessageText: 'white',
 			// Diff highlight opacity
 			diffOpacity: 1,
 		},
@@ -321,6 +339,40 @@ export const themes: Record<ThemeType, Theme> = {
 			logoGradient: ['#0abab5', '#5fd6d1', '#9bd9d3'],
 			// User message background - Tiffany pale
 			userMessageBackground: '#bfe7e3',
+			// User message text color
+			userMessageText: '#000000',
+			// Diff highlight opacity
+			diffOpacity: 1,
+		},
+	},
+	'macaron-pink': {
+		name: 'Macaron Pink',
+		type: 'macaron-pink',
+		colors: {
+			background: '#fff0f5',
+			text: '#5a2a4a',
+			border: '#f7b6d2',
+			diffAdded: '#c8e8d4',
+			diffRemoved: '#fbc4d0',
+			diffModified: '#fde2a7',
+			lineNumber: '#b07a96',
+			lineNumberBorder: '#f3c6dc',
+			// Menu colors - macaron pastel palette
+			menuSelected: '#ff7eb6',
+			menuNormal: '#5a2a4a',
+			menuInfo: '#b388eb',
+			menuSecondary: '#a87a96',
+			// Status colors
+			error: '#e5547d',
+			warning: '#e8a87c',
+			success: '#7ec4a3',
+			cyan: '#8fd3d8',
+			// Logo gradient - pink to lavender macaron
+			logoGradient: ['#ffb3d1', '#ff7eb6', '#b388eb'],
+			// User message background - soft pink macaron
+			userMessageBackground: '#ffd1e3',
+			// User message text color
+			userMessageText: '#5a2a4a',
 			// Diff highlight opacity
 			diffOpacity: 1,
 		},

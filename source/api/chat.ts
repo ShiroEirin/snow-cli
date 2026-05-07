@@ -95,6 +95,7 @@ export interface ChatCompletionMessageParam {
 		  }>;
 	tool_call_id?: string;
 	tool_calls?: ToolCall[];
+	name?: string;
 }
 
 function getStreamingToolCallOverlap(
@@ -299,9 +300,8 @@ function resolveStreamingToolCallIndex(
 		return undefined;
 	}
 
-	const singleBufferedToolCallIndex = getSingleBufferedToolCallIndex(
-		toolCallsBuffer,
-	);
+	const singleBufferedToolCallIndex =
+		getSingleBufferedToolCallIndex(toolCallsBuffer);
 	if (singleBufferedToolCallIndex !== undefined) {
 		return singleBufferedToolCallIndex;
 	}
@@ -334,12 +334,15 @@ export function applyStreamingToolCallDelta(
 		deltaToolCallCount,
 	);
 	if (index === undefined) {
-		logger.warn('Skipping ambiguous streaming tool-call delta without stable index/id', {
-			deltaCallPosition,
-			deltaToolCallCount,
-			deltaToolCallId: deltaCall.id,
-			deltaToolCallName: deltaCall.function?.name,
-		});
+		logger.warn(
+			'Skipping ambiguous streaming tool-call delta without stable index/id',
+			{
+				deltaCallPosition,
+				deltaToolCallCount,
+				deltaToolCallId: deltaCall.id,
+				deltaToolCallName: deltaCall.function?.name,
+			},
+		);
 		return '';
 	}
 
@@ -395,13 +398,15 @@ export function finalizeStreamingToolCalls(
 				return [];
 			}
 
-			return [{
-				...toolCall,
-				function: {
-					...toolCall.function,
-					arguments: JSON.stringify(parseResult.data),
+			return [
+				{
+					...toolCall,
+					function: {
+						...toolCall.function,
+						arguments: JSON.stringify(parseResult.data),
+					},
 				},
-			}];
+			];
 		});
 }
 
@@ -415,7 +420,7 @@ export function finalizeStreamingToolCalls(
  * @param includeBuiltinSystemPrompt - Whether to include builtin system prompt (default true)
  * @param customSystemPromptOverride - Optional custom system prompt content (for sub-agents)
  */
-function convertToOpenAIMessages(
+export function convertToOpenAIMessages(
 	messages: ChatMessage[],
 	config: ReturnType<typeof getSnowConfig>,
 	includeBuiltinSystemPrompt: boolean = true,
@@ -427,6 +432,7 @@ function convertToOpenAIMessages(
 	thinkingEnabled: boolean = false,
 ): ChatCompletionMessageParam[] {
 	const customSystemPrompts = customSystemPromptOverride;
+	const toolNameByCallId = new Map<string, string>();
 
 	let result = messages.map(msg => {
 		// 如果消息包含图片，使用 content 数组格式
@@ -467,6 +473,13 @@ function convertToOpenAIMessages(
 		};
 
 		if (msg.role === 'assistant' && msg.tool_calls) {
+			for (const toolCall of msg.tool_calls) {
+				toolNameByCallId.set(
+					toolCall.id,
+					toolCall.publicName || toolCall.function.name,
+				);
+			}
+
 			const result: any = {
 				...baseMessage,
 				tool_calls: msg.tool_calls,
@@ -483,6 +496,7 @@ function convertToOpenAIMessages(
 		if (msg.role === 'tool' && msg.tool_call_id) {
 			// Handle multimodal tool results with images
 			if (msg.images && msg.images.length > 0) {
+				const toolName = msg.name || toolNameByCallId.get(msg.tool_call_id);
 				const content: Array<{
 					type: 'text' | 'image_url';
 					text?: string;
@@ -515,13 +529,16 @@ function convertToOpenAIMessages(
 					role: 'tool',
 					content,
 					tool_call_id: msg.tool_call_id,
+					name: config.backendMode === 'vcp' ? toolName : msg.name,
 				} as ChatCompletionMessageParam;
 			}
 
+			const toolName = msg.name || toolNameByCallId.get(msg.tool_call_id);
 			return {
 				role: 'tool',
 				content: msg.content,
 				tool_call_id: msg.tool_call_id,
+				name: config.backendMode === 'vcp' ? toolName : msg.name,
 			} as ChatCompletionMessageParam;
 		}
 
@@ -995,7 +1012,10 @@ export async function* createStreamingChatCompletion(
 				const deltaToolCalls = choice.delta?.tool_calls;
 				if (deltaToolCalls) {
 					hasToolCalls = true;
-					for (const [deltaCallPosition, deltaCall] of deltaToolCalls.entries()) {
+					for (const [
+						deltaCallPosition,
+						deltaCall,
+					] of deltaToolCalls.entries()) {
 						const deltaText = applyStreamingToolCallDelta(
 							toolCallsBuffer,
 							toolCallIndexById,

@@ -6,6 +6,7 @@ import org.java_websocket.WebSocket
 import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.WebSocketServer
 import java.net.InetSocketAddress
+import java.net.ServerSocket
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 
@@ -70,6 +71,19 @@ class SnowWebSocketManager private constructor() {
             return
         }
 
+        // Synchronously probe whether the port is actually free before handing it
+        // to Java-WebSocket. Java-WebSocket's start() is asynchronous: when another
+        // process (e.g. another JetBrains IDE) already holds the port, the bind
+        // failure surfaces only inside the server thread via onError, AFTER we have
+        // already cached actualPort and registered the project under the wrong port
+        // in snow-cli-ports.json. That mismatch is what causes the CLI to attach
+        // to the WRONG IDE when two JetBrains IDEs are open simultaneously
+        // (showing one IDE's active file with another IDE's working directory).
+        if (!isPortAvailable(port)) {
+            tryStartServer(port + 1)
+            return
+        }
+
         try {
             val wsServer = WebSocketServerImpl(InetSocketAddress(port))
             server.set(wsServer)
@@ -96,6 +110,27 @@ class SnowWebSocketManager private constructor() {
         } catch (e: Exception) {
             logger.error("Failed to create WebSocket server on port $port", e)
             tryStartServer(port + 1)
+        }
+    }
+
+    /**
+     * Test whether a TCP port can be bound on localhost. Used to avoid the
+     * Java-WebSocket async-bind race: if another IDE already owns the port,
+     * binding here fails immediately and we move on to the next port.
+     *
+     * Note: there is an inherent (microscopic) TOCTOU window between the probe
+     * and the actual WebSocketServer bind. The async catch path above still
+     * handles that fallback for completeness.
+     */
+    private fun isPortAvailable(port: Int): Boolean {
+        return try {
+            ServerSocket().use { socket ->
+                socket.reuseAddress = false
+                socket.bind(InetSocketAddress("0.0.0.0", port))
+            }
+            true
+        } catch (e: Exception) {
+            false
         }
     }
 

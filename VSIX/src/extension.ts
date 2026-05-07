@@ -33,8 +33,7 @@ function refreshStartupCommandManager(): void {
 
 /** Apply the context key so the sidebar view shows/hides accordingly */
 function applySidebarContext(): void {
-
-	const mode = getConfig<string>('terminalMode', 'split');
+	const mode = getConfig<string>('terminalMode', 'sidebar');
 	vscode.commands.executeCommand(
 		'setContext',
 		'snow-cli.sidebarMode',
@@ -48,8 +47,7 @@ function getWorkspaceFolderForActiveEditor(): string | undefined {
 		? vscode.workspace.getWorkspaceFolder(editor.document.uri)
 		: undefined;
 	return (
-		folder?.uri.fsPath ??
-		vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+		folder?.uri.fsPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
 	);
 }
 
@@ -121,12 +119,14 @@ async function sendFilePathsToSplitTerminal(paths: string[]): Promise<void> {
 	);
 }
 
-async function sendFilePathsToConfiguredTerminal(paths: string[]): Promise<void> {
+async function sendFilePathsToConfiguredTerminal(
+	paths: string[],
+): Promise<void> {
 	if (paths.length === 0) {
 		return;
 	}
 
-	const mode = getConfig<string>('terminalMode', 'split');
+	const mode = getConfig<string>('terminalMode', 'sidebar');
 	if (mode === 'sidebar') {
 		sidebarProvider?.sendFilePaths(paths);
 		return;
@@ -146,7 +146,9 @@ async function pickPaths(mode: 'file' | 'folder'): Promise<string[]> {
 	return uris?.map(uri => uri.fsPath) ?? [];
 }
 
-function formatSelectionLocation(editor: vscode.TextEditor): string | undefined {
+function formatSelectionLocation(
+	editor: vscode.TextEditor,
+): string | undefined {
 	const {document, selection} = editor;
 	if (selection.isEmpty) {
 		return undefined;
@@ -194,9 +196,7 @@ function checkExtensionVersionChange(context: vscode.ExtensionContext): void {
 		.showWarningMessage(message, 'Reload Window')
 		.then(choice => {
 			if (choice === 'Reload Window') {
-				void vscode.commands.executeCommand(
-					'workbench.action.reloadWindow',
-				);
+				void vscode.commands.executeCommand('workbench.action.reloadWindow');
 			}
 		});
 }
@@ -211,7 +211,6 @@ export function activate(context: vscode.ExtensionContext) {
 	refreshStartupCommandManager();
 
 	try {
-
 		startWebSocketServer();
 	} catch (err) {
 		console.error('Failed to start WebSocket server:', err);
@@ -248,7 +247,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// 4. 注册命令
 	context.subscriptions.push(
 		vscode.commands.registerCommand('snow-cli.openTerminal', async () => {
-			const mode = getConfig<string>('terminalMode', 'split');
+			const mode = getConfig<string>('terminalMode', 'sidebar');
 			if (mode === 'sidebar') {
 				await vscode.commands.executeCommand('snowCliTerminal.focus');
 				sidebarProvider?.ensureTerminal({focus: true});
@@ -259,15 +258,18 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('snow-cli.restartSidebarTerminal', () => {
 			sidebarProvider?.restartTerminal({reason: 'manualRestart'});
 		}),
-		vscode.commands.registerCommand('snow-cli.newSidebarTerminalTab', async () => {
-			const mode = getConfig<string>('terminalMode', 'split');
-			if (mode === 'sidebar') {
-				await vscode.commands.executeCommand('snowCliTerminal.focus');
-				sidebarProvider?.createTab({focus: true});
-			} else {
-				await openSplitTerminal();
-			}
-		}),
+		vscode.commands.registerCommand(
+			'snow-cli.newSidebarTerminalTab',
+			async () => {
+				const mode = getConfig<string>('terminalMode', 'sidebar');
+				if (mode === 'sidebar') {
+					await vscode.commands.executeCommand('snowCliTerminal.focus');
+					sidebarProvider?.createTab({focus: true});
+				} else {
+					await openSplitTerminal();
+				}
+			},
+		),
 		vscode.commands.registerCommand('snow-cli.openSnowSettings', async () => {
 			await vscode.commands.executeCommand(
 				'workbench.action.openSettings',
@@ -283,7 +285,7 @@ export function activate(context: vscode.ExtensionContext) {
 			await sendFilePathsToConfiguredTerminal(paths);
 		}),
 		vscode.commands.registerCommand('snow-cli.focusSidebar', async () => {
-			const mode = getConfig<string>('terminalMode', 'split');
+			const mode = getConfig<string>('terminalMode', 'sidebar');
 			if (mode === 'sidebar') {
 				await vscode.commands.executeCommand('snowCliTerminal.focus');
 				sidebarProvider?.ensureTerminal({focus: true});
@@ -291,40 +293,52 @@ export function activate(context: vscode.ExtensionContext) {
 				await openSplitTerminal();
 			}
 		}),
-		vscode.commands.registerCommand('snow-cli.sendSelectionLocation', async () => {
-			const editor = vscode.window.activeTextEditor;
-			if (!editor) {
-				return;
-			}
+		vscode.commands.registerCommand(
+			'snow-cli.sendSelectionLocation',
+			async () => {
+				const editor = vscode.window.activeTextEditor;
+				if (!editor) {
+					return;
+				}
 
-			const scheme = editor.document.uri.scheme;
-			if (scheme !== 'file' && scheme !== 'vscode-remote') {
-				return;
-			}
+				const scheme = editor.document.uri.scheme;
+				if (scheme !== 'file' && scheme !== 'vscode-remote') {
+					return;
+				}
 
-			const selectionLocation = formatSelectionLocation(editor);
-			if (!selectionLocation) {
-				return;
-			}
+				const selectionLocation = formatSelectionLocation(editor);
+				if (!selectionLocation) {
+					return;
+				}
 
-			await sendFilePathsToConfiguredTerminal([selectionLocation]);
-		}),
-		vscode.commands.registerCommand('snow-cli.sendFilePaths', async (...args: unknown[]) => {
-			// Context menu: (clickedUri, selectedUris) or command palette: no args
-			const selectedUris = args[1] as vscode.Uri[] | undefined;
-			const clickedUri = args[0] as vscode.Uri | undefined;
-			const uris = selectedUris?.length ? selectedUris : clickedUri ? [clickedUri] : [];
-			const paths = uris.map(u => u.fsPath);
-			if (paths.length === 0) {
-				// Fallback: use active editor
-				const active = vscode.window.activeTextEditor?.document.uri.fsPath;
-				if (active) { paths.push(active); }
-			}
-			if (paths.length === 0) {
-				return;
-			}
-			await sendFilePathsToConfiguredTerminal(paths);
-		}),
+				await sendFilePathsToConfiguredTerminal([selectionLocation]);
+			},
+		),
+		vscode.commands.registerCommand(
+			'snow-cli.sendFilePaths',
+			async (...args: unknown[]) => {
+				// Context menu: (clickedUri, selectedUris) or command palette: no args
+				const selectedUris = args[1] as vscode.Uri[] | undefined;
+				const clickedUri = args[0] as vscode.Uri | undefined;
+				const uris = selectedUris?.length
+					? selectedUris
+					: clickedUri
+					? [clickedUri]
+					: [];
+				const paths = uris.map(u => u.fsPath);
+				if (paths.length === 0) {
+					// Fallback: use active editor
+					const active = vscode.window.activeTextEditor?.document.uri.fsPath;
+					if (active) {
+						paths.push(active);
+					}
+				}
+				if (paths.length === 0) {
+					return;
+				}
+				await sendFilePathsToConfiguredTerminal(paths);
+			},
+		),
 	);
 
 	// 5. 监听编辑器变化
@@ -372,7 +386,6 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		}),
 	);
-
 
 	console.log('Snow CLI extension activated');
 }

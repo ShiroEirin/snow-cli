@@ -38,6 +38,7 @@ export function useChatScreenCommands(workingDirectory: string) {
 			import('../../../utils/commands/branch.js'),
 			import('../../../utils/commands/backend.js'),
 			import('../../../utils/commands/loop.js'),
+			import('../../../utils/commands/models.js'),
 			import('../../../utils/commands/subagentDepth.js'),
 			import('../../../utils/commands/worktree.js'),
 			import('../../../utils/commands/newPrompt.js'),
@@ -46,6 +47,7 @@ export function useChatScreenCommands(workingDirectory: string) {
 			import('../../../utils/commands/hybridCompress.js'),
 			import('../../../utils/commands/team.js'),
 			import('../../../utils/commands/btw.js'),
+			import('../../../utils/commands/deepresearch.js'),
 			import('../../../utils/commands/pixel.js'),
 		])
 			.then(async () => {

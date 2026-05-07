@@ -1,10 +1,12 @@
-import React, {useState, useEffect, useCallback} from 'react';
+import React, {useState, useEffect, useCallback, useRef} from 'react';
 import {Box, Text, useInput} from 'ink';
 import {
 	sessionManager,
 	type SessionListItem,
 } from '../../../utils/session/sessionManager.js';
 import {useI18n} from '../../../i18n/index.js';
+import {useTheme} from '../../contexts/ThemeContext.js';
+import {useTerminalSize} from '../../../hooks/ui/useTerminalSize.js';
 
 type Props = {
 	onSelectSession: (sessionId: string) => void;
@@ -13,6 +15,8 @@ type Props = {
 
 export default function SessionListPanel({onSelectSession, onClose}: Props) {
 	const {t} = useI18n();
+	const {theme} = useTheme();
+	const {columns: terminalWidth} = useTerminalSize();
 	const [sessions, setSessions] = useState<SessionListItem[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [loadingMore, setLoadingMore] = useState(false);
@@ -29,10 +33,20 @@ export default function SessionListPanel({onSelectSession, onClose}: Props) {
 	);
 	const [renameInput, setRenameInput] = useState('');
 	const [isRenaming, setIsRenaming] = useState(false);
+	const [pendingDeleteCount, setPendingDeleteCount] = useState(0);
+	const pendingDeleteTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-	const VISIBLE_ITEMS = 5;
+	useEffect(() => {
+		return () => {
+			if (pendingDeleteTimerRef.current) {
+				clearTimeout(pendingDeleteTimerRef.current);
+			}
+		};
+	}, []);
+
+	const VISIBLE_ITEMS = 10;
 	const PAGE_SIZE = 20;
-	const SEARCH_DEBOUNCE_MS = 300;
+	const SEARCH_DEBOUNCE_MS = 600;
 
 	useEffect(() => {
 		const timer = setTimeout(() => {
@@ -249,30 +263,60 @@ export default function SessionListPanel({onSelectSession, onClose}: Props) {
 		}
 
 		if (input === 'd' || input === 'D') {
-			if (markedSessions.size > 0) {
-				const deleteMarked = async () => {
-					const ids = Array.from(markedSessions);
-					await Promise.all(ids.map(id => sessionManager.deleteSession(id)));
-					const result = await sessionManager.listSessionsPaginated(
-						0,
-						PAGE_SIZE,
-						debouncedSearch,
-					);
-					setSessions(result.sessions);
-					setHasMore(result.hasMore);
-					setTotalCount(result.total);
-					setCurrentPage(0);
-					setMarkedSessions(new Set());
-					if (
-						selectedIndex >= result.sessions.length &&
-						result.sessions.length > 0
-					) {
-						setSelectedIndex(result.sessions.length - 1);
-					}
-					setScrollOffset(0);
-				};
-				void deleteMarked();
+			const idsToDelete: string[] =
+				markedSessions.size > 0
+					? Array.from(markedSessions)
+					: sessions[selectedIndex]
+					? [sessions[selectedIndex]!.id]
+					: [];
+
+			if (idsToDelete.length === 0) {
+				return;
 			}
+
+			// First press: show confirmation prompt for 1 second
+			if (pendingDeleteCount === 0) {
+				setPendingDeleteCount(idsToDelete.length);
+				if (pendingDeleteTimerRef.current) {
+					clearTimeout(pendingDeleteTimerRef.current);
+				}
+				pendingDeleteTimerRef.current = setTimeout(() => {
+					setPendingDeleteCount(0);
+					pendingDeleteTimerRef.current = null;
+				}, 1000);
+				return;
+			}
+
+			// Second press within 1s: actually delete
+			if (pendingDeleteTimerRef.current) {
+				clearTimeout(pendingDeleteTimerRef.current);
+				pendingDeleteTimerRef.current = null;
+			}
+			setPendingDeleteCount(0);
+
+			const deleteSessions = async () => {
+				await Promise.all(
+					idsToDelete.map(id => sessionManager.deleteSession(id)),
+				);
+				const result = await sessionManager.listSessionsPaginated(
+					0,
+					PAGE_SIZE,
+					debouncedSearch,
+				);
+				setSessions(result.sessions);
+				setHasMore(result.hasMore);
+				setTotalCount(result.total);
+				setCurrentPage(0);
+				setMarkedSessions(new Set());
+				if (
+					selectedIndex >= result.sessions.length &&
+					result.sessions.length > 0
+				) {
+					setSelectedIndex(result.sessions.length - 1);
+				}
+				setScrollOffset(0);
+			};
+			void deleteSessions();
 			return;
 		}
 
@@ -317,14 +361,14 @@ export default function SessionListPanel({onSelectSession, onClose}: Props) {
 	const currentSession = sessions[selectedIndex];
 
 	return (
-		<Box
-			borderStyle="round"
-			borderColor="cyan"
-			paddingX={1}
-			flexDirection="column"
-		>
+		<Box paddingX={1} flexDirection="column">
+			<Box height={1}>
+				<Text color={theme.colors.menuSecondary} dimColor>
+					{'─'.repeat(Math.max(0, terminalWidth - 2))}
+				</Text>
+			</Box>
 			<Box flexDirection="column">
-				<Text color="cyan" dimColor>
+				<Text color={theme.colors.menuInfo} bold>
 					{t.sessionListPanel.title} ({selectedIndex + 1}/{sessions.length}
 					{totalCount > sessions.length && ` of ${totalCount}`})
 					{currentSession &&
@@ -332,7 +376,7 @@ export default function SessionListPanel({onSelectSession, onClose}: Props) {
 							currentSession.messageCount
 						} ${t.sessionListPanel.messages.replace('{count}', '')}`}
 					{markedSessions.size > 0 && (
-						<Text color="yellow">
+						<Text color={theme.colors.warning}>
 							{' '}
 							•{' '}
 							{t.sessionListPanel.marked.replace(
@@ -342,36 +386,77 @@ export default function SessionListPanel({onSelectSession, onClose}: Props) {
 						</Text>
 					)}
 					{loadingMore && (
-						<Text color="gray"> • {t.sessionListPanel.loadingMore}</Text>
+						<Text color={theme.colors.menuSecondary}>
+							{' '}
+							• {t.sessionListPanel.loadingMore}
+						</Text>
+					)}
+					{pendingDeleteCount > 0 && (
+						<Text color={theme.colors.error || theme.colors.warning} bold>
+							{' '}
+							•{' '}
+							{t.sessionListPanel.confirmDelete.replace(
+								'{count}',
+								String(pendingDeleteCount),
+							)}
+						</Text>
 					)}
 				</Text>
-				{searchInput ? (
-					<Text color="green">
-						{t.sessionListPanel.searchLabel} {searchInput}
-						{searchInput !== debouncedSearch && (
-							<Text color="gray"> ({t.sessionListPanel.searching})</Text>
-						)}
-					</Text>
-				) : renamingSessionId ? (
-					<Text color="yellow">
+				{renamingSessionId ? (
+					<Text color={theme.colors.warning}>
 						{t.sessionListPanel.renamePrompt}:{' '}
-						<Text color="white">{renameInput}</Text>
+						<Text color={theme.colors.text}>{renameInput}</Text>
+						<Text color={theme.colors.warning}>▌</Text>
 						{isRenaming && (
-							<Text color="gray"> ({t.sessionListPanel.renaming})</Text>
+							<Text color={theme.colors.menuSecondary}>
+								{' '}
+								({t.sessionListPanel.renaming})
+							</Text>
 						)}
 					</Text>
 				) : (
-					<Text color="gray" dimColor>
+					<Text color={theme.colors.menuSecondary} dimColor>
 						{t.sessionListPanel.navigationHint}
 					</Text>
 				)}
 			</Box>
+			{!renamingSessionId && (
+				<Box
+					borderStyle="round"
+					borderColor={
+						searchInput ? theme.colors.success : theme.colors.menuSecondary
+					}
+					paddingX={1}
+				>
+					<Text
+						color={
+							searchInput ? theme.colors.success : theme.colors.menuSecondary
+						}
+					>
+						⌕{' '}
+					</Text>
+					{searchInput ? (
+						<Text color={theme.colors.text}>
+							{searchInput}
+							<Text color={theme.colors.success}>▌</Text>
+						</Text>
+					) : (
+						<Text color={theme.colors.menuSecondary}>▌</Text>
+					)}
+					{searchInput && searchInput !== debouncedSearch && (
+						<Text color={theme.colors.menuSecondary}>
+							{' '}
+							({t.sessionListPanel.searching})
+						</Text>
+					)}
+				</Box>
+			)}
 			{loading ? (
-				<Text color="gray" dimColor>
+				<Text color={theme.colors.menuSecondary} dimColor>
 					{t.sessionListPanel.loading}
 				</Text>
 			) : sessions.length === 0 ? (
-				<Text color="gray" dimColor>
+				<Text color={theme.colors.menuSecondary} dimColor>
 					{debouncedSearch
 						? t.sessionListPanel.noResults.replace('{query}', debouncedSearch)
 						: t.sessionListPanel.noConversations}
@@ -379,7 +464,7 @@ export default function SessionListPanel({onSelectSession, onClose}: Props) {
 			) : (
 				<>
 					{hasPrevious && (
-						<Text color="gray" dimColor>
+						<Text color={theme.colors.menuSecondary} dimColor>
 							{' '}
 							{t.sessionListPanel.moreAbove.replace(
 								'{count}',
@@ -403,18 +488,34 @@ export default function SessionListPanel({onSelectSession, onClose}: Props) {
 
 						return (
 							<Box key={session.id}>
-								<Text color={isMarked ? 'green' : 'gray'}>
+								<Text
+									color={
+										isMarked ? theme.colors.success : theme.colors.menuSecondary
+									}
+								>
 									{isMarked ? '✔ ' : '  '}
 								</Text>
-								<Text color={isSelected ? 'green' : 'gray'}>
+								<Text
+									color={
+										isSelected
+											? theme.colors.success
+											: theme.colors.menuSecondary
+									}
+								>
 									{isSelected ? '❯ ' : '  '}
 								</Text>
 								<Text
-									color={isSelected ? 'cyan' : isMarked ? 'green' : 'white'}
+									color={
+										isSelected
+											? theme.colors.menuInfo
+											: isMarked
+											? theme.colors.success
+											: theme.colors.text
+									}
 								>
 									{truncatedLabel}
 								</Text>
-								<Text color="gray" dimColor>
+								<Text color={theme.colors.menuSecondary} dimColor>
 									{' '}
 									• {timeStr}
 									{sizeStr ? ` • ${sizeStr}` : ''}
@@ -425,7 +526,7 @@ export default function SessionListPanel({onSelectSession, onClose}: Props) {
 				</>
 			)}
 			{!loading && sessions.length > 0 && hasMoreInView && (
-				<Text color="gray" dimColor>
+				<Text color={theme.colors.menuSecondary} dimColor>
 					{' '}
 					{t.sessionListPanel.moreBelow.replace(
 						'{count}',

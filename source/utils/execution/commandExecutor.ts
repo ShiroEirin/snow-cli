@@ -25,6 +25,7 @@ export interface CommandResult {
 		| 'showTodoPicker'
 		| 'showTodoListPanel'
 		| 'showProfilePanel'
+		| 'showModelsPanel'
 		| 'showSubAgentDepthPanel'
 		| 'showSkillsPicker'
 		| 'showGitLinePicker'
@@ -35,6 +36,7 @@ export interface CommandResult {
 		| 'executeTerminalCommand'
 		| 'deleteCustomCommand'
 		| 'showSkillsCreation'
+		| 'showSkillsListPanel'
 		| 'showRoleCreation'
 		| 'showRoleDeletion'
 		| 'showRoleList'
@@ -56,6 +58,7 @@ export interface CommandResult {
 		| 'showTaskManager'
 		| 'forkSession'
 		| 'btw'
+		| 'deepResearch'
 		| 'quit'
 		| 'disconnect';
 	prompt?: string;

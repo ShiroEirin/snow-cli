@@ -417,6 +417,7 @@ type CommandHandlerOptions = {
 		React.SetStateAction<string | undefined>
 	>;
 	setShowMcpPanel: React.Dispatch<React.SetStateAction<boolean>>;
+	setShowHelpPanel: React.Dispatch<React.SetStateAction<boolean>>;
 	onCompressionStatus?: (
 		status:
 			| import('../../ui/components/compression/CompressionStatus.js').CompressionStatus
@@ -425,9 +426,11 @@ type CommandHandlerOptions = {
 	setShowTodoListPanel: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowPixelEditor: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowUsagePanel: React.Dispatch<React.SetStateAction<boolean>>;
+	setShowModelsPanel: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowSubAgentDepthPanel: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowCustomCommandConfig: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowSkillsCreation: React.Dispatch<React.SetStateAction<boolean>>;
+	setShowSkillsListPanel: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowRoleCreation: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowRoleDeletion: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowRoleList: React.Dispatch<React.SetStateAction<boolean>>;
@@ -686,6 +689,14 @@ export function useCommandHandler(options: CommandHandlerOptions) {
 					commandName: commandName,
 				};
 				options.setMessages(prev => [...prev, commandMessage]);
+			} else if (result.success && result.action === 'showModelsPanel') {
+				options.setShowModelsPanel(true);
+				const commandMessage: Message = {
+					role: 'command',
+					content: '',
+					commandName: commandName,
+				};
+				options.setMessages(prev => [...prev, commandMessage]);
 			} else if (result.success && result.action === 'showBackgroundPanel') {
 				options.setShowBackgroundPanel();
 				const commandMessage: Message = {
@@ -714,8 +725,8 @@ export function useCommandHandler(options: CommandHandlerOptions) {
 				};
 				options.setMessages(prev => [...prev, commandMessage]);
 			} else if (result.success && result.action === 'help') {
-				// Help uses a dedicated screen to avoid chat layout overflow.
-				navigateTo('help');
+				// Help shown as an in-chat panel, ESC closes panel without resetting terminal.
+				options.setShowHelpPanel(true);
 				// Don't add command message to keep UI clean
 			} else if (result.success && result.action === 'pixel') {
 				// Pixel editor shown as an overlay panel
@@ -734,6 +745,14 @@ export function useCommandHandler(options: CommandHandlerOptions) {
 				options.setMessages(prev => [...prev, commandMessage]);
 			} else if (result.success && result.action === 'showSkillsCreation') {
 				options.setShowSkillsCreation(true);
+				const commandMessage: Message = {
+					role: 'command',
+					content: '',
+					commandName: commandName,
+				};
+				options.setMessages(prev => [...prev, commandMessage]);
+			} else if (result.success && result.action === 'showSkillsListPanel') {
+				options.setShowSkillsListPanel(true);
 				const commandMessage: Message = {
 					role: 'command',
 					content: '',
@@ -1163,6 +1182,24 @@ export function useCommandHandler(options: CommandHandlerOptions) {
 				};
 				options.setMessages([commandMessage]);
 				// Auto-send the review prompt using advanced model (not basic model), hide the prompt from UI
+				options.processMessage(result.prompt, undefined, false, true);
+			} else if (
+				result.success &&
+				result.action === 'deepResearch' &&
+				result.prompt
+			) {
+				// Deep Research command: run as a normal advanced-model task while
+				// hiding the (very long) embedded prompt from the chat history.
+				// Show the original (truncated) user request under the command tree
+				// node — `result.message` is set by deepresearch.ts to the truncated
+				// user prompt, which formatCommandResultLines() renders as `└─ ...`.
+				const commandMessage: Message = {
+					role: 'command',
+					content: result.message || '',
+					commandName: commandName,
+				};
+				options.setMessages(prev => [...prev, commandMessage]);
+				// Use advanced model (basicModel=false) and hide the prompt from UI
 				options.processMessage(result.prompt, undefined, false, true);
 			} else if (result.success && result.action === 'exportChat') {
 				// Handle export chat command

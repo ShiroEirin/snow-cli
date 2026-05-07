@@ -10,6 +10,7 @@ import {
 	appendSystemContext,
 	detectWindowsPowerShell,
 	getToolDiscoverySection as getToolDiscoverySectionHelper,
+	getOverrideRoleContent,
 } from './shared/promptHelpers.js';
 import os from 'os';
 import {getPlanModeSystemPrompt} from './planModeSystemPrompt.js';
@@ -409,6 +410,19 @@ Tools are loaded on-demand to save context. At the start of each conversation, o
 
 // Export SYSTEM_PROMPT as a getter function for real-time ROLE.md updates
 export function getSystemPrompt(toolSearchDisabled = false): string {
+	// If the active role is marked as "override", its content REPLACES the
+	// default system prompt entirely. Only system environment + date are appended.
+	const overrideContent = getOverrideRoleContent();
+	if (overrideContent) {
+		const systemEnvOverride = getSystemEnvironmentInfoHelper(true);
+		const timeInfoOverride = getCurrentTimeInfo();
+		return appendSystemContext(
+			overrideContent,
+			systemEnvOverride,
+			timeInfoOverride,
+		);
+	}
+
 	const basePrompt = getSystemPromptWithRoleHelper(
 		SYSTEM_PROMPT_TEMPLATE,
 		'You are Snow AI CLI, an intelligent command-line assistant.',

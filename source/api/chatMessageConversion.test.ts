@@ -44,12 +44,12 @@ test('convertToOpenAIMessages attaches tool message names for VCP mode requests'
 
 	const converted = convertToOpenAIMessages(
 		messages,
+		{backendMode: 'vcp'} as any,
 		false,
 		undefined,
 		false,
 		false,
 		false,
-		true,
 	);
 
 	const toolMessages = converted.filter(message => message.role === 'tool');
@@ -89,9 +89,9 @@ test('convertToOpenAIMessages keeps tool messages unchanged when VCP mode is off
 
 	const converted = convertToOpenAIMessages(
 		messages,
+		{backendMode: 'native'} as any,
 		false,
 		undefined,
-		false,
 		false,
 		false,
 		false,
@@ -132,12 +132,12 @@ test('convertToOpenAIMessages prefers explicit tool message names when present',
 
 	const converted = convertToOpenAIMessages(
 		messages,
+		{backendMode: 'vcp'} as any,
 		false,
 		undefined,
 		false,
 		false,
 		false,
-		true,
 	);
 
 	const toolMessage = converted.find(message => message.role === 'tool');

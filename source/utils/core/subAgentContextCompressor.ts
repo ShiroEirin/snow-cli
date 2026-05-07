@@ -22,6 +22,7 @@ import type {
 	ToolTransport,
 } from '../config/apiConfig.js';
 import {resolveVcpModeRequest} from '../session/vcpCompatibility/mode.js';
+import {cleanOrphanedToolCalls} from './contextCompressor.js';
 
 /** Threshold percentage to trigger compression */
 const COMPRESS_THRESHOLD = 80;
@@ -197,19 +198,38 @@ function findRecentRoundsStartIndex(
 	let roundCount = 0;
 	let i = messages.length - 1;
 
+	// Only count main-agent rounds. subAgentInternal messages are nested inside a
+	// main-agent tool call (subagent-agent_*) and must NOT be counted as separate
+	// rounds — otherwise the cut may land in the middle of a sub-agent block and
+	// orphan the parent main-agent tool_calls/tool results.
 	while (i >= 0 && roundCount < keepRounds) {
 		const msg = messages[i];
+		if (!msg) {
+			i--;
+			continue;
+		}
 
-		if (msg?.role === 'tool') {
-			// Skip all consecutive tool messages (they belong to the same round)
-			while (i >= 0 && messages[i]?.role === 'tool') {
+		// Skip sub-agent internal messages entirely (they belong to a wrapping main round)
+		if ((msg as any).subAgentInternal) {
+			i--;
+			continue;
+		}
+
+		if (msg.role === 'tool') {
+			// Skip all consecutive tool messages (they belong to the same round).
+			// Tolerate interleaved subAgentInternal messages.
+			while (
+				i >= 0 &&
+				(messages[i]?.role === 'tool' || (messages[i] as any)?.subAgentInternal)
+			) {
 				i--;
 			}
 			// Now i points to the assistant message with tool_calls
 			if (
 				i >= 0 &&
 				messages[i]?.role === 'assistant' &&
-				messages[i]?.tool_calls?.length
+				messages[i]?.tool_calls?.length &&
+				!(messages[i] as any).subAgentInternal
 			) {
 				roundCount++;
 				i--;
@@ -219,7 +239,56 @@ function findRecentRoundsStartIndex(
 		}
 	}
 
-	return Math.max(0, i + 1);
+	let cut = Math.max(0, i + 1);
+
+	// Defensive: never cut into the middle of an orphaned tool / subAgentInternal block.
+	// Advance forward past leading tool / subAgentInternal messages that have no
+	// corresponding main-agent assistant.tool_calls in the preserved region.
+	while (cut < messages.length) {
+		const m = messages[cut];
+		if (!m) break;
+		const isOrphanTool =
+			m.role === 'tool' &&
+			!hasPrecedingAssistantWithToolCall(messages, cut, m.tool_call_id);
+		const isLeadingSubAgent = (m as any).subAgentInternal === true;
+		if (isOrphanTool || isLeadingSubAgent) {
+			cut++;
+			continue;
+		}
+		break;
+	}
+
+	return cut;
+}
+
+/**
+ * Check whether `messages[idx]` (a tool message) has a preceding main-agent
+ * assistant message with a matching tool_call id within the slice
+ * `messages[start..idx]` (where start is determined by walking backwards
+ * through tool/subAgentInternal messages).
+ *
+ * Used by findRecentRoundsStartIndex to detect orphaned tool results that
+ * would otherwise be sent to the API and trigger a 400 error.
+ */
+function hasPrecedingAssistantWithToolCall(
+	messages: ChatMessage[],
+	idx: number,
+	toolCallId?: string,
+): boolean {
+	if (!toolCallId) return false;
+	for (let j = idx - 1; j >= 0; j--) {
+		const m = messages[j];
+		if (!m) continue;
+		if (
+			m.role === 'assistant' &&
+			m.tool_calls?.some(tc => tc.id === toolCallId)
+		) {
+			return true;
+		}
+		// Stop searching if we hit a user message (round boundary)
+		if (m.role === 'user') return false;
+	}
+	return false;
 }
 
 /**
@@ -358,6 +427,14 @@ async function aiSummaryCompress(
 
 	const messagesToCompress = messages.slice(0, preserveStartIndex);
 	const preservedMessages = messages.slice(preserveStartIndex);
+
+	// CRITICAL: Clean orphaned tool_calls / tool results from preserved messages.
+	// Without this, an assistant.tool_calls cut off from its tool results (or a
+	// tool result with no parent assistant) would be persisted into the new
+	// compressed session, causing the next API call to fail with errors like:
+	//   "No tool call found for function call output with call_id ..."
+	// (OpenAI Responses API) or 400 from Anthropic tool_use/tool_result mismatch.
+	cleanOrphanedToolCalls(preservedMessages);
 
 	// Generate summary using the appropriate API
 	const compressionMessages =

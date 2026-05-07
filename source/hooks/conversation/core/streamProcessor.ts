@@ -35,6 +35,7 @@ export async function processStreamRound(ctx: {
 	model: string;
 	conversationMessages: ChatMessage[];
 	activeTools: MCPTool[];
+	allowVcpTimeBridge?: boolean;
 	controller: AbortController;
 	encoder: TokenEncoder;
 	setStreamTokenCount: React.Dispatch<React.SetStateAction<number>>;
@@ -50,6 +51,7 @@ export async function processStreamRound(ctx: {
 		model,
 		conversationMessages,
 		activeTools,
+		allowVcpTimeBridge,
 		controller,
 		encoder,
 		setStreamTokenCount,
@@ -246,6 +248,7 @@ export async function processStreamRound(ctx: {
 		model,
 		conversationMessages,
 		activeTools,
+		allowVcpTimeBridge,
 		sessionId: currentSession?.id,
 		useBasicModel: options.useBasicModel,
 		planMode: options.planMode,

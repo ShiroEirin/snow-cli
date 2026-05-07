@@ -503,6 +503,8 @@ export const en: TranslationKeys = {
 		nordInfo: 'Arctic, north-bluish color palette',
 		tiffany: 'Tiffany Blue',
 		tiffanyInfo: 'Fresh and elegant Tiffany blue palette',
+		macaronPink: 'Macaron Pink',
+		macaronPinkInfo: 'Sweet pastel macaron pink palette',
 		custom: 'Custom',
 		customInfo: 'Use your own custom colors',
 		editCustom: 'Edit Custom Theme...',
@@ -654,6 +656,7 @@ export const en: TranslationKeys = {
 			backend: 'Show background processes panel',
 			loop: 'Schedule a session-scoped recurring task. Usage: /loop 5m <prompt>',
 			profiles: 'Switch configuration profiles',
+			models: 'Open the model switching panel',
 			subAgentDepth: 'Set the maximum nested spawn depth for sub-agents',
 			vulnerabilityHunting:
 				'Toggle vulnerability hunting mode for security-focused code analysis',
@@ -674,6 +677,8 @@ export const en: TranslationKeys = {
 			newPrompt: 'Generate a refined prompt from your requirement using AI',
 			pixel: 'Open the terminal pixel editor',
 			btw: 'Ask a side-question while AI is working (temporary, no context saved)',
+			deepresearch:
+				'Run an autonomous multi-step web research workflow and save a cited markdown report to .snow/deepresearch/',
 			quit: 'Exit the application',
 		},
 		copyLastFeedback: {
@@ -715,6 +720,30 @@ export const en: TranslationKeys = {
 					'Conversation forked into branch {name}. To return to the original session:\n/resume {originalId}',
 				failed: 'Failed to fork session',
 			},
+			// Deep Research command messages
+			deepResearch: {
+				usage:
+					'Usage: /deepresearch <prompt>\nExample: /deepresearch Compare the architectures of OpenAI Deep Research and Gemini Deep Research',
+			},
+			// Loop command messages
+			loop: {
+				usage:
+					'Usage: /loop 5m <prompt> | /loop 8h30m <prompt> | /loop <prompt> every 2 hours | /loop list | /loop cancel <id> | /loop tasks',
+				openingTaskManager: 'Opening task manager...',
+				relatedLoopTasks: 'Related loop tasks:',
+				noActiveLoops:
+					'No active loops. Create one with /loop 5m <prompt> or /loop <prompt> every 2 hours.',
+				loopNotFound: 'Loop not found: {id}',
+				cancelled: 'Cancelled loop {id} (every {interval})',
+				created: 'Loop created: {id}',
+				scheduleEvery: 'Schedule: every {interval}',
+				promptLabel: 'Prompt: {prompt}',
+				nextRun: 'Next run: {time}',
+				sessionScopedNote:
+					'Session-scoped only: loop jobs stop when Snow CLI exits.',
+				usageHint:
+					'Use /loop list to inspect jobs or /loop cancel <id> to stop one.',
+			},
 		},
 	},
 	fileList: {
@@ -740,7 +769,10 @@ export const en: TranslationKeys = {
 		connectSuccess: 'Connected to {label}',
 		connectError: 'Failed to connect: {error}',
 		unmatchedIDEs:
-			'Found {count} other running IDE(s). However, their workspace/project directories do not match the current cwd.',
+			'The above {count} IDE(s) have workspaces that do not match the current directory. Selecting one will switch the working directory.',
+		unmatchedHeader: '— Switch working directory —',
+		switchWorkdirMark: ' (switch cwd)',
+		switchWorkdirError: 'Failed to switch working directory: {error}',
 	},
 	permissionsPanel: {
 		title: 'Permissions',
@@ -763,6 +795,43 @@ export const en: TranslationKeys = {
 		hint: 'Enter save • Esc close • digits only',
 		fileHint:
 			'This setting is persisted to .snow/settings.json in the project root',
+	},
+	modelsPanel: {
+		title: 'Model Switching',
+		subtitle: 'Tab to switch tabs | Enter to select',
+		tabAdvanced: 'Advanced Model',
+		tabBasic: 'Basic Model',
+		tabThinking: 'Thinking',
+		currentModel: 'Current Model:',
+		notSet: 'Not Set',
+		loadingModels: 'Loading models...',
+		hint: 'Enter to select model | m for manual input | Esc to close',
+		manualInputTitle: 'Manual Input',
+		manualInputHint: 'Enter to save, Esc to close',
+		filterLabel: 'Filter:',
+		manualInputOption: 'Manual Input',
+		requestMethod: 'Request Method:',
+		showThinkingProcess: 'Show Thinking Process:',
+		enableThinking: 'Enable Thinking:',
+		thinkingMode: 'Thinking Mode:',
+		thinkingStrength: 'Thinking Strength:',
+		inputNumberHint: 'Enter number, press Enter to save',
+		escCancel: 'Esc to cancel',
+		navigationHint: '↑↓ to select | Enter to toggle | Esc to close',
+		notSupported: 'Not Supported',
+		advancedModelLabel: 'Advanced Model',
+		basicModelLabel: 'Basic Model',
+		thinkingLabel: 'Thinking',
+		requestMethodNotSupportedForThinking:
+			'Current request method ({requestMethod}) does not support thinking',
+		requestMethodNotSupportedForThinkingStrength:
+			'Current request method ({requestMethod}) does not support thinking strength settings',
+		anthropicSpeed: 'Speed:',
+		saveFailed: 'Save failed',
+		modelSaveFailed: 'Model save failed',
+		tipLabel: 'Tip:',
+		modelCount: '{count} models',
+		scrollHint: '↑↓ scroll for more',
 	},
 	profilePanel: {
 		title: 'Select Profile',
@@ -1309,10 +1378,14 @@ export const en: TranslationKeys = {
 		deleteSuccess: 'Role deleted successfully',
 		loading: 'Processing...',
 		hints:
-			'Tab: Switch scope | Enter: Activate | N: New | D: Delete | ESC: Close',
+			'Tab: Switch scope | Enter: Activate | N: New | D: Delete | R: Override prompt | ESC: Close',
 		cannotDeleteActive: 'Cannot delete active role',
 		confirmDelete: 'Confirm delete this role?',
 		confirmDeleteHint: 'Press Y to confirm, N to cancel',
+		overrideTag: 'Override',
+		overrideEnabled: 'Enabled: this role overrides the system prompt',
+		overrideDisabled: 'Disabled: default system prompt restored',
+		cannotOverrideInactive: 'Only the active role can be marked as override',
 	},
 
 	roleSubagentCreation: {
@@ -1568,6 +1641,11 @@ export const en: TranslationKeys = {
 		title: 'Diff Review',
 		noSnapshots: 'No file changes found in this session',
 		navigationHint: '↑↓ navigate • Tab view files • Enter open all • ESC close',
+		filesSuffix: '{count} files',
+		filesViewNavigationHint:
+			'↑↓ navigate • Tab back • Enter open all • ESC close',
+		moreAbove: '↑ {count} more above',
+		moreBelow: '↓ {count} more below',
 	},
 	sessionListPanel: {
 		title: 'Resume',
@@ -1590,6 +1668,7 @@ export const en: TranslationKeys = {
 		renamePrompt: 'Rename Session',
 		renaming: 'Renaming...',
 		renamePlaceholder: 'Enter new title',
+		confirmDelete: 'Press D again within 1s to confirm delete ({count})',
 	},
 	mcpInfoPanel: {
 		title: 'MCP Services',
@@ -1622,6 +1701,18 @@ export const en: TranslationKeys = {
 		toolScopeProject: '[Project]',
 		mcpSourceProject: ' [Project]',
 		mcpSourceGlobal: ' [Global]',
+	},
+	skillsListPanel: {
+		title: 'Skills',
+		loading: 'Loading skills...',
+		error: 'Error: {message}',
+		noSkills: 'No skills available',
+		locationProject: '(Project)',
+		locationGlobal: '(Global)',
+		statusDisabled: '(Disabled)',
+		navigationHint: '↑↓ Navigate • Tab/Space/Enter Toggle • ESC Close',
+		moreAbove: '↑ {count} more above',
+		moreBelow: '↓ {count} more below',
 	},
 	mcpConfigScreen: {
 		title: 'MCP Config - Select scope to edit',

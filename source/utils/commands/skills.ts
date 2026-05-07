@@ -733,7 +733,19 @@ if __name__ == "__main__":
 
 // Register /skills command
 registerCommand('skills', {
-	execute: async (): Promise<CommandResult> => {
+	execute: async (args?: string): Promise<CommandResult> => {
+		const trimmedArgs = args?.trim();
+
+		// -l / --list: open skills list panel (toggle enable/disable per skill)
+		if (trimmedArgs === '-l' || trimmedArgs === '--list') {
+			return {
+				success: true,
+				action: 'showSkillsListPanel',
+				message: 'Opening Skills list panel...',
+			};
+		}
+
+		// Default: show creation dialog
 		return {
 			success: true,
 			action: 'showSkillsCreation',

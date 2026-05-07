@@ -7,17 +7,28 @@ import {
 	loopManager,
 	parseLoopSchedule,
 } from '../task/loopManager.js';
+import {getCurrentLanguage} from '../config/languageConfig.js';
+import {translations} from '../../i18n/index.js';
 
-const LOOP_USAGE =
-	'Usage: /loop 5m <prompt> | /loop 8h30m <prompt> | /loop <prompt> every 2 hours | /loop list | /loop cancel <id> | /loop tasks';
+function format(template: string, params: Record<string, string>): string {
+	return template.replace(/\{(\w+)\}/g, (_, key) =>
+		key in params ? params[key]! : `{${key}}`,
+	);
+}
 
 registerCommand('loop', {
 	execute: async (args?: string): Promise<CommandResult> => {
+		const lang = getCurrentLanguage();
+		const t = translations[lang]?.commandPanel?.commandOutput?.loop;
+		const fallback = translations.en.commandPanel.commandOutput.loop;
+		const m = (key: keyof typeof fallback): string =>
+			(t?.[key] as string) || fallback[key];
+
 		const trimmedArgs = args?.trim();
 		if (!trimmedArgs) {
 			return {
 				success: false,
-				message: LOOP_USAGE,
+				message: m('usage'),
 			};
 		}
 
@@ -29,12 +40,12 @@ registerCommand('loop', {
 				message:
 					taskSummaries.length > 0
 						? [
-								'Opening task manager...',
+								m('openingTaskManager'),
 								'',
-								'Related loop tasks:',
+								m('relatedLoopTasks'),
 								...taskSummaries,
 						  ].join('\n')
-						: 'Opening task manager...',
+						: m('openingTaskManager'),
 			};
 		}
 
@@ -43,8 +54,7 @@ registerCommand('loop', {
 			if (loops.length === 0) {
 				return {
 					success: true,
-					message:
-						'No active loops. Create one with /loop 5m <prompt> or /loop <prompt> every 2 hours.',
+					message: m('noActiveLoops'),
 				};
 			}
 
@@ -62,13 +72,16 @@ registerCommand('loop', {
 			if (!loop) {
 				return {
 					success: false,
-					message: `Loop not found: ${cancelMatch[1]}`,
+					message: format(m('loopNotFound'), {id: cancelMatch[1]}),
 				};
 			}
 
 			return {
 				success: true,
-				message: `Cancelled loop ${loop.id} (every ${loop.intervalLabel})`,
+				message: format(m('cancelled'), {
+					id: loop.id,
+					interval: loop.intervalLabel,
+				}),
 			};
 		}
 
@@ -77,12 +90,14 @@ registerCommand('loop', {
 		return {
 			success: true,
 			message: [
-				`Loop created: ${loop.id}`,
-				`Schedule: every ${loop.intervalLabel}`,
-				`Prompt: ${loop.prompt}`,
-				`Next run: ${new Date(loop.nextRunAt).toLocaleString()}`,
-				'Session-scoped only: loop jobs stop when Snow CLI exits.',
-				'Use /loop list to inspect jobs or /loop cancel <id> to stop one.',
+				format(m('created'), {id: loop.id}),
+				format(m('scheduleEvery'), {interval: loop.intervalLabel}),
+				format(m('promptLabel'), {prompt: loop.prompt}),
+				format(m('nextRun'), {
+					time: new Date(loop.nextRunAt).toLocaleString(),
+				}),
+				m('sessionScopedNote'),
+				m('usageHint'),
 			].join('\n'),
 		};
 	},

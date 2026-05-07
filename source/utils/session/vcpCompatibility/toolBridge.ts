@@ -32,7 +32,7 @@ type BridgeServiceInfoShape = {
 
 type VcpToolBridgeConfig = {
 	backendMode?: 'native' | 'vcp';
-	toolTransport?: 'local' | 'bridge';
+	toolTransport?: 'local' | 'bridge' | 'hybrid';
 	vcpToolBridgeWsUrl?: string;
 	vcpToolBridgeToken?: string;
 	vcpToolBridgeToolFilter?: string;
@@ -175,7 +175,10 @@ const MAX_COMMAND_SUMMARY_COUNT = 4;
 const SAFE_TOOL_NAME_REGEX = /^[A-Za-z0-9_-]{1,64}$/;
 
 function isBridgeEnabled(config: VcpToolBridgeConfig): boolean {
-	return config.backendMode === 'vcp' && config.toolTransport === 'bridge';
+	return (
+		config.backendMode === 'vcp' &&
+		(config.toolTransport === 'bridge' || config.toolTransport === 'hybrid')
+	);
 }
 
 function splitFilterValues(value?: string): string[] {
@@ -193,7 +196,8 @@ function summarizeText(value?: string, maxLength = 160): string {
 		return '';
 	}
 
-	const firstSentence = normalized.split(/(?<=[。！？.!?])\s+/)[0] || normalized;
+	const firstSentence =
+		normalized.split(/(?<=[。！？.!?])\s+/)[0] || normalized;
 	if (firstSentence.length <= maxLength) {
 		return firstSentence;
 	}
@@ -221,20 +225,22 @@ function createBridgeToolId(originName: string): string {
 
 function uniqueStrings(values: Array<string | undefined>): string[] {
 	return Array.from(
-		new Set(
-			values
-				.map(value => String(value || '').trim())
-				.filter(Boolean),
-		),
+		new Set(values.map(value => String(value || '').trim()).filter(Boolean)),
 	);
 }
 
-function normalizeBridgeToolName(rawName: string, usedNames: Set<string>): string {
+function normalizeBridgeToolName(
+	rawName: string,
+	usedNames: Set<string>,
+): string {
 	const trimmed = String(rawName || '').trim();
 	const normalizedBase =
 		SAFE_TOOL_NAME_REGEX.test(trimmed) && trimmed.length > 0
 			? trimmed
-			: `vcp_${trimmed.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'tool'}`;
+			: `vcp_${
+					trimmed.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') ||
+					'tool'
+			  }`;
 
 	if (!usedNames.has(normalizedBase)) {
 		usedNames.add(normalizedBase);
@@ -297,7 +303,10 @@ function buildParameterSchema(
 	const schemaType = normalizeSchemaType(parameter.type);
 	const schema: Record<string, unknown> = {
 		type: schemaType,
-		description: `${summarizeText(parameter.description, 220) || 'Parameter for VCP bridge command.'} (command: ${commandName})`,
+		description: `${
+			summarizeText(parameter.description, 220) ||
+			'Parameter for VCP bridge command.'
+		} (command: ${commandName})`,
 	};
 
 	if (schemaType === 'array') {
@@ -390,7 +399,9 @@ function buildBridgeCapabilityTags(
 	return uniqueStrings(tags);
 }
 
-function buildToolParameters(commands: VcpBridgeCommand[]): Record<string, unknown> {
+function buildToolParameters(
+	commands: VcpBridgeCommand[],
+): Record<string, unknown> {
 	if (commands.length === 1) {
 		const [singleCommand] = commands;
 		if (!singleCommand) {
@@ -432,7 +443,9 @@ function buildToolParameters(commands: VcpBridgeCommand[]): Record<string, unkno
 			description: commands
 				.map(
 					command =>
-						`${command.commandName}: ${summarizeText(command.description, 120) || 'Use this sub-command.'}`,
+						`${command.commandName}: ${
+							summarizeText(command.description, 120) || 'Use this sub-command.'
+						}`,
 				)
 				.join(' | '),
 		},
@@ -461,7 +474,9 @@ function buildToolParameters(commands: VcpBridgeCommand[]): Record<string, unkno
 
 function buildToolDescription(plugin: VcpBridgePlugin): string {
 	const summary = summarizeText(plugin.description, 180);
-	const commandNames = plugin.bridgeCommands.map(command => command.commandName);
+	const commandNames = plugin.bridgeCommands.map(
+		command => command.commandName,
+	);
 	if (commandNames.length === 1) {
 		return [
 			`[SnowBridge] ${plugin.displayName || plugin.name}`,
@@ -475,7 +490,10 @@ function buildToolDescription(plugin: VcpBridgePlugin): string {
 	const commandSummary = commandNames
 		.slice(0, MAX_COMMAND_SUMMARY_COUNT)
 		.join(', ');
-	const moreCount = Math.max(0, commandNames.length - MAX_COMMAND_SUMMARY_COUNT);
+	const moreCount = Math.max(
+		0,
+		commandNames.length - MAX_COMMAND_SUMMARY_COUNT,
+	);
 	const suffix = moreCount > 0 ? ` +${moreCount}` : '';
 
 	return [
@@ -590,7 +608,9 @@ function toBridgeExecutionError(
 	fallbackMessage: string,
 ): Error {
 	const codePrefix = error?.code ? `[${error.code}] ` : '';
-	const nextError = new Error(`${codePrefix}${error?.message || fallbackMessage}`);
+	const nextError = new Error(
+		`${codePrefix}${error?.message || fallbackMessage}`,
+	);
 	nextError.name = 'VcpBridgeError';
 	Object.assign(nextError, {bridgeError: error});
 	return nextError;
@@ -631,10 +651,7 @@ class VcpToolBridgeClient {
 		string,
 		PendingRequest<VcpManifestResponsePayload>
 	>();
-	private pendingExecutionRequests = new Map<
-		string,
-		PendingExecutionRequest
-	>();
+	private pendingExecutionRequests = new Map<string, PendingExecutionRequest>();
 	private pendingCancelRequests = new Map<
 		string,
 		PendingRequest<VcpToolCancelAckPayload>
@@ -667,7 +684,9 @@ class VcpToolBridgeClient {
 		this.pendingCancelRequests.clear();
 	}
 
-	private setDefinitions(definitions: Map<string, VcpBridgeToolDefinition>): void {
+	private setDefinitions(
+		definitions: Map<string, VcpBridgeToolDefinition>,
+	): void {
 		this.definitions.clear();
 
 		for (const definition of definitions.values()) {
@@ -866,7 +885,9 @@ class VcpToolBridgeClient {
 				const timer = setTimeout(() => {
 					this.pendingManifestRequests.delete(requestId);
 					reject(
-						new Error('Timed out while waiting for VCP bridge manifest response.'),
+						new Error(
+							'Timed out while waiting for VCP bridge manifest response.',
+						),
 					);
 				}, BRIDGE_DISCOVERY_TIMEOUT_MS);
 
@@ -916,7 +937,9 @@ class VcpToolBridgeClient {
 			await new Promise<VcpToolCancelAckPayload>((resolve, reject) => {
 				const timer = setTimeout(() => {
 					this.pendingCancelRequests.delete(invocationId);
-					reject(new Error('Timed out while waiting for VCP bridge cancel ack.'));
+					reject(
+						new Error('Timed out while waiting for VCP bridge cancel ack.'),
+					);
 				}, BRIDGE_CANCEL_TIMEOUT_MS);
 
 				this.pendingCancelRequests.set(invocationId, {
@@ -978,7 +1001,9 @@ class VcpToolBridgeClient {
 		abortSignal?: AbortSignal,
 	): Promise<unknown> {
 		if (!isBridgeEnabled(config)) {
-			throw new Error('VCP bridge tool execution is not enabled in current config.');
+			throw new Error(
+				'VCP bridge tool execution is not enabled in current config.',
+			);
 		}
 
 		if (abortSignal?.aborted) {

@@ -44,6 +44,16 @@ import {
 } from '../config/disabledMCPTools.js';
 import {logger} from '../core/logger.js';
 import {resourceMonitor} from '../core/resourceMonitor.js';
+import {
+	buildToolRegistrySnapshot,
+	createSnowToolId,
+} from '../../tooling/core/toolRegistry.js';
+import type {
+	SnowToolOwner,
+	SnowToolSpec,
+	SnowToolTransport,
+	ToolRegistrySnapshot,
+} from '../../tooling/core/types.js';
 
 import os from 'os';
 import path from 'path';
@@ -194,11 +204,13 @@ async function generateConfigHash(): Promise<string> {
 
 		// Include skills in hash (both project and global)
 		const projectRoot = process.cwd();
-		const [{getTeamMode}, skillTools, {loadCodebaseConfig}] = await Promise.all([
-			import('../config/projectSettings.js'),
-			getSkillTools(projectRoot),
-			import('../config/codebaseConfig.js'),
-		]);
+		const [{getTeamMode}, skillTools, {loadCodebaseConfig}] = await Promise.all(
+			[
+				import('../config/projectSettings.js'),
+				getSkillTools(projectRoot),
+				import('../config/codebaseConfig.js'),
+			],
+		);
 
 		// 🔥 CRITICAL: Include codebase enabled status in hash
 		const codebaseConfig = loadCodebaseConfig();
@@ -519,36 +531,37 @@ async function refreshToolsCache(): Promise<void> {
 	try {
 		const mcpConfig = getMCPConfig();
 		const externalServiceResults = await Promise.all(
-			Object.entries(mcpConfig.mcpServers).map(async ([serviceName, server]) => {
-				const source = getMCPServerSource(serviceName) || 'global';
-				if (server.enabled === false) {
-					return {
-						serviceName,
-						tools: [] as InternalMCPTool[],
-						connected: false,
-						error: 'Disabled by user',
-						source,
-					};
-				}
+			Object.entries(mcpConfig.mcpServers).map(
+				async ([serviceName, server]) => {
+					const source = getMCPServerSource(serviceName) || 'global';
+					if (server.enabled === false) {
+						return {
+							serviceName,
+							tools: [] as InternalMCPTool[],
+							connected: false,
+							error: 'Disabled by user',
+							source,
+						};
+					}
 
-				try {
-					return {
-						serviceName,
-						tools: await probeServiceTools(serviceName, server),
-						connected: true,
-						source,
-					};
-				} catch (error) {
-					return {
-						serviceName,
-						tools: [] as InternalMCPTool[],
-						connected: false,
-						error:
-							error instanceof Error ? error.message : 'Unknown error',
-						source,
-					};
-				}
-			}),
+					try {
+						return {
+							serviceName,
+							tools: await probeServiceTools(serviceName, server),
+							connected: true,
+							source,
+						};
+					} catch (error) {
+						return {
+							serviceName,
+							tools: [] as InternalMCPTool[],
+							connected: false,
+							error: error instanceof Error ? error.message : 'Unknown error',
+							source,
+						};
+					}
+				},
+			),
 		);
 
 		for (const serviceResult of externalServiceResults) {
@@ -718,6 +731,85 @@ export async function collectAllMCPTools(): Promise<MCPTool[]> {
  */
 export async function getMCPServicesInfo(): Promise<MCPServiceTools[]> {
 	return (await ensureToolsCacheReady()).servicesInfo;
+}
+
+function inferBuiltinOwner(serviceName: string): SnowToolOwner {
+	switch (serviceName) {
+		case 'subagent':
+			return 'snow_subagent';
+		case 'team':
+			return 'snow_team';
+		case 'skill':
+			return 'snow_skill';
+		default:
+			return 'snow_builtin';
+	}
+}
+
+function resolvePublicToolName(options: {
+	serviceName: string;
+	originName: string;
+	enabledToolNames: Set<string>;
+}): string | undefined {
+	const prefixedName = `${options.serviceName}-${options.originName}`;
+	if (options.enabledToolNames.has(prefixedName)) {
+		return prefixedName;
+	}
+
+	if (options.enabledToolNames.has(options.originName)) {
+		return options.originName;
+	}
+
+	return undefined;
+}
+
+export async function getToolRegistrySnapshot(): Promise<ToolRegistrySnapshot> {
+	const cache = await ensureToolsCacheReady();
+	const enabledToolNames = new Set(cache.tools.map(tool => tool.function.name));
+	const specs: SnowToolSpec[] = [];
+
+	for (const service of cache.servicesInfo) {
+		if (service.enabled === false || service.connected === false) {
+			continue;
+		}
+
+		const owner = service.isBuiltIn
+			? inferBuiltinOwner(service.serviceName)
+			: 'snow_mcp';
+		const transport: SnowToolTransport = service.isBuiltIn ? 'local' : 'mcp';
+
+		for (const tool of service.tools) {
+			const publicName = resolvePublicToolName({
+				serviceName: service.serviceName,
+				originName: tool.name,
+				enabledToolNames,
+			});
+
+			if (!publicName) {
+				continue;
+			}
+
+			specs.push({
+				toolId: createSnowToolId({
+					owner,
+					serviceName: service.serviceName,
+					originName: tool.name,
+				}),
+				publicName,
+				description: tool.description,
+				inputSchema: tool.inputSchema,
+				owner,
+				transport,
+				serviceName: service.serviceName,
+				originName: tool.name,
+				enabled: true,
+				connected: true,
+				aliases: publicName === tool.name ? undefined : [tool.name],
+			});
+		}
+	}
+
+	return buildToolRegistrySnapshot(specs);
 }
 
 /**
@@ -1011,7 +1103,10 @@ async function connectAndGetTools(
 				env: getServerProcessEnv(server),
 				stderr: 'ignore', // 屏蔽第三方MCP服务的stderr输出,避免干扰CLI界面
 			});
-			await runWithTimeout(client.connect(transport), 'stdio connection timeout');
+			await runWithTimeout(
+				client.connect(transport),
+				'stdio connection timeout',
+			);
 		} else {
 			throw new Error('No URL or command specified');
 		}

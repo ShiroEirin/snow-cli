@@ -472,6 +472,8 @@ export const zh: TranslationKeys = {
 		nordInfo: '北极、北方蓝调色板',
 		tiffany: '蒂芙尼蓝',
 		tiffanyInfo: '清新优雅的蒂芙尼蓝色调',
+		macaronPink: '马卡龙粉',
+		macaronPinkInfo: '甜美柔和的马卡龙粉色调',
 		custom: '自定义',
 		customInfo: '使用您自定义的颜色',
 		editCustom: '编辑自定义主题...',
@@ -615,6 +617,7 @@ export const zh: TranslationKeys = {
 			backend: '显示后台进程面板',
 			loop: '创建会话级循环任务。用法: /loop 5m <提示词>',
 			profiles: '打开配置文件切换面板',
+			models: '打开模型切换面板',
 			subAgentDepth: '设置子代理嵌套创建深度上限',
 			vulnerabilityHunting: '切换漏洞检查模式，进行安全性代码分析',
 			autoFormat:
@@ -632,6 +635,8 @@ export const zh: TranslationKeys = {
 			newPrompt: '根据需求使用 AI 生成精炼的提示词',
 			pixel: '打开终端像素编辑器',
 			btw: '在 AI 运行时快速提问（临时对话，不保存上下文）',
+			deepresearch:
+				'执行自主多步联网深度研究，并将带引用的 Markdown 报告保存到 .snow/deepresearch/',
 			quit: '退出应用程序',
 		},
 		copyLastFeedback: {
@@ -672,6 +677,29 @@ export const zh: TranslationKeys = {
 					'对话已分叉为分支 {name}。返回原会话请执行:\n/resume {originalId}',
 				failed: '会话分叉失败',
 			},
+			// Deep Research 命令消息
+			deepResearch: {
+				usage:
+					'用法: /deepresearch <提示词>\n示例: /deepresearch 对比 OpenAI Deep Research 与 Gemini Deep Research 的架构差异',
+			},
+			// Loop 命令消息
+			loop: {
+				usage:
+					'用法: /loop 5m <提示词> | /loop 8h30m <提示词> | /loop <提示词> every 2 hours | /loop list | /loop cancel <id> | /loop tasks',
+				openingTaskManager: '正在打开任务管理器...',
+				relatedLoopTasks: '相关循环任务:',
+				noActiveLoops:
+					'暂无活跃的循环任务。可使用 /loop 5m <提示词> 或 /loop <提示词> every 2 hours 创建。',
+				loopNotFound: '未找到循环任务: {id}',
+				cancelled: '已取消循环任务 {id}（每 {interval}）',
+				created: '循环任务已创建: {id}',
+				scheduleEvery: '调度: 每 {interval}',
+				promptLabel: '提示词: {prompt}',
+				nextRun: '下次运行: {time}',
+				sessionScopedNote: '仅限会话作用域: Snow CLI 退出后循环任务将停止。',
+				usageHint:
+					'使用 /loop list 查看任务，或使用 /loop cancel <id> 停止某个任务。',
+			},
 		},
 	},
 	fileList: {
@@ -696,7 +724,10 @@ export const zh: TranslationKeys = {
 		connectSuccess: '已连接到 {label}',
 		connectError: '连接失败：{error}',
 		unmatchedIDEs:
-			'发现 {count} 个其他运行中的 IDE，但其工作区/项目目录与当前工作目录不匹配。',
+			'上述 {count} 个 IDE 的工作区与当前目录不匹配，选择后将自动切换工作目录。',
+		unmatchedHeader: '— 切换工作目录 —',
+		switchWorkdirMark: ' (切换工作目录)',
+		switchWorkdirError: '切换工作目录失败：{error}',
 	},
 	permissionsPanel: {
 		title: '权限',
@@ -717,6 +748,43 @@ export const zh: TranslationKeys = {
 		saveSuccess: '保存成功',
 		hint: 'Enter 保存 • Esc 关闭 • 仅支持数字输入',
 		fileHint: '该设置会持久化到项目根目录的 .snow/settings.json',
+	},
+	modelsPanel: {
+		title: '模型切换',
+		subtitle: 'Tab 切换标签 | Enter 选择',
+		tabAdvanced: '高级模型',
+		tabBasic: '基础模型',
+		tabThinking: '思考',
+		currentModel: '当前模型:',
+		notSet: '未设置',
+		loadingModels: '正在加载模型...',
+		hint: 'Enter 选择模型 | m 手动输入 | Esc 关闭',
+		manualInputTitle: '手动输入',
+		manualInputHint: 'Enter 保存 | Esc 关闭',
+		filterLabel: '筛选:',
+		manualInputOption: '手动输入',
+		requestMethod: '请求方式:',
+		showThinkingProcess: '显示思考过程:',
+		enableThinking: '启用思考:',
+		thinkingMode: '思考模式:',
+		thinkingStrength: '思考强度:',
+		inputNumberHint: '输入数字，回车保存',
+		escCancel: 'Esc 取消',
+		navigationHint: '↑↓键选择 | Enter 切换 | Esc 关闭',
+		notSupported: '不支持',
+		advancedModelLabel: '高级模型',
+		basicModelLabel: '基础模型',
+		thinkingLabel: '思考',
+		requestMethodNotSupportedForThinking:
+			'当前请求方式({requestMethod})不支持思考',
+		requestMethodNotSupportedForThinkingStrength:
+			'当前请求方式({requestMethod})不支持思考强度设置',
+		anthropicSpeed: 'Speed:',
+		saveFailed: '保存失败',
+		modelSaveFailed: '模型保存失败',
+		tipLabel: '提示:',
+		modelCount: '共 {count} 个模型',
+		scrollHint: '↑↓ 滚动浏览更多模型',
 	},
 	profilePanel: {
 		title: '选择配置',
@@ -1100,7 +1168,7 @@ export const zh: TranslationKeys = {
 		toolSearchEnabled: '♾︎ 工具搜索已开启 - 按需搜索加载工具',
 		hybridCompressEnabled: '⇌ 混合压缩已开启 - AI 摘要 + 智能截断',
 		teamModeActive: '⚑ Agent Team 模式已激活 - 多代理独立 Worktree 协同工作',
-		tokens: ' 个token',
+		tokens: ' 个词元',
 		cached: '已缓存',
 		newCache: '新缓存',
 	},
@@ -1233,10 +1301,15 @@ export const zh: TranslationKeys = {
 		createSuccess: '角色创建成功',
 		deleteSuccess: '角色删除成功',
 		loading: '处理中...',
-		hints: 'Tab: 切换作用域 | Enter: 激活 | N: 新建 | D: 删除 | ESC: 关闭',
+		hints:
+			'Tab: 切换作用域 | Enter: 激活 | N: 新建 | D: 删除 | R: 覆盖系统提示词 | ESC: 关闭',
 		cannotDeleteActive: '无法删除激活的角色',
 		confirmDelete: '确认删除该角色？',
 		confirmDeleteHint: '按 Y 确认，按 N 取消',
+		overrideTag: '覆盖',
+		overrideEnabled: '已启用：使用该角色覆盖系统提示词',
+		overrideDisabled: '已关闭：恢复使用默认系统提示词',
+		cannotOverrideInactive: '只有激活的角色才能标记为覆盖',
 	},
 
 	roleSubagentCreation: {
@@ -1485,6 +1558,10 @@ export const zh: TranslationKeys = {
 		title: 'Diff 审查',
 		noSnapshots: '该会话没有找到文件变更记录',
 		navigationHint: '↑↓ 导航 • Tab 查看文件 • Enter 打开全部 • ESC 关闭',
+		filesSuffix: '{count} 个文件',
+		filesViewNavigationHint: '↑↓ 导航 • Tab 返回 • Enter 打开全部 • ESC 关闭',
+		moreAbove: '↑ 上方还有 {count} 个',
+		moreBelow: '↓ 下方还有 {count} 个',
 	},
 	sessionListPanel: {
 		title: '恢复会话',
@@ -1507,6 +1584,7 @@ export const zh: TranslationKeys = {
 		renamePrompt: '重命名会话',
 		renaming: '重命名中...',
 		renamePlaceholder: '输入新的标题',
+		confirmDelete: '1 秒内再按一次 D 确认删除（共 {count} 个）',
 	},
 	mcpInfoPanel: {
 		title: 'MCP 服务',
@@ -1537,6 +1615,18 @@ export const zh: TranslationKeys = {
 		toolScopeProject: '[项目]',
 		mcpSourceProject: ' [项目]',
 		mcpSourceGlobal: ' [全局]',
+	},
+	skillsListPanel: {
+		title: '技能列表',
+		loading: '加载技能中...',
+		error: '错误: {message}',
+		noSkills: '没有可用的技能',
+		locationProject: '(项目)',
+		locationGlobal: '(全局)',
+		statusDisabled: '(已禁用)',
+		navigationHint: '↑↓ 导航 • Tab/空格/Enter 启停 • ESC 关闭',
+		moreAbove: '↑ 上方还有 {count} 项',
+		moreBelow: '↓ 下方还有 {count} 项',
 	},
 	mcpConfigScreen: {
 		title: 'MCP 配置 - 选择编辑范围',

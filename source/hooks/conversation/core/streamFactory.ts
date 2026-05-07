@@ -20,6 +20,7 @@ export type StreamFactoryOptions = {
 	vulnerabilityHuntingMode?: boolean;
 	teamMode?: boolean;
 	toolSearchDisabled?: boolean;
+	allowVcpTimeBridge?: boolean;
 	signal: AbortSignal;
 	onRetry: (error: Error, attempt: number, nextDelay: number) => void;
 };
@@ -27,7 +28,11 @@ export type StreamFactoryOptions = {
 export function buildStreamRequestContext(
 	options: Pick<
 		StreamFactoryOptions,
-		'config' | 'model' | 'conversationMessages' | 'activeTools'
+		| 'config'
+		| 'model'
+		| 'conversationMessages'
+		| 'activeTools'
+		| 'allowVcpTimeBridge'
 	>,
 ) {
 	const {config, model, conversationMessages, activeTools} = options;
@@ -43,6 +48,7 @@ export function buildStreamRequestContext(
 			requestMethod: resolvedRequest.requestMethod,
 		},
 		messages: conversationMessages,
+		allowTimeBridge: options.allowVcpTimeBridge,
 	});
 
 	return {
@@ -52,14 +58,9 @@ export function buildStreamRequestContext(
 }
 
 export function createStreamGenerator(options: StreamFactoryOptions) {
-	const {
-		config,
-		model,
-		sessionId,
-		signal,
-		onRetry,
-	} = options;
-	const {resolvedRequest, transformedMessages} = buildStreamRequestContext(options);
+	const {config, model, sessionId, signal, onRetry} = options;
+	const {resolvedRequest, transformedMessages} =
+		buildStreamRequestContext(options);
 
 	if (resolvedRequest.requestMethod === 'anthropic') {
 		return createStreamingAnthropicCompletion(

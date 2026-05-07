@@ -363,8 +363,7 @@ export default function DiffViewer({
 		const hl = (content: string) =>
 			highlightCodeContent(expandTabsForDisplay(content), codeLanguage);
 
-		const addedStyle = (text: string) =>
-			chalk.bgHex(diffAddedBg).white(text);
+		const addedStyle = (text: string) => chalk.bgHex(diffAddedBg).white(text);
 		const removedStyle = (text: string) =>
 			chalk.bgHex(diffRemovedBg).white(text);
 		const dimStyle = (text: string) => chalk.dim(text);
@@ -378,9 +377,7 @@ export default function DiffViewer({
 				? chalk.cyan.bold(filename) + chalk.green(' (new)')
 				: chalk.green.bold('New File');
 			const allLines = diffNewContent.split('\n');
-			const body = allLines
-				.map(line => addedStyle('+ ' + hl(line)))
-				.join('\n');
+			const body = allLines.map(line => addedStyle('+ ' + hl(line))).join('\n');
 			return header + '\n' + body;
 		}
 
@@ -425,7 +422,8 @@ export default function DiffViewer({
 		let output = header + '\n' + hunkStrings.join('\n');
 
 		if (hunks.length > 1) {
-			output += '\n' + chalk.gray.dim(`Total: ${hunks.length} change region(s)`);
+			output +=
+				'\n' + chalk.gray.dim(`Total: ${hunks.length} change region(s)`);
 		}
 
 		return output;
@@ -462,9 +460,7 @@ function formatUnified(
 	for (const change of hunk.changes) {
 		const lineNum =
 			change.type === 'added' ? change.newLineNum : change.oldLineNum;
-		const lineNumStr = lineNum
-			? String(lineNum).padStart(4, ' ')
-			: '    ';
+		const lineNumStr = lineNum ? String(lineNum).padStart(4, ' ') : '    ';
 		const content = hl(cleanContent(change.content));
 
 		if (change.type === 'added') {
@@ -522,10 +518,7 @@ function formatSideBySide(
 		const leftChange = leftChanges[leftIdx];
 		const rightChange = rightChanges[rightIdx];
 
-		if (
-			leftChange?.type === 'unchanged' &&
-			rightChange?.type === 'unchanged'
-		) {
+		if (leftChange?.type === 'unchanged' && rightChange?.type === 'unchanged') {
 			pairedLines.push({
 				left: {
 					lineNum: leftChange.oldLineNum,
@@ -596,6 +589,28 @@ function formatSideBySide(
 		return str + ' '.repeat(width - w);
 	};
 
+	/**
+	 * Wrap an ANSI string into multiple rows, each padded to exactly `width`
+	 * visible columns. Preserves ANSI escape sequences across slices.
+	 */
+	const wrapToWidth = (str: string, width: number): string[] => {
+		if (width <= 0) return [''];
+		const total = stringWidth(str);
+		if (total === 0) return [' '.repeat(width)];
+		const rows: string[] = [];
+		let offset = 0;
+		while (offset < total) {
+			const piece = sliceAnsi(str, offset, offset + width);
+			const pieceWidth = stringWidth(piece);
+			rows.push(
+				pieceWidth >= width ? piece : piece + ' '.repeat(width - pieceWidth),
+			);
+			if (pieceWidth <= 0) break;
+			offset += pieceWidth;
+		}
+		return rows.length > 0 ? rows : [' '.repeat(width)];
+	};
+
 	const headerDash = '-'.repeat(Math.max(Math.floor((panelWidth - 5) / 2), 1));
 	const leftHeader = fitToWidth(
 		chalk.dim(headerDash) + chalk.red.bold(' OLD ') + chalk.dim(headerDash),
@@ -606,12 +621,13 @@ function formatSideBySide(
 		panelWidth,
 	);
 
-	const lines: string[] = [
-		hunkHeader,
-		leftHeader + separator + rightHeader,
-	];
+	const lines: string[] = [hunkHeader, leftHeader + separator + rightHeader];
 
 	const emptyPanel = ' '.repeat(panelWidth);
+
+	const prefixWidth = lineNumWidth + 3; // "NNNN S " → lineNum + space + sign + space
+	const contentWidth = Math.max(panelWidth - prefixWidth, 1);
+	const blankPrefix = ' '.repeat(prefixWidth);
 
 	for (const pair of pairedLines) {
 		const leftLineNum = pair.left.lineNum
@@ -637,26 +653,46 @@ function formatSideBySide(
 		const leftContent = hl(cleanContent(pair.left.content));
 		const rightContent = hl(cleanContent(pair.right.content));
 
-		let leftStr = `${leftLineNum} ${leftSign} ${leftContent}`;
-		let rightStr = `${rightLineNum} ${rightSign} ${rightContent}`;
+		const leftRows =
+			pair.left.type === 'empty'
+				? ['']
+				: wrapToWidth(leftContent, contentWidth);
+		const rightRows =
+			pair.right.type === 'empty'
+				? ['']
+				: wrapToWidth(rightContent, contentWidth);
 
-		if (pair.left.type === 'removed') {
-			leftStr = fitToWidth(removedStyle(leftStr), panelWidth);
-		} else if (pair.left.type === 'empty') {
-			leftStr = emptyPanel;
-		} else {
-			leftStr = fitToWidth(dimStyle(leftStr), panelWidth);
+		const rowCount = Math.max(leftRows.length, rightRows.length);
+
+		for (let rowIdx = 0; rowIdx < rowCount; rowIdx++) {
+			const leftPrefix =
+				rowIdx === 0 ? `${leftLineNum} ${leftSign} ` : blankPrefix;
+			const rightPrefix =
+				rowIdx === 0 ? `${rightLineNum} ${rightSign} ` : blankPrefix;
+
+			const leftRow = leftRows[rowIdx] ?? ' '.repeat(contentWidth);
+			const rightRow = rightRows[rowIdx] ?? ' '.repeat(contentWidth);
+
+			let leftStr: string;
+			if (pair.left.type === 'empty') {
+				leftStr = emptyPanel;
+			} else if (pair.left.type === 'removed') {
+				leftStr = fitToWidth(removedStyle(leftPrefix + leftRow), panelWidth);
+			} else {
+				leftStr = fitToWidth(dimStyle(leftPrefix + leftRow), panelWidth);
+			}
+
+			let rightStr: string;
+			if (pair.right.type === 'empty') {
+				rightStr = emptyPanel;
+			} else if (pair.right.type === 'added') {
+				rightStr = fitToWidth(addedStyle(rightPrefix + rightRow), panelWidth);
+			} else {
+				rightStr = fitToWidth(dimStyle(rightPrefix + rightRow), panelWidth);
+			}
+
+			lines.push(leftStr + separator + rightStr);
 		}
-
-		if (pair.right.type === 'added') {
-			rightStr = fitToWidth(addedStyle(rightStr), panelWidth);
-		} else if (pair.right.type === 'empty') {
-			rightStr = emptyPanel;
-		} else {
-			rightStr = fitToWidth(dimStyle(rightStr), panelWidth);
-		}
-
-		lines.push(leftStr + separator + rightStr);
 	}
 
 	return lines.join('\n');

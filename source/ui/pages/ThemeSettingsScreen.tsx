@@ -14,6 +14,7 @@ import {useTheme} from '../contexts/ThemeContext.js';
 import {ThemeType} from '../themes/index.js';
 import {useI18n} from '../../i18n/index.js';
 import {getSimpleMode, setSimpleMode} from '../../utils/config/themeConfig.js';
+import {useTerminalTitle} from '../../hooks/ui/useTerminalTitle.js';
 
 const CustomThemeScreen = React.lazy(() => import('./CustomThemeScreen.js'));
 
@@ -40,6 +41,7 @@ export default function ThemeSettingsScreen({
 }: Props) {
 	const {themeType, setThemeType, diffOpacity, setDiffOpacity} = useTheme();
 	const {t} = useI18n();
+	useTerminalTitle(`Snow CLI - ${t.themeSettings.title}`);
 	const {stdout} = useStdout();
 
 	// Use themeType from context which is already loaded from config
@@ -139,6 +141,14 @@ export default function ThemeSettingsScreen({
 						: t.themeSettings.tiffany,
 				value: 'tiffany',
 				infoText: t.themeSettings.tiffanyInfo,
+			},
+			{
+				label:
+					selectedTheme === 'macaron-pink'
+						? `✓ ${t.themeSettings.macaronPink}`
+						: t.themeSettings.macaronPink,
+				value: 'macaron-pink',
+				infoText: t.themeSettings.macaronPinkInfo,
 			},
 			{
 				label:

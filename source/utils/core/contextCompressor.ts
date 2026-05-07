@@ -170,7 +170,7 @@ function findPreserveStartIndex(messages: ChatMessage[]): number {
  *
  * @param messages - Array of conversation messages (will be modified in-place)
  */
-function cleanOrphanedToolCalls(messages: ChatMessage[]): void {
+export function cleanOrphanedToolCalls(messages: ChatMessage[]): void {
 	// Find indices to remove (iterate backwards for safe removal)
 	const indicesToRemove: number[] = [];
 

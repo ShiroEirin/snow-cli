@@ -37,9 +37,11 @@ export const COMMAND_ARGS_HINTS: Record<string, string> = {
 	'add-dir': '[path]',
 	loop: '<interval> <prompt> | list | tasks | cancel <id>',
 	role: '[-l|--list | -d|--delete]',
+	skills: '[-l|--list]',
 	'role-subagent': '[-l|--list | -d|--delete]',
 	'subagent-depth': '[<number>|status]',
 	btw: '<question>',
+	deepresearch: '<prompt>',
 	connect: '[apiUrl]',
 };
 
@@ -50,9 +52,10 @@ export const COMMAND_ARGS_OPTIONS: Record<string, string[]> = {
 	'auto-format': ['on', 'off', 'status'],
 	reindex: ['-force'],
 	role: ['-l', '-d'],
+	skills: ['-l'],
 	'role-subagent': ['-l', '-d'],
 	'subagent-depth': ['status'],
-	loop: ['list', 'tasks'],
+	loop: ['list', 'tasks', 'cancel'],
 };
 
 export function useCommandPanel(buffer: TextBuffer, isProcessing = false) {
@@ -134,6 +137,11 @@ export function useCommandPanel(buffer: TextBuffer, isProcessing = false) {
 			{
 				name: 'profiles',
 				description: t.commandPanel.commands.profiles,
+			},
+			{
+				name: 'models',
+				description:
+					t.commandPanel.commands.models || 'Open the model switching panel',
 			},
 			{
 				name: 'loop',
@@ -281,6 +289,12 @@ export function useCommandPanel(buffer: TextBuffer, isProcessing = false) {
 					'Ask a side-question while AI is working (temporary, no context saved)',
 				allowDuringProcessing: true,
 				mainFlowOnly: true,
+			},
+			{
+				name: 'deepresearch',
+				description:
+					t.commandPanel.commands.deepresearch ||
+					'Run an autonomous web research workflow and save a cited markdown report to .snow/deepresearch/',
 			},
 		],
 		[t],

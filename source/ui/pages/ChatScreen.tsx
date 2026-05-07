@@ -32,6 +32,8 @@ import {useChatScreenLocalState} from './chatScreen/useChatScreenLocalState.js';
 import {useChatScreenModes} from './chatScreen/useChatScreenModes.js';
 import {useChatScreenSessionLifecycle} from './chatScreen/useChatScreenSessionLifecycle.js';
 import {useCodebaseIndexing} from './chatScreen/useCodebaseIndexing.js';
+import {useTerminalTitle} from '../../hooks/ui/useTerminalTitle.js';
+import {resetTerminal} from '../../utils/execution/terminal.js';
 
 const MIN_TERMINAL_HEIGHT = 10;
 
@@ -49,6 +51,7 @@ export default function ChatScreen({
 	enablePlan,
 }: Props) {
 	const {t} = useI18n();
+	useTerminalTitle(`Snow CLI - ${t.chatScreen.headerTitle}`);
 	const {theme} = useTheme();
 	const {columns: terminalWidth, rows: terminalHeight} = useTerminalSize();
 	const workingDirectory = process.cwd();
@@ -271,10 +274,13 @@ export default function ChatScreen({
 		setShowSessionPanel: panelState.setShowSessionPanel,
 		onResumeSessionById: handleSessionPanelSelect,
 		setShowMcpPanel: panelState.setShowMcpPanel,
+		setShowHelpPanel: panelState.setShowHelpPanel,
 		setShowUsagePanel: panelState.setShowUsagePanel,
+		setShowModelsPanel: panelState.setShowModelsPanel,
 		setShowSubAgentDepthPanel,
 		setShowCustomCommandConfig: panelState.setShowCustomCommandConfig,
 		setShowSkillsCreation: panelState.setShowSkillsCreation,
+		setShowSkillsListPanel: panelState.setShowSkillsListPanel,
 		setShowRoleCreation: panelState.setShowRoleCreation,
 		setShowRoleDeletion: panelState.setShowRoleDeletion,
 		setShowRoleList: panelState.setShowRoleList,
@@ -381,7 +387,9 @@ export default function ChatScreen({
 		panelState.showSessionPanel ||
 		panelState.showMcpPanel ||
 		panelState.showUsagePanel ||
+		panelState.showHelpPanel ||
 		panelState.showProfileEditPanel ||
+		panelState.showModelsPanel ||
 		panelState.showCustomCommandConfig ||
 		panelState.showSkillsCreation ||
 		panelState.showRoleCreation ||
@@ -392,7 +400,6 @@ export default function ChatScreen({
 		panelState.showRoleSubagentList ||
 		panelState.showWorkingDirPanel ||
 		panelState.showBranchPanel ||
-		panelState.showDiffReviewPanel ||
 		panelState.showConnectionPanel ||
 		panelState.showNewPromptPanel ||
 		panelState.showTodoListPanel ||
@@ -512,13 +519,14 @@ export default function ChatScreen({
 				terminalWidth={terminalWidth}
 				workingDirectory={workingDirectory}
 				panelState={panelState}
-				messages={messages}
 				snapshotState={snapshotState}
 				handleSessionPanelSelect={handleSessionPanelSelect}
 				showPermissionsPanel={showPermissionsPanel}
 				setShowPermissionsPanel={setShowPermissionsPanel}
 				showSubAgentDepthPanel={showSubAgentDepthPanel}
 				setShowSubAgentDepthPanel={setShowSubAgentDepthPanel}
+				modelsPanelAdvancedModel={getSnowConfig().advancedModel || ''}
+				modelsPanelBasicModel={getSnowConfig().basicModel || ''}
 				alwaysApprovedTools={alwaysApprovedTools}
 				removeFromAlwaysApproved={removeFromAlwaysApproved}
 				clearAllAlwaysApproved={clearAllAlwaysApproved}
@@ -542,8 +550,14 @@ export default function ChatScreen({
 					showReviewCommitPanel={panelState.showReviewCommitPanel}
 					setShowReviewCommitPanel={panelState.setShowReviewCommitPanel}
 					onReviewCommitConfirm={handleReviewCommitConfirm}
+					showDiffReviewPanel={panelState.showDiffReviewPanel}
+					setShowDiffReviewPanel={panelState.setShowDiffReviewPanel}
+					diffReviewMessages={messages}
+					diffReviewSnapshotFileCount={snapshotState.snapshotFileCount}
 					showIdeSelectPanel={panelState.showIdeSelectPanel}
 					setShowIdeSelectPanel={panelState.setShowIdeSelectPanel}
+					showSkillsListPanel={panelState.showSkillsListPanel}
+					setShowSkillsListPanel={panelState.setShowSkillsListPanel}
 					onIdeConnectionChange={(status, message) => {
 						vscodeState.setVscodeConnectionStatus(status);
 						if (message) {
@@ -554,6 +568,15 @@ export default function ChatScreen({
 							};
 							setMessages(prev => [...prev, commandMessage]);
 						}
+					}}
+					onIdeWorkingDirectoryChanged={() => {
+						// Working directory changed via process.chdir().
+						// ChatHeader lives inside <Static>, so we must:
+						// 1. Reset the terminal to clear stale Static output (incl. old cwd line).
+						// 2. Bump remountKey to force <Static> to remount; the next render
+						//    will pick up the new process.cwd() in ChatHeader.
+						resetTerminal();
+						setRemountKey(prev => prev + 1);
 					}}
 					btwPrompt={btwPrompt}
 					onBtwClose={() => setBtwPrompt(null)}
@@ -587,6 +610,7 @@ export default function ChatScreen({
 					draftContent={inputDraftContent}
 					onDraftChange={setInputDraftContent}
 					onContextPercentageChange={setCurrentContextPercentage}
+					onInitialContentConsumed={() => setRestoreInputContent(null)}
 					showProfilePicker={panelState.showProfilePanel}
 					setShowProfilePicker={panelState.setShowProfilePanel}
 					profileSelectedIndex={panelState.profileSelectedIndex}

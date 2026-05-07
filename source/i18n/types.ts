@@ -466,6 +466,8 @@ export type TranslationKeys = {
 		nordInfo: string;
 		tiffany: string;
 		tiffanyInfo: string;
+		macaronPink: string;
+		macaronPinkInfo: string;
 		custom: string;
 		customInfo: string;
 		editCustom: string;
@@ -597,6 +599,7 @@ export type TranslationKeys = {
 			backend: string;
 			loop: string;
 			profiles: string;
+			models: string;
 			subAgentDepth: string;
 			export: string;
 			custom: string;
@@ -623,6 +626,7 @@ export type TranslationKeys = {
 			newPrompt: string;
 			pixel: string;
 			btw: string;
+			deepresearch: string;
 			quit: string;
 		};
 		copyLastFeedback: {
@@ -660,6 +664,25 @@ export type TranslationKeys = {
 				success: string;
 				failed: string;
 			};
+			// Deep Research command messages
+			deepResearch: {
+				usage: string;
+			};
+			// Loop command messages
+			loop: {
+				usage: string;
+				openingTaskManager: string;
+				relatedLoopTasks: string;
+				noActiveLoops: string;
+				loopNotFound: string;
+				cancelled: string;
+				created: string;
+				scheduleEvery: string;
+				promptLabel: string;
+				nextRun: string;
+				sessionScopedNote: string;
+				usageHint: string;
+			};
 		};
 	};
 	// File search list (`@` panel)
@@ -691,6 +714,9 @@ export type TranslationKeys = {
 		connectSuccess: string;
 		connectError: string;
 		unmatchedIDEs: string;
+		unmatchedHeader: string;
+		switchWorkdirMark: string;
+		switchWorkdirError: string;
 	};
 	// Profile Panel
 	profilePanel: {
@@ -785,6 +811,42 @@ export type TranslationKeys = {
 		hint: string;
 		fileHint: string;
 	};
+	modelsPanel: {
+		title: string;
+		subtitle: string;
+		tabAdvanced: string;
+		tabBasic: string;
+		tabThinking: string;
+		currentModel: string;
+		notSet: string;
+		loadingModels: string;
+		hint: string;
+		manualInputTitle: string;
+		manualInputHint: string;
+		filterLabel: string;
+		manualInputOption: string;
+		requestMethod: string;
+		showThinkingProcess: string;
+		enableThinking: string;
+		thinkingMode: string;
+		thinkingStrength: string;
+		inputNumberHint: string;
+		escCancel: string;
+		navigationHint: string;
+		notSupported: string;
+		advancedModelLabel: string;
+		basicModelLabel: string;
+		thinkingLabel: string;
+		requestMethodNotSupportedForThinking: string;
+		requestMethodNotSupportedForThinkingStrength: string;
+		anthropicSpeed: string;
+		saveFailed: string;
+		modelSaveFailed: string;
+		tipLabel: string;
+		modelCount: string;
+		scrollHint: string;
+	};
+
 	// Hooks
 	hooks: {
 		pressCtrlCAgain: string;
@@ -1227,6 +1289,10 @@ export type TranslationKeys = {
 		cannotDeleteActive: string;
 		confirmDelete: string;
 		confirmDeleteHint: string;
+		overrideTag: string;
+		overrideEnabled: string;
+		overrideDisabled: string;
+		cannotOverrideInactive: string;
 	};
 	roleSubagentCreation: {
 		title: string;
@@ -1470,6 +1536,10 @@ export type TranslationKeys = {
 		title: string;
 		noSnapshots: string;
 		navigationHint: string;
+		filesSuffix: string;
+		filesViewNavigationHint: string;
+		moreAbove: string;
+		moreBelow: string;
 	};
 	sessionListPanel: {
 		title: string;
@@ -1491,6 +1561,7 @@ export type TranslationKeys = {
 		renamePrompt: string;
 		renaming: string;
 		renamePlaceholder: string;
+		confirmDelete: string;
 	};
 	mcpInfoPanel: {
 		title: string;
@@ -1521,6 +1592,18 @@ export type TranslationKeys = {
 		toolScopeProject: string;
 		mcpSourceProject: string;
 		mcpSourceGlobal: string;
+	};
+	skillsListPanel: {
+		title: string;
+		loading: string;
+		error: string;
+		noSkills: string;
+		locationProject: string;
+		locationGlobal: string;
+		statusDisabled: string;
+		navigationHint: string;
+		moreAbove: string;
+		moreBelow: string;
 	};
 	mcpConfigScreen: {
 		title: string;

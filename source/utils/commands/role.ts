@@ -13,6 +13,7 @@ export type RoleLocation = 'global' | 'project';
 
 type RoleConfig = {
 	activeRoleId?: string;
+	overrideRoleIds?: string[];
 };
 
 const DEFAULT_ACTIVE_ROLE_ID = 'active';
@@ -172,6 +173,7 @@ export interface RoleItem {
 	name: string; // display name (extracted from file or filename)
 	filename: string; // actual filename
 	isActive: boolean; // whether this is the active ROLE.md
+	isOverride: boolean; // whether this role is marked to OVERRIDE the system prompt
 	location: RoleLocation;
 	path: string; // full file path
 }
@@ -239,6 +241,8 @@ export function listRoles(
 		}
 
 		const activeRoleId = resolveActiveRoleId(location, projectRoot, scanned);
+		const config = readRoleConfig(location, projectRoot);
+		const overrideSet = new Set(config.overrideRoleIds || []);
 
 		for (const item of scanned) {
 			const isActive = item.id === activeRoleId;
@@ -247,6 +251,7 @@ export function listRoles(
 				name: isActive ? 'Active Role' : `Role (${item.id})`,
 				filename: item.filename,
 				isActive,
+				isOverride: overrideSet.has(item.id),
 				location,
 				path: path.join(dir, item.filename),
 			});
@@ -354,6 +359,55 @@ export async function deleteRole(
 		}
 
 		return {success: true};
+	} catch (error) {
+		return {
+			success: false,
+			error: error instanceof Error ? error.message : 'Unknown error',
+		};
+	}
+}
+
+/**
+ * Toggle override flag for a role: when enabled, this role's content
+ * COMPLETELY REPLACES the default system prompt (only system env/time appended).
+ * Only the active role can be toggled - inactive roles cannot be made the override.
+ */
+export async function toggleRoleOverride(
+	roleId: string,
+	location: RoleLocation,
+	projectRoot?: string,
+): Promise<{success: boolean; isOverride?: boolean; error?: string}> {
+	try {
+		const roles = listRoles(location, projectRoot);
+		const targetRole = roles.find(r => r.id === roleId);
+
+		if (!targetRole) {
+			return {success: false, error: 'Role not found'};
+		}
+
+		if (!targetRole.isActive) {
+			return {
+				success: false,
+				error: 'Only the active role can be marked as override',
+			};
+		}
+
+		const config = readRoleConfig(location, projectRoot);
+		const current = new Set(config.overrideRoleIds || []);
+		let nextIsOverride: boolean;
+		if (current.has(roleId)) {
+			current.delete(roleId);
+			nextIsOverride = false;
+		} else {
+			current.add(roleId);
+			nextIsOverride = true;
+		}
+		const nextConfig: RoleConfig = {
+			...config,
+			overrideRoleIds: Array.from(current),
+		};
+		await writeRoleConfig(location, nextConfig, projectRoot);
+		return {success: true, isOverride: nextIsOverride};
 	} catch (error) {
 		return {
 			success: false,

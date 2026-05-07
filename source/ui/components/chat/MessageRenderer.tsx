@@ -486,7 +486,13 @@ export default function MessageRenderer({
 			width={terminalWidth}
 		>
 			{message.plainOutput ? (
-				<Text color={message.role === 'user' ? 'white' : toolStatusColor}>
+				<Text
+					color={
+						message.role === 'user'
+							? theme.colors.userMessageText
+							: toolStatusColor
+					}
+				>
 					{getDisplayContent(message.content)}
 				</Text>
 			) : (
@@ -573,7 +579,9 @@ export default function MessageRenderer({
 									{message.plainOutput ? (
 										<Text
 											color={
-												message.role === 'user' ? 'white' : toolStatusColor
+												message.role === 'user'
+													? theme.colors.userMessageText
+													: toolStatusColor
 											}
 											backgroundColor={
 												message.role === 'user'
@@ -697,7 +705,7 @@ export default function MessageRenderer({
 															).map((line, lineIndex) => (
 																<Text
 																	key={lineIndex}
-																	color="white"
+																	color={theme.colors.userMessageText}
 																	backgroundColor={
 																		theme.colors.userMessageBackground
 																	}
@@ -768,32 +776,32 @@ export default function MessageRenderer({
 												/>
 											</Box>
 										)}
-								{message.toolCall &&
-									(message.toolCall.name === 'filesystem-edit' ||
-										message.toolCall.name === 'filesystem-replaceedit') &&
-									message.toolCall.arguments.oldContent &&
-									message.toolCall.arguments.newContent && (
-										<Box marginTop={1}>
-											<DiffViewer
-												oldContent={message.toolCall.arguments.oldContent}
-												newContent={message.toolCall.arguments.newContent}
-												filename={message.toolCall.arguments.filename}
-												completeOldContent={
-													message.toolCall.arguments.completeOldContent
-												}
-												completeNewContent={
-													message.toolCall.arguments.completeNewContent
-												}
-												startLineNumber={
-													message.toolCall.arguments.contextStartLine
-												}
-											/>
-										</Box>
-									)}
-								{/* Show batch edit results */}
-								{message.toolCall &&
-									(message.toolCall.name === 'filesystem-edit' ||
-										message.toolCall.name === 'filesystem-replaceedit') &&
+									{message.toolCall &&
+										(message.toolCall.name === 'filesystem-edit' ||
+											message.toolCall.name === 'filesystem-replaceedit') &&
+										message.toolCall.arguments.oldContent &&
+										message.toolCall.arguments.newContent && (
+											<Box marginTop={1}>
+												<DiffViewer
+													oldContent={message.toolCall.arguments.oldContent}
+													newContent={message.toolCall.arguments.newContent}
+													filename={message.toolCall.arguments.filename}
+													completeOldContent={
+														message.toolCall.arguments.completeOldContent
+													}
+													completeNewContent={
+														message.toolCall.arguments.completeNewContent
+													}
+													startLineNumber={
+														message.toolCall.arguments.contextStartLine
+													}
+												/>
+											</Box>
+										)}
+									{/* Show batch edit results */}
+									{message.toolCall &&
+										(message.toolCall.name === 'filesystem-edit' ||
+											message.toolCall.name === 'filesystem-replaceedit') &&
 										message.toolCall.arguments.isBatch &&
 										message.toolCall.arguments.batchResults &&
 										Array.isArray(message.toolCall.arguments.batchResults) && (

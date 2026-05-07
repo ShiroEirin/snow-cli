@@ -66,9 +66,7 @@ class VSCodeConnectionManager {
 
 		if (portsToTry.length === 0) {
 			return Promise.reject(
-				new Error(
-					'No IDE with matching workspace found for current directory',
-				),
+				new Error('No IDE with matching workspace found for current directory'),
 			);
 		}
 
@@ -92,9 +90,7 @@ class VSCodeConnectionManager {
 						isSettled = true;
 						this.cleanupConnection();
 						reject(
-							new Error(
-								'Failed to connect to any IDE with matching workspace',
-							),
+							new Error('Failed to connect to any IDE with matching workspace'),
 						);
 					}
 					return;
@@ -236,10 +232,7 @@ class VSCodeConnectionManager {
 		}
 
 		// cwd is inside the IDE workspace
-		if (
-			workspaceFolder.length > 1 &&
-			cwd.startsWith(workspaceFolder + '/')
-		) {
+		if (workspaceFolder.length > 1 && cwd.startsWith(workspaceFolder + '/')) {
 			return true;
 		}
 
@@ -272,10 +265,10 @@ class VSCodeConnectionManager {
 					typeof value === 'number'
 						? value
 						: typeof value === 'object' &&
-							  value !== null &&
-							  typeof (value as any).port === 'number'
-							? (value as any).port
-							: null;
+						  value !== null &&
+						  typeof (value as any).port === 'number'
+						? (value as any).port
+						: null;
 				if (entryPort !== this.port) {
 					continue;
 				}
@@ -287,10 +280,7 @@ class VSCodeConnectionManager {
 
 			const cwd = this.normalizePath(this.currentWorkingDirectory);
 			for (const ws of this.connectedWorkspaceFolders) {
-				if (
-					ws.length > 1 &&
-					(cwd === ws || cwd.startsWith(ws + '/'))
-				) {
+				if (ws.length > 1 && (cwd === ws || cwd.startsWith(ws + '/'))) {
 					this.connectedPortHasCwdMatch = true;
 					break;
 				}
@@ -400,6 +390,19 @@ class VSCodeConnectionManager {
 
 	getPort(): number {
 		return this.port;
+	}
+
+	/**
+	 * Update the current working directory used for IDE workspace matching.
+	 * Call this after process.chdir() to keep workspace matching consistent.
+	 */
+	setCurrentWorkingDirectory(dir: string): void {
+		this.currentWorkingDirectory = dir;
+		this.refreshConnectedWorkspaceFolders();
+	}
+
+	getCurrentWorkingDirectory(): string {
+		return this.currentWorkingDirectory;
 	}
 
 	/**
