@@ -10,6 +10,10 @@ export interface ImageContent {
 
 export interface ToolCall {
 	id: string;
+	toolId?: string;
+	publicName?: string;
+	rawName?: string;
+	thoughtSignature?: string;
 	type: 'function';
 	function: {
 		name: string;
@@ -25,7 +29,11 @@ export interface ChatMessage {
 	toolStatusDetail?: string; // Display-only lifecycle/status sideband preserved for replay
 	toolLifecycleState?: string; // Display-only lifecycle state for async tool rendering
 	messageStatus?: 'pending' | 'success' | 'error';
+	name?: string; // Tool message name for VCP mode endpoints that require explicit function_response.name
 	tool_call_id?: string;
+	toolId?: string; // Canonical Snow tool id persisted for assistant/tool session messages
+	publicName?: string; // Canonical public tool name persisted for assistant/tool session messages
+	rawName?: string; // Provider/raw function name before publicName normalization
 	tool_calls?: ToolCall[];
 	images?: ImageContent[]; // 图片内容
 	subAgentInternal?: boolean; // Mark internal sub-agent messages (filtered from API requests)

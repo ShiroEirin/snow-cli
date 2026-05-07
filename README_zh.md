@@ -9,15 +9,9 @@
 [![license](https://img.shields.io/npm/l/snow-ai.svg)](https://github.com/MayDay-wpf/snow-cli/blob/main/LICENSE)
 [![node](https://img.shields.io/node/v/snow-ai.svg)](https://nodejs.org/)
 
-<a href="https://www.producthunt.com/products/snow-cli/launches/snow-cli?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-snow-cli" target="_blank" rel="noopener noreferrer"><img alt="Snow CLI - Agentic coding in your terminal | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1084735&amp;theme=light&amp;t=1776848197707"></a>
-
 [English](README.md) | **中文**
 
 **QQ 群**: 910298558
-
-**Telegram**: [https://t.me/snow_cli](https://t.me/snow_cli)
-
-**AI 社区**: [https://linux.do](https://linux.do)
 
 _在终端中进行 Agentic 编程_
 
@@ -31,24 +25,14 @@ _在终端中进行 Agentic 编程_
 
 ![alt text](docs/images/image_zh.png)
 
-<h3>推荐使用字体：<a href="https://github.com/SpaceTimee/Fusion-JetBrainsMapleMono">JetBrains Maple Mono NF</a> </3>
+<h3>推荐使用字体: <a href="https://github.com/SpaceTimee/Fusion-JetBrainsMapleMono">JetBrains Maple Mono NF</a> </3>
 
-<h3>Windows 用户推荐终端组合</h3>
+## 感谢社区
 
-- **PowerShell 7+**: 现代化的跨平台 PowerShell，提供更强的功能和更好的兼容性
-  - GitHub: https://github.com/PowerShell/PowerShell
-- **Windows Terminal**: 现代化的终端应用程序，支持多标签、分屏、GPU 加速渲染
-  - GitHub: https://github.com/microsoft/terminal
+<a href="https://linux.do">
+  <img width="360" height="120" alt="LINUXDO" src="https://github.com/user-attachments/assets/e09aab70-2daf-45d0-b49d-770086ad6c08" />
+</a>
 
-**安装方式**:
-
-```bash
-# 使用 winget 安装 (Windows 10/11 自带)
-winget install Microsoft.PowerShell
-winget install Microsoft.WindowsTerminal
-
-# 或使用 Microsoft Store 安装
-```
 ## 文档目录
 
 - [安装指南](docs/usage/zh/01.安装指南.md) - 系统要求、安装(更新、卸载)步骤、IDE 扩展安装
@@ -75,23 +59,14 @@ winget install Microsoft.WindowsTerminal
 - [MCP 配置](docs/usage/zh/14.MCP配置.md) - MCP 服务管理、配置外部服务、启用/禁用服务、故障排除
 - [异步任务管理](docs/usage/zh/15.异步任务管理.md) - 后台任务创建、任务管理界面、敏感命令审批、任务转会话
 - [Skills 指令详细说明](docs/usage/zh/18.Skills指令详细说明.md) - 技能创建、使用方法、Claude Code Skills 兼容性、工具限制
-- [LSP 配置与用法](docs/usage/zh/17.LSP配置.md) - LSP 配置文件、语言服务器安装、ACE 工具用法(跳转/大纲)
+- [LSP 配置与用法](docs/usage/zh/19.LSP配置.md) - LSP 配置文件、语言服务器安装、ACE 工具用法(跳转/大纲)
 - [SSE 服务模式](docs/usage/zh/20.SSE服务模式.md) - SSE 服务器启动、API 端点说明、工具确认流程、权限配置、YOLO 模式、客户端集成示例
 - [自定义 StatusLine 指南](docs/usage/zh/21.自定义StatusLine指南.md) - 用户级状态栏插件、hook 结构、覆盖机制、中英文示例
-- [Team 模式指南](docs/usage/zh/22.Team模式指南.md) - 多智能体协作、并行任务执行、团队管理
-
-### VCP TUI 专题（0.8 测试口径）
-
-- [VCP 五层边界与 Seam 说明](docs/usage/zh/22.VCP五层边界与Seam说明.md) - 当前分支的五层职责、Snow Core seam 约束与边界防回退测试
-- [VCP TUI 测试标准分支说明](docs/usage/zh/23.VCPTUI测试标准分支说明.md) - 当前 0.8 测试标准分支的目标、配置前提、已实现能力与未承诺项
-- [SnowBridge 与工具传输模式](docs/usage/zh/24.SnowBridge与工具传输模式.md) - `local / bridge / hybrid` 的真实行为、配置方式、自动请求头与故障语义
-- [VCP 兼容验证与已知限制](docs/usage/zh/25.VCP兼容验证与已知限制.md) - 当前黑盒/定向验证口径、bridge sidecar 的已验证范围、已知限制与 1.0 前待补项
-
-当前这一组文档的统一读法：
-
-- 它描述的是 `snow-cli` 当前 `VCP TUI 0.8` 测试标准分支，不是 `main` 的正式稳定承诺
-- 五层架构当前被视为“过渡性正确架构”，目标是先稳住边界，再识别哪些能力值得后续内化为 `Snow Core` 扩展点
-- `36.4 / 36.5` 已确认 `SnowBridge` sidecar 和 `bridge / hybrid` 主桥接链稳定，但 `FileOperator / UrlFetch / LightMemo / VSearch` 这批高膨胀插件仍建议后续补 targeted live 样本
+- [VCP 兼容说明](docs/usage/zh/21.VCP兼容说明.md) - Snow 与 VCP 生态的兼容边界、当前实现、显示层与测试策略
+- [VCP 元思考链显示改造单](docs/usage/zh/22.VCP元思考链显示改造单.md) - `VCP元思考链` 显示兼容的修正原因、分层原则、改造方案与验收标准
+- [Snow 与 VCPChat 兼容依据](docs/usage/zh/23.Snow与VCPChat兼容依据.md) - `Snow CLI` 作为 `VCP TUI` 的职责边界、静态插件/主动插件分层、当前 VCP 后端兼容审计
+- [VCPTUI 改造单](docs/usage/zh/24.VCPTUI改造单.md) - `Snow CLI` 作为 `VCP TUI` 的最终改造边界、协议显示层、压缩链与验收标准
+- [Snow Native 与 VCP Mode 边界说明](docs/usage/zh/27.Snow%20Native与VCP%20Mode边界说明.md) - `Snow` 原生直连与 `VCP mode` 的职责边界、协议能力差异与后续扩展准则
 
 ### 推荐使用的 ROLE.md
 
@@ -105,7 +80,7 @@ winget install Microsoft.WindowsTerminal
 
 ### 环境要求
 
-- **Node.js >= 18.x** (需要 ES2020 特性支持)
+- **Node.js >= 16.x** (需要 ES2020 特性支持)
 - npm >= 8.3.0
 
 检查你的 Node.js 版本：
@@ -114,12 +89,12 @@ winget install Microsoft.WindowsTerminal
 node --version
 ```
 
-如果版本低于 18.x，请先升级：
+如果版本低于 16.x，请先升级：
 
 ```bash
 # 使用 nvm (推荐)
-nvm install 18
-nvm use 18
+nvm install 16
+nvm use 16
 
 # 或从官网下载
 # https://nodejs.org/
@@ -150,39 +125,33 @@ npm run link   # 构建并全局链接 snow
 ### 项目结构
 
 ```
-source/                     # 源代码
-├── agents/                 # AI 代理实现
-├── api/                    # LLM API 适配器
-├── hooks/                  # 对话 React Hooks
-├── i18n/                   # 国际化
-├── mcp/                    # Model Context Protocol
-├── prompt/                 # 系统提示词模板
-├── types/                  # TypeScript 类型定义
-├── ui/                     # UI 组件 (Ink)
-└── utils/                  # 工具函数
-
-bundle/                     # 构建输出（单文件可执行）
-dist/                       # TypeScript 编译输出
-docs/                       # 文档
-JetBrains/                  # JetBrains 插件源码
-scripts/                    # 构建和工具脚本
-VSIX/                       # VSCode 扩展源码
-```
-
-### 用户配置目录
-
-运行 snow 后，会在主目录创建 `.snow/` 文件夹：
-
-```
-~/.snow/                    # 用户配置目录
+.snow/                      # 用户配置目录
 ├── log/                    # 运行日志(本地，可删除)
 ├── profiles/               # 配置文件
 ├── sessions/               # 对话记录
+├── snapshots/              # 文件快照
+├── todos/                  # TODO 列表
 ├── tasks/                  # 异步任务
+├── task-logs/              # 异步任务日志
+├── history/                # 命令历史
+├── commands/               # 自定义命令
 ├── hooks/                  # 工作流钩子
+├── sse-daemons/            # SSE 守护进程
+├── sse-logs/               # SSE 服务日志
+├── usage/                  # 使用统计
+├── active-profile.json     # 当前活动配置
 ├── config.json             # API 配置
+├── custom-headers.json     # 自定义请求头
 ├── mcp-config.json         # MCP 配置
-└── ...                     # 其他配置文件
+├── lsp-config.json         # LSP 配置
+├── proxy-config.json       # 代理设置
+├── codebase.json           # 代码库索引设置
+├── sub-agents.json         # 子代理配置
+├── sensitive-commands.json # 敏感命令规则
+├── theme.json              # 主题设置
+├── language.json           # 语言设置
+├── history.json            # 历史设置
+└── system-prompt.json      # 自定义系统提示词
 ```
 
 ## Star History

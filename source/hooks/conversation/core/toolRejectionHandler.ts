@@ -50,6 +50,7 @@ export async function handleToolRejection(
 	for (const toolCall of toolsNeedingConfirmation) {
 		const rejectionMessage = {
 			role: 'tool' as const,
+			name: toolCall.function.name,
 			tool_call_id: toolCall.id,
 			content: rejectMessage,
 			messageStatus: 'error' as const,
@@ -80,6 +81,7 @@ export async function handleToolRejection(
 	for (const toolCall of [...autoApprovedTools, ...nonSensitiveTools]) {
 		const rejectionMessage = {
 			role: 'tool' as const,
+			name: toolCall.function.name,
 			tool_call_id: toolCall.id,
 			content: rejectMessage,
 			messageStatus: 'error' as const,
